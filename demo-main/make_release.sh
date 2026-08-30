@@ -32,7 +32,7 @@ cp ../screenshot_aa.png ../screenshot_gauge.png ../screenshot_checker.png ../scr
 find $OUT \( -name "*.o" -o -name "*.bak" -o -name "*.orig" -o -name "*.rej" -o -name "*~" \) -exec rm -rf {} + 2>/dev/null
 for b in fxtk_sim headless_test render_canvas rt_resize; do rm -f $OUT/demo-main/test/$b $OUT/demo-main/$b 2>/dev/null; done
 
-tar czf fxtk-$VER.tar.gz $OUT
+tar --use-compress-program="gzip -9" -cf fxtk-$VER.tar.gz $OUT
 echo "🎉 $VER 源码打包完成:"
 echo "   .c 源文件: $(tar tzf fxtk-$VER.tar.gz | grep -c '\.c$')"
 echo "   .h 头文件: $(tar tzf fxtk-$VER.tar.gz | grep -c '\.h$')"
