@@ -32,9 +32,10 @@ int fx_band_index(void) { return -1; }
 /* ================= 抗锯齿 (v2.2) =================
  * 用"到图形的距离"做边缘覆盖度, 在离屏帧缓冲(offbuf)上读回目标像素做 alpha 混合。
  * 只有离屏/帧缓冲路径可回读目标色; 非离屏(direct 行缓冲)时 AA 自动降级为普通绘制。
- * 全局开关: fx_set_aa(on)。v2.2 默认开启(可用宏 FX_AA_DEFAULT=0 或运行时 fx_set_aa(0) 关闭)。 */
+ * 全局开关: fx_set_aa(on)。默认关闭(opt-in), 避免把一切画布都改成离屏/CPU 渲染而影响按直接/GPU
+ * 绘制设计的页面(如滚动页); 需要抗锯齿的地方调 fx_set_aa(1)。 */
 #ifndef FX_AA_DEFAULT
-#define FX_AA_DEFAULT 1
+#define FX_AA_DEFAULT 0
 #endif
 static int s_aa = FX_AA_DEFAULT;
 int fxtk_aa(void) { return s_aa; }

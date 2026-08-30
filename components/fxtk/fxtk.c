@@ -677,7 +677,7 @@ int fx_is_dark_theme(void) { return s_dark_theme; }
 fx_color_t fx_colorx_current(fx_colorx_t c) { return s_dark_theme ? c.dark : c.light; }
 void fx_set_title(fx_widget_t *w,const char *s){ if(!w)return; strncpy(w->title,s?s:"",sizeof(w->title)-1); w->title[sizeof(w->title)-1]=0; redraw_widget_now(w); }
 void fx_set_color_w(fx_widget_t *w,fx_color_t c){ if(!w)return; w->bg=c; redraw_widget_now(w); }
-void fx_set_value(fx_widget_t *w,int v){ if(!w)return; if(v<0)v=0; if(v>100)v=100; w->value=(int16_t)v; }
+void fx_set_value(fx_widget_t *w,int v){ if(!w)return; if(v<0)v=0; if(v>100)v=100; if(w->value!=(int16_t)v){ w->value=(int16_t)v; redraw_widget_now(w); } }
 int fx_get_value(const fx_widget_t *w){return w?w->value:0;}
 void fx_set_cb(fx_widget_t *w,fx_cb_t cb,void *ud){ if(!w)return; w->cb=cb; w->ud=ud; }
 void fx_set_visible(fx_widget_t *w,int vis){ if(!w)return; if(vis)w->flags|=FX_F_VISIBLE; else w->flags&=(uint8_t)~FX_F_VISIBLE; fx_layout(); fx_repaint(); }

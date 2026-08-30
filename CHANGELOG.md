@@ -9,7 +9,7 @@
 - **便捷画布 API**：
   - `fx_canvas_size(w, &cw, &ch)` — 取画布本地宽高，替代重复的 `fx_widget_rect` + 宽高样板。
   - `fx_canvas_clear(w, color)` — 一键把画布清成指定颜色，替代 `fx_set_color` + `fx_fill_rect` 样板。
-- **抗锯齿（平滑渲染，默认开启）**：`fx_set_aa(1)` 开启（v2.2 默认开，编译期宏 `FX_AA_DEFAULT=0` 可默认关，`fx_set_aa(0)` 运行时关）——`fx_draw_line`/`fx_draw_circle`/`fx_fill_circle`/`fx_draw_rect`/`fx_fill_rect_round`/`fx_draw_arc`/`fx_draw_ellipse`/`fx_fill_ellipse` 等按到图形的距离/子像素覆盖做边缘混合，边缘平滑（尤其直线/圆弧/圆角/椭圆）。调 `fx_set_aa(1)` 后**画布自动离屏**以支持混合（无需手动 `fx_canvas_set_buf`），示例 `canvas_07_aa`。
+- **抗锯齿（平滑渲染，默认关闭/opt-in）**：`fx_set_aa(1)` 开启（默认关，避免把一切画布改成离屏/CPU 渲染而影响按直接/GPU 绘制设计的页面，如滚动页）——`fx_draw_line`/`fx_draw_circle`/`fx_fill_circle`/`fx_draw_rect`/`fx_fill_rect_round`/`fx_draw_arc`/`fx_draw_ellipse`/`fx_fill_ellipse` 等按到图形的距离/子像素覆盖做边缘混合，边缘平滑（尤其直线/圆弧/圆角/椭圆）。调 `fx_set_aa(1)` 后**画布自动离屏**以支持混合（无需手动 `fx_canvas_set_buf`），示例 `canvas_07_aa`。
 - **渐变填充**：`fx_fill_rect_gradient(x1,y1,x2,y2,c1,c2,vertical)` 在矩形内做 `c1→c2` 线性渐变（vertical=1 上下，0 左右），用于按钮/进度/背景等。
 - **离屏缓冲推广到任意画布**：`fx_canvas_enable_buf` 去掉按名字（rt_cv/pt_cv/…）的性能锁，并加 4M 像素内存护栏；任何画布都能 `fx_canvas_set_buf(w, 1)` 使用离屏缓冲。
 - **canvas 性能**：

@@ -4,7 +4,7 @@ fxtk 是一个**单线程、脏区重绘、属性宏驱动**的轻量 GUI 框架
 并额外提供桌面级扩展（输入框/滚动/滚轮/剪贴板）与渲染引擎能力（贴图/旋转/光追演示）。
 
 **画布与抗锯齿（v2.2 无头渲染示意图）**：
-| 抗锯齿（默认开） | 渐变 `fx_fill_rect_gradient` | 自定义控件（仪表盘） | 棋盘格（缩放安全） |
+| 抗锯齿 `fx_set_aa(1)` | 渐变 `fx_fill_rect_gradient` | 自定义控件（仪表盘） | 棋盘格（缩放安全） |
 |---|---|---|---|
 | ![aa](screenshot_aa.png) | ![gradient](screenshot_gradient.png) | ![gauge](screenshot_gauge.png) | ![checker](screenshot_checker.png) |
 
@@ -21,7 +21,7 @@ fxtk 是一个**单线程、脏区重绘、属性宏驱动**的轻量 GUI 框架
 - **开箱即用的默认配色**：浅底深字、蓝按钮、绿滑条——不写 `color()` 也能直接看（可显式覆盖）
 - **控件集**：按钮 / 标签 / 滑条 / 进度条 / 复选框 / 网格键盘 / 画布 / 标签页 / 图片 / 输入框 / 列表 / 下拉 / 滚动容器
 - **立体标签页**：选中页签凸起（亮底深字 + 高光），未选中下凹，阴影分隔线
-- **画布立即模式**：线/圆/椭圆/三角/多边形/圆弧/圆角矩形/文字 + **渐变填充** `fx_fill_rect_gradient`，支持离屏缓冲、动画标志 `anim(1)` 与**抗锯齿（默认开启）**：line/circle/ellipse/rect/round-rect/arc 边缘平滑；`fx_set_aa(0)` 可关，编译期宏 `FX_AA_DEFAULT=0` 可设默认为关。
+- **画布立即模式**：线/圆/椭圆/三角/多边形/圆弧/圆角矩形/文字 + **渐变填充** `fx_fill_rect_gradient`，支持离屏缓冲、动画标志 `anim(1)` 与**抗锯齿** `fx_set_aa(1)`（line/circle/ellipse/rect/round-rect/arc 边缘平滑；默认关闭，按需开启，开后该画布自动离屏）。
   v2.2 新增 `fx_canvas_size`/`fx_canvas_clear` 便捷 API，并把离屏缓冲推广到任意画布（去掉按名字的性能锁）。
 - **画布学习教程**：`examples/canvas/` 系列（图元 / 立即模式 / 离屏 / 自定义控件 / 图片 / 交互 / 抗锯齿）
 - **桌面扩展**：文本框（换行/跨行框选/Ctrl+A C V X 系统剪贴板/`maxlen` 计数/滚轮/光标像素级对齐）、

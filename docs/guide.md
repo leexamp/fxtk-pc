@@ -419,11 +419,12 @@ fx_fill_rect_gradient(20, 140, 240, 170, FX_RED_ACCENT, FX_YELLOW, 0);  /* 红�
 
 > 注：渐变/抗锯齿都需要能**读回目标像素**，因此作用于**离屏/帧缓冲**路径（抗锯齿默认开启时画布自动离屏）。
 
-### 8.1a 抗锯齿（v2.2，默认开启）
+### 8.1a 抗锯齿（v2.2，默认关闭，需开启）
 
-`fx_set_aa(1)` 开启抗锯齿（**v2.2 默认开**，`FX_AA_DEFAULT=0` 可默认关，`fx_set_aa(0)` 运行时关）。
+`fx_set_aa(1)` 开启抗锯齿（**默认关**；`FX_AA_DEFAULT=1` 可改默认开，`fx_set_aa(0)` 运行时关）。
 `line/circle/fill_circle/rect/fill_rect_round/arc/ellipse/fill_ellipse` 会按"到图形的距离/子像素覆盖"做边缘混合，边缘平滑无锯齿。
 **开启后画布自动离屏**以支持混合（无需手动 `fx_canvas_set_buf`）。
+> 注意：默认关是为了**不把一切画布改成离屏/CPU 渲染**（否则像滚动页这类按直接/GPU 绘制设计的页面会被影响）。需要平滑的地方再 `fx_set_aa(1)`。
 
 ```c
 fx_set_aa(1);               /* 让后续画布自动离屏 + 抗锯齿 */
