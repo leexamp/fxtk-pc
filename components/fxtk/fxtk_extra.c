@@ -1,4 +1,5 @@
 /* fxtk_extra.c — 列表/下拉 终版: 弹层对象池(零分配/零布局抖动) + 不越界+滚动 */
+#define _POSIX_C_SOURCE 200809L   /* 让 <string.h> 暴露 strdup (严格 -std 下会隐式声明) */
 #include "fxtk.h"
 #include "fxtk_internal.h"
 #include "fxtk_desktop.h"

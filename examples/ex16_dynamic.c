@@ -7,6 +7,8 @@
 static fx_widget_t *s_dyn[DYN_MAX];
 static int s_n = 0, s_t = 0;
 
+static void on_btn(fx_widget_t *w, void *ud) { (void)w; (void)ud; }   /* 动态按钮的点击回调(空) */
+
 static void on_cv(fx_widget_t *w, void *ud) {
     (void)ud;
     int x1, y1, x2, y2; fx_widget_rect(w, &x1, &y1, &x2, &y2);
@@ -18,7 +20,7 @@ static void on_cv(fx_widget_t *w, void *ud) {
     if (fxtk_fps() >= 30 && s_n < DYN_MAX) {
         fx_parent(w);
         fx_widget_t *nb = fx_button_new(pixel("0,0", "0,0"), title("动态"),
-                                        line(9), color(FX_RGB(156, 39, 176)), call(on_cv));
+                                        line(9), color(FX_RGB(156, 39, 176)), call(on_btn));
         fx_parent(NULL);
         if (nb) {
             int nx = 8 + (s_n % 20) * 22, ny = 28 + (s_n / 20) * 20;

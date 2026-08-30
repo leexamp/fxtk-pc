@@ -38,7 +38,7 @@
 
 ## 默认配色（fxtk.c `fx_widget_new_impl`）
 
-- 窗口背景 `s_bg = FX_RGB(240,240,240)`。
+- 窗口背景 `s_bg = FX_RGB(245,245,245)`。
 - 所有控件 `fg` 默认 `FX_RGB(40,40,40)` 深字；`bg` 按类型：
   - label/checkbox/image：`FX_BLACK` 哨兵 → 绘制时用窗口背景（透明）
   - grid/panel/tab/scroll：浅底 + `FX_LGRAY`

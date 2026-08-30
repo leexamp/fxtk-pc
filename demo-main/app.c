@@ -227,7 +227,7 @@ static void build_ui(void) {
     fx_grid_map(pixel("6,32", "280,220"), line(3), row(3), name("keys"), page(2), dense());
     for (int i = 0; i < 9; i++) {
         fx_widget_t *b = fx_button_new(grid("keys", i / 3 + 1, i % 3 + 1, i / 3 + 1, i % 3 + 1),
-                                       title(s_keys[i]), color(FX_RGB(33, 150, 243)), page(2), call(on_key));
+                                       title(s_keys[i]), color(FX_RGB(33, 150, 243)), page(2));
         fx_set_cb(b, on_key, (void *)(intptr_t)i);
     }
     fx_button_new(pixel("292,92", "444,142"), page(2), title("重置"), color(FX_RGB(244, 67, 54)), call(on_reset));
@@ -304,10 +304,10 @@ void app_init(void) {
     for (int i = 0; i < 3; i++) s_pics[i] = make_pic(i);
     if (s_pics[1]) fx_image_grayscale(s_pics[1]);
     if (s_pics[2]) fx_image_tint(s_pics[2], FX_RGB(0, 200, 255), 90);
-    fx_set_bg(FX_RGB(245, 245, 245));
+    fx_set_bg(FX_WINDOW_BG);
     /* 键鼠页已有坐标监视; 不叠加高频 T: 调试文本, 避免滚动页污染画面/文字缓存 */
     fx_set_touch_debug(0);
-    fx_set_window_title("demo v2.1");
+    fx_set_window_title("demo v2.2");
     build_ui();
     fx_canvas_new(pixel("0,271", "0,271"), name("fixer"), anim(1),
                   color(FX_RGB(240,240,240)), call(on_fix));

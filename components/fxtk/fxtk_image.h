@@ -1,12 +1,9 @@
 /**
- * fxtk_image.h — 图片功能扩展 (不修改 fxtk.h, 枚举用数字扩展)
+ * fxtk_image.h — 图片功能扩展 (控件/属性类型已并入 fxtk.h 枚举)
  */
 #ifndef FXTK_IMAGE_H
 #define FXTK_IMAGE_H
 #include "fxtk.h"
-
-#define FX_W_IMAGE 16          /* 新控件: 图片 (点击回调/缩放/按压缩暗) */
-#define FX_A_IMAGE 40          /* 新属性: 图片资源指针 */
 
 typedef struct fx_image {
     uint32_t *px;              /* 24bit RGB (0xRRGGBB) 像素 */

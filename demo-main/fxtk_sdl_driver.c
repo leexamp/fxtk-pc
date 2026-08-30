@@ -147,7 +147,7 @@ static void sdl_apply_size(int w,int h)
     if(w==s_width&&h==s_height)return;
     s_width=w;s_height=h;
     fx_sdl_driver.width=(uint16_t)s_width;fx_sdl_driver.height=(uint16_t)s_height;
-    fb_w=s_width; fb_h=s_height;
+    fb_w=0; fb_h=0;   /* 置 0 让 fb_ensure 按新尺寸重分配 fb_rgba (否则 resize 后软件像素全被丢弃而空白) */
     if(fb_rgba){free(fb_rgba);fb_rgba=0;} d_pending=0;
     if(scratch){SDL_DestroyTexture(scratch);scratch=0;scr_w=0;scr_h=0;}
     target_create();

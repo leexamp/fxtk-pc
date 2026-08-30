@@ -134,7 +134,7 @@ fx_button_new(grid("keys", 2, 2, 2, 2), title("5"), call(on_key));
 
 ### 3.3 缩放上限（大屏保护）
 
-默认控件最大放大 2.5 倍（`fx_set_max_scale(2.5f)`），大屏不至于控件巨大化。
+默认控件最大放大 1.6 倍（`fx_set_max_scale(1.6f)`），大屏不至于控件巨大化。
 自绘内容如需跟随 UI 缩放：
 
 ```c
@@ -156,11 +156,11 @@ fx_set_color(FX_RGB(33, 150, 243));     /* 任意 8bit 分量 */
 
 | 常量 | 值 | 常量 | 值 |
 |---|---|---|---|
-| `FX_BLACK` | 0x0000 | `FX_WHITE` | 0xFFFF |
-| `FX_RED` | 0xF800 | `FX_GREEN` | 0x07E0 |
-| `FX_BLUE` | 0x001F | `FX_YELLOW` | 0xFFE0 |
-| `FX_CYAN` | 0x07FF | `FX_MAGENTA` | 0xF81F |
-| `FX_GRAY` | 0x8430 | `FX_LGRAY` | 0xC618 |
+| `FX_BLACK` | `0x000000` | `FX_WHITE` | `0xFFFFFF` |
+| `FX_RED` | `0xFF0000` | `FX_GREEN` | `0x00FF00` |
+| `FX_BLUE` | `0x0000FF` | `FX_YELLOW` | `0xFFFF00` |
+| `FX_CYAN` | `0x00FFFF` | `FX_MAGENTA` | `0xFF00FF` |
+| `FX_GRAY` | `0x848484` | `FX_LGRAY` | `0xC8C8C8` |
 
 ### 4.2 默认配色（重点！）
 
@@ -168,7 +168,7 @@ fx_set_color(FX_RGB(33, 150, 243));     /* 任意 8bit 分量 */
 
 | 控件 | 默认背景 | 默认前景 |
 |---|---|---|
-| 窗口 | `FX_RGB(240,240,240)` | — |
+| 窗口 | `FX_RGB(245,245,245)` | — |
 | label / checkbox | 透明（窗口底色） | `FX_RGB(40,40,40)` 深字 |
 | 按钮 | `FX_RGB(33,150,243)` 蓝 | `FX_WHITE` 白字 |
 | grid / panel / tab | `FX_RGB(240,240,240)` | `FX_LGRAY` 网格线 |
@@ -265,7 +265,8 @@ fx_button_new(pixel("340,40","400,70"), name("br_r"), page(6),
 
 - `call()` 为**绘制回调**（立即式）。
 - `anim(1)`：每帧重绘（动画）；否则仅脏区/首次绘制。
-- 回调里坐标是**控件本地坐标**（0,0 为左上角），宽高用 `fx_widget_rect` 获取。
+- 回调里坐标是**控件本地坐标**（0,0 为左上角），宽高用 `fx_canvas_size(w,&cw,&ch)` 取（也可 `fx_widget_rect`）。
+- 清底用 `fx_canvas_clear(w,color)`（替代手写 `fx_set_color`+`fx_fill_rect`）。
 - canvas 可以当**容器**：`fx_parent(canvas)` 后创建的子控件会画在画布内容之上（C2 补画），随画布裁剪。
 
 ```c
@@ -315,25 +316,26 @@ fx_textedit_new(pixel("6,60","444,140"), name("edit1"), title("hello 你好"));
 fx_textedit_new(pixel("6,148","444,182"), name("edit2"), title(""), maxlen(20));
 ```
 
-### 6.8 `fx_list_new_p("r1","r2",rows)` — 列表
+### 6.8 `fx_list_new_p("r1","r2",pg)` — 列表
 
-- `rows` 可见行数；滚轮滚动；点击选中高亮。
+- `pg` 控件归属的**标签页页码**（`-1` 表示不属于任何页签）；滚轮滚动；点击选中高亮。
 - 数据：`fx_list_add(w, text)`；选中回调：`fx_list_set_cb(w, fn)`。
 - 回调里 `fx_list_sel(w)` 取选中行号。
 
 ```c
-fx_widget_t *list = fx_list_new_p("8,106","200,236", 10);
+fx_widget_t *list = fx_list_new_p("8,106","200,236", 3);   /* 放进第 3 个页签 */
 for (int i = 0; i < 12; i++) fx_list_add(list, names[i]);
 fx_list_set_cb(list, on_nc_pick);
 ```
 
-### 6.9 `fx_drop_new_p("r1","r2",rows)` — 下拉框
+### 6.9 `fx_drop_new_p("r1","r2",pg)` — 下拉框
 
+- `pg` 控件归属的**标签页页码**（`-1` 表示不属于任何页签）。
 - `fx_drop_add` 加选项；`fx_list_set_cb` 设选中回调。
 - 靠底部**自动向上弹**；弹层内容超出带滚动，不越界；点外部自动收起。
 
 ```c
-fx_widget_t *drop = fx_drop_new_p("220,106","360,132", 10);
+fx_widget_t *drop = fx_drop_new_p("220,106","360,132", 3);
 fx_drop_add(drop, "字体: 小");
 fx_drop_add(drop, "字体: 中");
 fx_drop_add(drop, "字体: 大");
@@ -408,6 +410,34 @@ fx_parent(fx_find("tab"));        /* 恢复父级 */
 | `fx_draw_ellipse(cx,cy,rx,ry)` / `fx_fill_ellipse` | 椭圆 |
 | `fx_draw_arc(cx,cy,r,a1,a2)` / `fx_fill_arc` | 圆弧（角度制） |
 | `fx_draw_rect_round(...)` / `fx_fill_rect_round(...)` | 圆角矩形 |
+| `fx_fill_rect_gradient(x1,y1,x2,y2,c1,c2,vertical)` | 渐变填充：`c1→c2` 线性过渡（`vertical=1` 上下，`0` 左右） |
+
+```c
+fx_fill_rect_gradient(20, 20, 240, 120, FX_BTN_BLUE, FX_OK_GREEN, 1);   /* 蓝→绿 上下渐变 */
+fx_fill_rect_gradient(20, 140, 240, 170, FX_RED_ACCENT, FX_YELLOW, 0);  /* 红→黄 左右渐变 */
+```
+
+> 注：渐变/抗锯齿都需要能**读回目标像素**，因此作用于**离屏/帧缓冲**路径（抗锯齿默认开启时画布自动离屏）。
+
+### 8.1a 抗锯齿（v2.2，默认开启）
+
+`fx_set_aa(1)` 开启抗锯齿（**v2.2 默认开**，`FX_AA_DEFAULT=0` 可默认关，`fx_set_aa(0)` 运行时关）。
+`line/circle/fill_circle/rect/fill_rect_round/arc/ellipse/fill_ellipse` 会按"到图形的距离/子像素覆盖"做边缘混合，边缘平滑无锯齿。
+**开启后画布自动离屏**以支持混合（无需手动 `fx_canvas_set_buf`）。
+
+```c
+fx_set_aa(1);               /* 让后续画布自动离屏 + 抗锯齿 */
+fx_canvas_new(pixel("6,32","444,236"), anim(1), call(on_draw));
+...
+fx_set_aa(0);               /* 关闭(恢复硬边/直接绘制) */
+```
+
+### 8.1b 画布便捷（v2.2）
+
+```c
+int cw, ch; fx_canvas_size(w, &cw, &ch);    /* 取画布本地宽高 (替代重复的 fx_widget_rect+cw/ch) */
+fx_canvas_clear(w, FX_WINDOW_BG);           /* 一键清底到颜色 */
+```
 
 ### 8.2 多边形
 
@@ -439,22 +469,24 @@ fx_reset_clip();                  /* 恢复全画布 */
 
 ```c
 static void on_view(fx_widget_t *w, void *ud) {
-    int x1, y1, x2, y2;
-    fx_widget_rect(w, &x1, &y1, &x2, &y2);
-    int cw = x2 - x1 + 1, ch = y2 - y1 + 1;
+    int cw, ch; fx_canvas_size(w, &cw, &ch);        /* v2.2: 取画布本地宽高 */
+    fx_canvas_clear(w, FX_WINDOW_BG);               /* v2.2: 一键清底 */
 
-    fx_set_color(FX_RGB(245,245,245));
-    fx_fill_rect(0, 0, cw - 1, ch - 1);        /* 清底 */
     fx_set_color(FX_RGB(33,150,243));
-    fx_fill_rect(10, 10, cw - 10, 40);         /* 内容 */
+    fx_fill_rect(10, 10, cw - 10, 40);              /* 内容 */
     fx_set_color(FX_RGB(40,40,40));
     fx_draw_text_c(20, 18, "状态: OK", FX_WHITE, FX_RGB(33,150,243));
 }
 ```
 
+> 早期写法（仍可用）是 `fx_widget_rect` + 手动 `fx_set_color`+`fx_fill_rect` 清底；v2.2 的
+> `fx_canvas_size` / `fx_canvas_clear` 专门替代这两段样板，画布代码更短。
+
 ---
 
 ## 9. 输入：触摸/键盘/滚轮
+
+> 本节 API（`fx_touch_state`/`fx_last_key`/`fx_pressed`/`fx_wheel_take`/`fx_set_focus`/`fx_get_focus` 等）属于**桌面扩展**，均在 `fxtk_desktop.h` 声明，使用前需 `#include "fxtk_desktop.h"`（文本框等桌面控件同理）。
 
 ### 9.1 鼠标/触摸状态
 
@@ -548,7 +580,8 @@ if (fxtk_fps() >= 30 && n < cap) {
 ### 10.3 删除控件
 
 ```c
-fx_delete(name("tmp"));               /* 按名字删除 */
+fx_widget_t *w = fx_find("tmp");
+if (w) fx_delete(fx_wptr(w));         /* 用 fx_wptr(控件指针) 或 grid(name) 定位删除 */
 ```
 
 ---
@@ -637,7 +670,7 @@ int w = fxtk_text_width_size(16, "大字号");   /* 测宽 */
 ### 14.2 渲染管线（GPU）
 
 - 控件绘制 → SDL 顶点批（矩形/三角/折线一次提交）→ 文本纹理 blit → present。
-- 图像缩放/旋转走 GPU 纹理变换，CPU 只算 565 像素。
+- 图像缩放/旋转走 GPU 纹理变换，CPU 只算 24bit RGB 像素。
 - `FXTK_STAT=1` 打印顶点数与帧耗时，用于性能调优。
 
 ### 14.3 性能建议
@@ -770,5 +803,47 @@ typedef struct {
 ```
 
 PC 端实现见 `demo-main/fxtk_sdl_driver.c`；换平台只需实现该结构体并 `fx_init(&drv)`。
+
+## 附录：主题、滚动容器与 GPU 光追
+
+### 主题（浅/深两套配色）
+
+颜色用 `fx_colorx_t { light, dark }` 提供两套值，当前主题自动选一套：
+
+```c
+fx_set_global_background((fx_colorx_t){ FX_RGB(245,245,245), FX_RGB(30,30,34) });
+fx_set_dark_theme(1);                /* 1=深色, 0=浅色 */
+int dark = fx_is_dark_theme();
+fx_color_t c = fx_colorx_current(some_colorx);   /* 按当前主题取值 */
+```
+
+（`fx_set_bg` 只改浅色背景；调用 `fx_set_dark_theme` 时控件会统一重刷。）
+
+### 滚动容器
+
+`fx_scroll_new(...)` 创建一个可滚动容器，内容高度超出后出现滚动条：
+
+```c
+fx_widget_t *sc = fx_scroll_new(pixel("0,0","480,200"));
+fx_parent(sc);                       /* 后续控件挂进滚动容器 */
+fx_button_new(pixel("10,10","200,50"), title("第 1 项"), call(...));
+...
+fx_scroll_content(sc, 1200);         /* 内容总高(像素), 超出才可滚 */
+```
+
+需要更细控制时用平滑滚动：`int off = fx_scroll_update(w, content_h)`（目标像素 + 25% 逐帧插值），配合 `fx_scrollbar_draw(w, off, content_h)` 画滚动条。
+
+### GPU 光追（3D 页）
+
+demo 的 3D 页用 Shadertoy 风格软件光线步进（`raymarch_render`）打到离屏缓冲，可选 GPU(GLSL) 通道 `gpu_raymarch_render`：
+
+```c
+raymarch_render(px, w, h, time, max_steps);   /* CPU 软光追, 24bit RGB */
+gpu_raymarch_start();                          /* 启动 GPU 线程 */
+if (gpu_raymarch_ok()) gpu_raymarch_render(px, w, h, time);   /* GPU 优先 */
+const char *r = gpu_raymarch_renderer();       /* 返回渲染器名 */
+```
+
+`gpu_raymarch_ok()` 返回 0 时自动退回 CPU（无硬件 GL 的 VM/CI 环境）；Windows 下由 `gpu_stub_win.c` 提供空实现。场景含解析地面/球 + 步进圆环 + 软阴影 + 雾。
 
 > 若需了解控件绘制、布局、重绘的源码细节，见 `docs/internals.md`。

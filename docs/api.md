@@ -33,8 +33,8 @@ fx_widget_t *fx_slider_new(...);    /* 滑杆 */
 fx_widget_t *fx_progress_new(...);  /* 进度 */
 fx_widget_t *fx_checkbox_new(...);  /* 复选 */
 fx_widget_t *fx_textedit_new(...);  /* 输入框 (fxtk_desktop.h) */
-fx_widget_t *fx_list_new_p("r1","r2",rows);  /* 列表 */
-fx_widget_t *fx_drop_new_p("r1","r2",rows);  /* 下拉 */
+fx_widget_t *fx_list_new_p("r1","r2",pg);    /* 列表 (pg=标签页页码, -1=无) */
+fx_widget_t *fx_drop_new_p("r1","r2",pg);    /* 下拉 (pg=标签页页码, -1=无) */
 fx_widget_t *fx_tab_new(...);  fx_widget_t *fx_panel_new(...);
 fx_widget_t *fx_grid_map(...); fx_widget_t *fx_image_new(...);
 ```
@@ -65,7 +65,7 @@ void fx_widget_set_rect(fx_widget_t*, int x1,int y1,int x2,int y2);
 void fx_widget_fix(fx_widget_t*, int x,int y);  /* 固定坐标, 防布局复位 */
 void fx_repaint(void);
 void fx_repaint_rect(int x1,int y1,int x2,int y2);
-void fx_delete(name("..."));                    /* 删除控件 */
+void fx_delete(fx_wptr(w));                     /* 删除控件 (用 fx_wptr 或 grid(name) 定位) */
 int  fxtk_widget_count(void);                   /* 存活控件总数 */
 int  fxtk_fps(void);                            /* 帧率 */
 int  fxtk_ui_scale(void);                       /* 480宽=100 */
@@ -75,8 +75,9 @@ void fx_set_max_scale(float f);                 /* 控件缩放上限(倍) */
 ## 绘制原语（canvas 回调内，本地坐标）
 
 ```c
-void fx_set_color(uint16_t);
+void fx_set_color(fx_color_t);
 void fx_fill_rect(int x1,int y1,int x2,int y2);
+void fx_fill_rect_gradient(int x1,int y1,int x2,int y2,fx_color_t c1,fx_color_t c2,int vertical); /* v2.2 渐变, vertical=1上下 */
 void fx_draw_rect(int x1,int y1,int x2,int y2);
 void fx_draw_hline(int x1,int x2,int y);
 void fx_draw_vline(int x,int y1,int y2);
@@ -90,12 +91,25 @@ void fx_draw_triangle(int x1,int y1,int x2,int y2,int x3,int y3);
 void fx_fill_triangle(int x1,int y1,int x2,int y2,int x3,int y3);
 void fx_draw_polygon(const int16_t *pts, int n);
 void fx_fill_polygon(const int16_t *pts, int n);
-void fx_draw_text_c(int x,int y,const char*,uint16_t fg,uint16_t bg);
-void fxtk_draw_text_size(int size,int x,int y,const char*,uint16_t fg,uint16_t bg);
+void fx_draw_text_c(int x,int y,const char*,fx_color_t fg,fx_color_t bg);
+void fxtk_draw_text_size(int size,int x,int y,const char*,fx_color_t fg,fx_color_t bg);
 int  fx_text_width(const char*);
 int  fxtk_text_width_size(int size,const char*);
 void fx_set_clip(int x1,int y1,int x2,int y2);
 void fx_reset_clip(void);
+```
+
+## 画布（v2.2 便捷 API）
+
+canvas 回调内以本地坐标 (0,0)~(cw-1,ch-1) 绘制；图元见上节。
+
+```c
+void fx_canvas_begin(fx_widget_t *cv);   /* 进入画布绘制 (框架自动调用, 通常无需手动) */
+void fx_canvas_end(void);
+int  fx_canvas_enable_buf(fx_widget_t *cv);          /* 开启离屏缓冲, 0 成功 */
+void fx_canvas_set_buf(fx_widget_t *cv, int on);     /* 开关离屏缓冲 */
+void fx_canvas_size(fx_widget_t *cv, int *w, int *h);/* 取画布本地宽高 (cb 内代替 fx_widget_rect 样板) */
+void fx_canvas_clear(fx_widget_t *cv, fx_color_t c); /* 一键清底到颜色 c */
 ```
 
 ## 文本
@@ -186,6 +200,13 @@ void fx_set_window_title(const char*);
 void fx_set_touch_debug(int on);
 void fx_set_grid_lines(int on);
 void fxtk_set_fps_debug(int on);   /* 左下角 FPS 角标 (默认关, demo 才开) */
+int  fx_widget_type(const fx_widget_t*);
+const char *fx_widget_title(const fx_widget_t*);
+/* 主题: 浅/深两套配色 */
+void fx_set_dark_theme(int dark);          /* 1=深色 */
+int  fx_is_dark_theme(void);
+void fx_set_global_background(fx_colorx_t c);
+fx_color_t fx_colorx_current(fx_colorx_t c);
 ```
 
 ## 默认配色速查
@@ -194,10 +215,10 @@ void fxtk_set_fps_debug(int on);   /* 左下角 FPS 角标 (默认关, demo 才�
 
 | 控件 | 背景 | 前景 |
 |---|---|---|
-| 窗口 | 240,240,240 | — |
+| 窗口 | 245,245,245 | — |
 | label / checkbox | 透明 | 40,40,40 深字 |
 | 按钮 | 33,150,243 蓝 | 白 |
-| grid / panel / tab | 240,240,240 | 浅灰网格线 |
+| grid / panel / tab | 245,245,245 | 浅灰网格线 |
 | slider / progress | 76,175,80 绿 | 浅灰轨道 |
-| canvas | 240,240,240 | — |
+| canvas | 245,245,245 | — |
 | textedit | 白 | 黑 |

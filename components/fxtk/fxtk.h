@@ -14,6 +14,12 @@ extern "C" {
 /* 颜色: 24bit RGB (0xRRGGBB), 与主流标准一致 */
 typedef uint32_t fx_color_t;
 
+/* 主题化颜色: 同时提供浅色/深色两套值, 由全局主题自动选择 */
+typedef struct {
+    fx_color_t light;
+    fx_color_t dark;
+} fx_colorx_t;
+
 #define FX_RGB(r, g, b) \
     ((fx_color_t)((((r) & 0xFF) << 16) | (((g) & 0xFF) << 8) | ((b) & 0xFF)))
 #define FX_RED    0xFF0000
@@ -26,6 +32,16 @@ typedef uint32_t fx_color_t;
 #define FX_MAGENTA 0xFF00FF
 #define FX_GRAY   0x848484
 #define FX_LGRAY  0xC8C8C8
+
+/* ---- 主题化命名词 (与默认配色一致, 消除各处 240/245 不一致) ---- */
+#define FX_WINDOW_BG   FX_RGB(245,245,245)  /* 浅色窗口背景 */
+#define FX_WINDOW_DARK FX_RGB(30,30,34)     /* 深色窗口背景 */
+#define FX_UI_FG       FX_RGB(40,40,40)     /* 默认深字 */
+#define FX_BTN_BLUE    FX_RGB(33,150,243)   /* 蓝按钮 */
+#define FX_OK_GREEN    FX_RGB(76,175,80)    /* 绿滑条/进度 */
+#define FX_RED_ACCENT  FX_RGB(244,67,54)    /* 红色强调 */
+#define FX_PURPLE      FX_RGB(156,39,176)   /* 紫色 */
+#define FX_CANVAS_DARK FX_RGB(30,30,30)     /* 深色画布底 */
 
 struct fx_widget;
 typedef struct fx_widget fx_widget_t;
@@ -50,6 +66,8 @@ typedef enum {
     FX_A_WIDGET,
     FX_A_PAGE,
     FX_A_ANIM,
+    FX_A_IMAGE,
+    FX_A_MAXLEN,
 } fx_attr_tag_t;
 
 typedef struct {
@@ -109,6 +127,9 @@ enum {
     FX_W_CHECKBOX,
     FX_W_PANEL,
     FX_W_TAB,
+    FX_W_IMAGE = 16,
+    FX_W_TEXTEDIT = 17,
+    FX_W_SCROLL = 19,
     FX_W_COUNT
 };
 
@@ -141,7 +162,7 @@ void fx_widget_set_rect(fx_widget_t *w, int x1, int y1, int x2, int y2);
 void fx_widget_rect(const fx_widget_t *w, int *x1, int *y1, int *x2, int *y2);
 
 void fx_layout(void);
-void fx_set_max_scale(float f);   /* 控件缩放上限(倍), 默认2.5 */
+void fx_set_max_scale(float f);   /* 控件缩放上限(倍), 默认1.6 */
 void fxtk_apply_fit(fx_widget_t *w);
 void fx_touch_press(int x, int y);
 void fx_touch_release(int x, int y);
@@ -162,6 +183,7 @@ void fx_draw_vline(int x, int y1, int y2);
 void fx_draw_line(int x1, int y1, int x2, int y2);
 void fx_draw_rect(int x1, int y1, int x2, int y2);
 void fx_fill_rect(int x1, int y1, int x2, int y2);
+void fx_fill_rect_gradient(int x1, int y1, int x2, int y2, fx_color_t c1, fx_color_t c2, int vertical);  /* v2.2 渐变填充 (vertical=1 上下, 0 左右) */
 void fx_draw_rect_round(int x1, int y1, int x2, int y2, int r);
 void fx_fill_rect_round(int x1, int y1, int x2, int y2, int r);
 void fx_draw_circle(int cx, int cy, int r);
@@ -173,6 +195,8 @@ void fx_fill_arc(int cx, int cy, int r, int a1, int a2);
 void fx_draw_triangle(int x1, int y1, int x2, int y2, int x3, int y3);
 void fx_fill_triangle(int x1, int y1, int x2, int y2, int x3, int y3);
 void fx_draw_polygon(const int16_t *pts, int n);
+void fx_set_aa(int on);   /* 抗锯齿开关 (默认关): 开时 line/circle/rect 等矢量图元在离屏/帧缓冲路径上做边缘平滑 */
+int  fxtk_aa(void);
 void fx_fill_polygon(const int16_t *pts, int n);
 void fx_draw_text(int x, int y, const char *s);
 void fx_draw_text_c(int x, int y, const char *s, fx_color_t fg, fx_color_t bg);
@@ -180,6 +204,8 @@ int  fx_text_width(const char *s);
 void fx_canvas_begin(fx_widget_t *cv);
 void fx_canvas_end(void);
 int  fx_canvas_enable_buf(fx_widget_t *cv);
+void fx_canvas_size(fx_widget_t *cv, int *w, int *h);   /* 画布本地宽高 (canvas 回调内取 cw/ch) */
+void fx_canvas_clear(fx_widget_t *cv, fx_color_t color); /* 一键清空画布到 color (省去重复铺底样板) */
 
 /* 桌面扩展: 键盘事件 */
 typedef struct { char utf8[64]; int key; int down; int mod; } fx_keyev_t;
@@ -216,6 +242,10 @@ uint16_t fx_height(void);
 void fx_set_autorepaint(int on);
 void fx_set_touch_debug(int on);
 void fx_set_bg(fx_color_t c);
+void fx_set_global_background(fx_colorx_t c);
+void fx_set_dark_theme(int dark);
+int  fx_is_dark_theme(void);
+fx_color_t fx_colorx_current(fx_colorx_t c);
 void fx_set_window_title(const char *s);
 void fx_set_grid_lines(int on);   /* 调试: 显示网格线 */
 int fxtk_grid_lines_on(void);  /* 运行时改窗口标题 */
@@ -225,15 +255,10 @@ int fxtk_fps(void);            /* 驱动刷新率 (帧/秒) */
 void fx_widget_fix(fx_widget_t *w, int x1, int y1);  /* 固定坐标模式: 防布局重算, 记录基准 */
 fx_color_t fx_get_bg(void);
 
-#ifdef __cplusplus
-}
-#endif
-
 /* 核心丝滑滚动 */
 int  fx_scroll_update(fx_widget_t *w,int content_h);
 void fx_scrollbar_draw(fx_widget_t *w,int off,int content_h);
 void fx_canvas_set_buf(fx_widget_t *w,int on);
-#endif
 
 /* ---- extra: 多尺寸文字 / 列表 / 下拉 ---- */
 void *fxtk_font_size(int size);
@@ -256,3 +281,9 @@ void fxtk_set_ui_scale_cap(int p);   /* 行高/字号缩放上限% */          /
 int  fxtk_font_height(int size);  /* 缩放后字高 */
 int  fxtk_drv_width(void);
 int  fxtk_drv_height(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* FXTK_H */

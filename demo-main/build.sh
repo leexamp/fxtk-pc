@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "🔨 Compiling fxtk PC App (v2.1 GPU)..."
+echo "🔨 Compiling fxtk PC App (v2.2 GPU)..."
 LOG=/tmp/fxtk_build.log
 gcc -O2 -s -pthread \
     -I. -I../components/fxtk \

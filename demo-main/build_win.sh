@@ -7,11 +7,12 @@
 #       ./build_win.sh ex01_hello # 独立示例
 EX=${1:-app}
 echo "🔨 Windows build: $EX"
-python3 tools/gen_gpu_stub.py gpu_raymarch.h > gpu_stub_win.c
+# gpu_stub_win.c 已随仓库提供 (GPU 页在 Windows 自动降级为 CPU), 无需再生成
+[ "$EX" = "app" ] && [ ! -f gpu_stub_win.c ] && { echo "❌ 缺 gpu_stub_win.c"; exit 1; }
 gcc -O2 -I. -I../components/fxtk \
     ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
     ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_font.c \
-    ../components/fxtk/fxtk_effects.c \
+    ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_extra.c \
     fxtk_sdl_driver.c fxtk_image_sdl.c main_linux.c \
     $( if [ "$EX" = "app" ]; then echo "app.c app_desktop.c raymarch.c gpu_stub_win.c"; else echo "examples/$EX.c"; fi ) \
     -o fxtk_win.exe \

@@ -23,7 +23,9 @@ static int s_boot = 3;   /* 前3帧强制全屏, 杜绝偶发启动黑屏 */
 static int s_full = 0;
 static int s_autorepaint = 1;
 /* 窗口默认背景: 245 灰白, 与 SDL 清屏一致, 无可见色差 */
-static fx_color_t s_bg = FX_RGB(245, 245, 245);
+static fx_color_t s_bg = FX_WINDOW_BG;
+static int s_dark_theme = 0;
+static fx_colorx_t s_global_bg = { FX_WINDOW_BG, FX_WINDOW_DARK };
 #define FX_DIRTY_MAX 8
 static int s_dirty[FX_DIRTY_MAX][4];
 static int s_dirty_n = 0;
@@ -211,6 +213,7 @@ fx_widget_t *fx_widget_new_impl(int type, fx_attr_t attrs[])
     }
     if (type == FX_W_TAB) { int n=1; for (const char *p=w->title; *p; p++) if (*p==',') n++; w->lines=(int16_t)n; }
     fx_layout(); fx_repaint();
+    if (type == FX_W_CANVAS && fxtk_aa()) fx_canvas_enable_buf(w);   /* v2.2: 开抗锯齿的画布自动离屏, 以便边缘混合 */
     return w;
 }
 
@@ -629,6 +632,49 @@ void fx_repaint_rect(int x1,int y1,int x2,int y2)
     else fx_repaint();
 }
 void fx_set_bg(fx_color_t c){s_bg=c;s_root.bg=c;fx_repaint();}
+
+/* 主题化全局背景: 设置浅/深两套背景, 当前主题决定实际使用哪一套 */
+void fx_set_global_background(fx_colorx_t c)
+{
+    s_global_bg = c;
+    s_bg = fx_colorx_current(c);
+    s_root.bg = s_bg;
+    fx_repaint();
+}
+
+void fx_set_dark_theme(int dark)
+{
+    s_dark_theme = dark ? 1 : 0;
+    s_bg = fx_colorx_current(s_global_bg);
+    s_root.bg = s_bg;
+
+    /* 统一重刷主题相关控件: 文本/复选框透明, 标签页/面板/网格跟随深色 */
+    for (int i = 0; i < FX_MAX_WIDGETS; i++) {
+        fx_widget_t *w = &s_pool[i];
+        if (w->type == FX_W_NONE) continue;
+        switch (w->type) {
+        case FX_W_LABEL:
+        case FX_W_CHECKBOX:
+            w->bg = FX_BLACK;
+            w->fg = s_dark_theme ? FX_RGB(235, 235, 235) : FX_RGB(40, 40, 40);
+            break;
+        case FX_W_CANVAS:
+            w->bg = FX_RGB(30, 30, 34);
+            break;
+        case FX_W_TAB:
+        case FX_W_GRID:
+        case FX_W_PANEL:
+            w->bg = s_dark_theme ? FX_RGB(45, 45, 50) : FX_RGB(224, 224, 224);
+            break;
+        default:
+            break;
+        }
+    }
+    fx_repaint();
+}
+
+int fx_is_dark_theme(void) { return s_dark_theme; }
+fx_color_t fx_colorx_current(fx_colorx_t c) { return s_dark_theme ? c.dark : c.light; }
 void fx_set_title(fx_widget_t *w,const char *s){ if(!w)return; strncpy(w->title,s?s:"",sizeof(w->title)-1); w->title[sizeof(w->title)-1]=0; redraw_widget_now(w); }
 void fx_set_color_w(fx_widget_t *w,fx_color_t c){ if(!w)return; w->bg=c; redraw_widget_now(w); }
 void fx_set_value(fx_widget_t *w,int v){ if(!w)return; if(v<0)v=0; if(v>100)v=100; w->value=(int16_t)v; }

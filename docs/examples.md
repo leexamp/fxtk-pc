@@ -21,11 +21,59 @@
 | ex17_tabs | 立体标签页 + `page()` 页闸：三页不同内容（按钮/动画/矢量） |
 | ex18_defaults | 默认配色零配置：全部控件不写 `color()`/`fgcolor()` 也好看 |
 
+## 画布学习目录 `examples/canvas/`（v2.2 新增）
+
+专门学习画布用法的教程系列，从基础到进阶，每个都带详尽注释：
+
+| 示例 | 看点 |
+|---|---|
+| canvas_01_primitives | 全部绘图图元：线/矩形/圆/椭圆/圆弧/三角/多边形/圆角矩形/文字 |
+| canvas_02_immediate | 立即模式 + `anim(1)` 每帧回调：画一个"时钟" |
+| canvas_03_offscreen | 随窗口缩放的棋盘格（直接绘制，缩放安全）；并讲解离屏缓冲 `fx_canvas_set_buf` 的适用场合与缩放限制 |
+| canvas_04_custom_widget | 用画布自绘一个"自定义控件"：圆表 + 环形进度（可复用） |
+| canvas_05_image | 画布内渲染图片：程序生成贴图 + 旋转/缩放/灰度/染色 |
+| canvas_06_interact | 画布内的交互：按住拖动小球（`fx_touch_state`/`fx_pressed`） |
+| canvas_07_aa | 抗锯齿：`fx_set_aa(1)` 后 line/circle/rect/round-rect/arc 边缘平滑，按钮实时切换 ON/OFF |
+
+> v2.2 新增便捷 API：`fx_canvas_size(w,&cw,&ch)` 取画布本地宽高、`fx_canvas_clear(w,color)` 一键清底。
+> 运行：`./build_ex.sh canvas_01_primitives` 或 `make -C demo-main canvas_01_primitives`。
+
+### 抗锯齿（v2.2）
+
+`fx_set_aa(1)` 开启边缘抗锯齿：line/circle/fill_circle/rect/round-rect/arc 等矢量图元按"到图形的距离/子像素覆盖"做边缘混合，边缘更平滑（平滑渲染）。**调 `fx_set_aa(1)` 后画布会自动离屏**以支持混合（无需手动 `fx_canvas_set_buf`），见 `canvas_07_aa`。`fx_set_aa(0)` 关闭。
+
+### 画布内容要跟随窗口缩放（重要）
+
+pixel() 画布会随窗口等比放大/缩小，但**画布内部是本地坐标系**. 如果你在回调里写死像素坐标。
+窗口拖大后内容就会挤在一角（不符合预期）。办法是**把坐标/尺寸写成 `cw`/`ch` 的比例**，
+本目录示例都这么做：
+
+```c
+int cw, ch; fx_canvas_size(w, &cw, &ch);
+fx_canvas_clear(w, FX_WINDOW_BG);
+int px = (int)(cw * 0.5f);                 /* 横向 50% 处 */
+fx_fill_circle(px, (int)(ch * 0.5f), (int)(cw * 0.05f));
+```
+
+### 离线查看画布渲染结果（无窗口）
+
+`demo-main/test/render_canvas.c` 用一个假驱动把示例渲染成 PPM 图，无需 SDL/窗口/字体，
+方便在不同窗口尺寸下检查是否崩坏/错位：
+
+```bash
+gcc -O2 -I. -I../components/fxtk test/render_canvas.c ../examples/canvas/canvas_01_primitives.c \
+  ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c ../components/fxtk/fxtk_widgets.c \
+  ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_effects.c -o /tmp/rc -lm
+/tmp/rc 800 480 /tmp/frame.ppm       # 800x480 窗口下的渲染
+convert /tmp/frame.ppm /tmp/frame.png # 用 ImageMagick 转 PNG 查看
+```
+
 运行：
 ```bash
-./build_ex.sh              # 一次全构建并逐个运行全部示例
+./build_ex.sh              # 一次全构建并逐个运行全部示例 (含 examples/canvas/)
 ./build_ex.sh all --no-run # 只全构建不运行
 ./build_ex.sh ex03_anim    # 单个示例 (换成任意名字)
+./build_ex.sh canvas_01_primitives  # 单个画布教程示例
 ```
 
 ## 备注

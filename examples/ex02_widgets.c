@@ -9,11 +9,8 @@ static void on_sl(fx_widget_t *w, void *ud) { fx_set_value(fx_find("pg"), fx_get
 void app_init(void) {
     fx_set_bg(FX_RGB(240, 240, 240));
     fx_grid_map(pixel("20,20", "260,200"), line(3), row(3), name("pad"));
-    fx_set_color_w(fx_find("pad"), FX_RGB(240,240,240));
-    /*
-    需要用fx_set_color_w来指定背景色，不然grid默认颜色为黑色
-    dense() （可选），可以使grid_map紧凑排布
-    */
+    /* grid 默认自带浅底(245,245,245) + 浅灰网格线, 无需手动铺背景;
+       dense() 可选, 让 grid_map 紧凑排布 */
     const char *k[9] = { "1","2","3","4","5","6","7","8","9" };
     for (int i = 0; i < 9; i++)
         fx_button_new(grid("pad", i/3+1, i%3+1, i/3+1, i%3+1),

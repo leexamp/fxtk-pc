@@ -47,7 +47,7 @@ int main(int argc, char *argv[]) {
     
     fx_init(&fx_sdl_driver);
     { extern void sdl_first_target(void); sdl_first_target(); }
-    fx_set_bg(FX_RGB(245, 245, 245));
+    fx_set_bg(FX_WINDOW_BG);
     
     app_init();
     

@@ -1,6 +1,7 @@
 /**
  * fxtk_font.c — v2 极致性能版: 文字 GPU 纹理缓存 (零 CPU 上传)
  */
+#define _POSIX_C_SOURCE 200809L   /* 让 <string.h> 暴露 strdup (严格 -std 下会隐式声明) */
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
