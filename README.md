@@ -6,7 +6,8 @@
   <img alt="c" src="https://img.shields.io/badge/language-C99-9cf">
   <img alt="platform" src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20ESP32-lightgrey">
 </p>
-## English README.md available at 
+**English README.md available at**
+
  - [docs_en/README_en.md] README_en.md
 
 **一个单帧、脏区重绘、属性宏驱动的 C GUI 框架**——核心纯 C、热路径零分配、480×272 响应式设计、
