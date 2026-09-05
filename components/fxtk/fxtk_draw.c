@@ -59,67 +59,83 @@ static inline void aa_blend(int x, int y, uint32_t c, int cov)
 static void aa_line(int x1, int y1, int x2, int y2, uint32_t c)
 {
     float dx = (float)(x2 - x1), dy = (float)(y2 - y1);
-    float len2 = dx * dx + dy * dy; if (len2 < 0.001f) len2 = 1;
+    float len2 = dx * dx + dy * dy;
+    if (len2 < 0.001f) len2 = 1;
     int minx = (x1 < x2 ? x1 : x2) - 1, maxx = (x1 > x2 ? x1 : x2) + 1;
     int miny = (y1 < y2 ? y1 : y2) - 1, maxy = (y1 > y2 ? y1 : y2) + 1;
     for (int y = miny; y <= maxy; y++)
         for (int x = minx; x <= maxx; x++) {
-            float t = ((x - x1) * dx + (y - y1) * dy) / len2; if (t < 0) t = 0; if (t > 1) t = 1;
+            float t = ((x - x1) * dx + (y - y1) * dy) / len2;
+            if (t < 0) t = 0;
+            if (t > 1) t = 1;
             float px = x1 + t * dx, py = y1 + t * dy;
             float dist = (float)sqrt((x - px) * (x - px) + (y - py) * (y - py));
             float cov = 0.5f + 0.5f - dist;          /* 半像素宽 */
-            if (cov <= 0) continue; if (cov > 1) cov = 1;
+            if (cov <= 0) continue;
+            if (cov > 1) cov = 1;
             aa_blend(x, y, c, (int)(cov * 255));
         }
 }
 
-/* 抗锯齿圆描边: 到圆心距离接近半径处的 1px 圆环带, 边缘平滑 */
+/* 抗锯齿圆描边 (扫描线: 每行只扫圆环带 ~3px, 而非整框 O(r²) sqrt) */
 static void aa_circle(int cx, int cy, int r, uint32_t c)
 {
-    for (int y = cy - r - 1; y <= cy + r + 1; y++)
-        for (int x = cx - r - 1; x <= cx + r + 1; x++) {
-            float d = (float)sqrt((double)((x - cx) * (x - cx) + (y - cy) * (y - cy)));
-            float cov = 1.0f - (float)fabs(d - r);       /* 1px 圆环带, 中心 d=r 全覆盖 */
-            if (cov <= 0) continue; if (cov > 1) cov = 1;
-            aa_blend(x, y, c, (int)(cov * 255));
+    if (r <= 0) return;
+    for (int dy = -r; dy <= r; dy++) {
+        int y = cy + dy;
+        float rad = (float)(r * r - dy * dy);
+        if (rad < 0) continue;
+        int gx = (int)sqrtf(rad);
+        for (int dd = gx - 1; dd <= gx + 1; dd++) {
+            float d = sqrtf((float)(dd * dd + dy * dy));
+            float cov = 1.0f - (float)fabs(d - (float)r);
+            if (cov <= 0) continue;
+            if (cov > 1) cov = 1;
+            aa_blend(cx - dd, y, c, (int)(cov * 255));
+            aa_blend(cx + dd, y, c, (int)(cov * 255));
         }
+    }
 }
 
 /* 抗锯齿实心圆: 内部 d<r 全覆盖, 边缘 d≈r 处平滑淡出 */
 static void aa_fill_circle(int cx, int cy, int r, uint32_t c)
 {
-    for (int y = cy - r - 1; y <= cy + r + 1; y++)
-        for (int x = cx - r - 1; x <= cx + r + 1; x++) {
-            float d = (float)sqrt((double)((x - cx) * (x - cx) + (y - cy) * (y - cy)));
-            float cov = (r + 0.5f) - d;
-            if (cov <= 0) continue; if (cov > 1) cov = 1;
-            aa_blend(x, y, c, (int)(cov * 255));
-        }
+    if (r <= 0) return;
+    for (int dy = -r; dy <= r; dy++) {
+        int y = cy + dy;
+        int dx = (int)sqrtf((float)(r * r - dy * dy));
+        int x0 = cx - dx, x1 = cx + dx;
+        for (int x = x0 + 1; x < x1; x++) aa_blend(x, y, c, 255);   /* 内部全色 */
+        float d0 = sqrtf((float)(dx * dx + dy * dy));
+        float cov = (r + 0.5f) - d0;
+        if (cov < 0) cov = 0;
+        if (cov > 1) cov = 1;
+        int ic = (int)(cov * 255);
+        if (x0 == x1) aa_blend(x0, y, c, ic);   /* 顶部/底部只有 1 个像素 */
+        else { aa_blend(x0, y, c, ic); aa_blend(x1, y, c, ic); }
+    }
 }
 
 /* 圆角矩形的有符号距离 (SDF): <0 内部, >0 外部 */
-static float sd_round_box(float px, float py, float cx0, float cy0, float hx, float hy, float r)
-{
-    float qx = fabsf(px - cx0) - (hx - r);
-    float qy = fabsf(py - cy0) - (hy - r);
-    float ox = qx > 0 ? qx : 0, oy = qy > 0 ? qy : 0;
-    return sqrtf(ox * ox + oy * oy) + fminf(fmaxf(qx, qy), 0) - r;
-}
 
 /* 抗锯齿实心圆角矩形: 到圆角矩形边界的距离决定覆盖度, 角部平滑 */
 static void aa_fill_rect_round(int x1, int y1, int x2, int y2, int r, uint32_t c)
 {
     if (r < 0) r = 0;
-    float cx0 = (x1 + x2) * 0.5f, cy0 = (y1 + y2) * 0.5f;
-    float hx = (x2 - x1 + 1) * 0.5f, hy = (y2 - y1 + 1) * 0.5f;
-    int pad = r + 1;
-    for (int y = y1 - pad; y <= y2 + pad; y++)
-        for (int x = x1 - pad; x <= x2 + pad; x++) {
-            float d = sd_round_box((float)x, (float)y, cx0, cy0, hx, hy, (float)r);
-            float cov = 0.5f - d;
-            if (cov <= 0) continue; if (cov > 1) cov = 1;
-            aa_blend(x, y, c, (int)(cov * 255));
-        }
+    int w = x2 - x1 + 1, h = y2 - y1 + 1;
+    if (r * 2 > w) r = w / 2;
+    if (r * 2 > h) r = h / 2;
+    for (int y = y1; y <= y2; y++) {   /* 扫描线: 每行算圆角内缩, 填充内部+混边缘列 */
+        int lc = 0, dy = 0;
+        if (y - y1 < r) dy = r - (y - y1);
+        else if (y2 - y < r) dy = r - (y2 - y);
+        if (dy) lc = r - (int)sqrtf((float)(r * r - dy * dy));
+        int lx = x1 + lc, rx2 = x2 - lc;
+        for (int x = lx + 1; x < rx2; x++) aa_blend(x, y, c, 255);
+        int ic = (lx >= rx2) ? 220 : 128;
+        aa_blend(lx, y, c, ic);
+        if (lx < rx2) aa_blend(rx2, y, c, 128);
+    }
 }
 
 /* 抗锯齿圆弧: 到圆心距离接近半径的 1px 圆环带, 且角度落在 [a1,a2] 内, 边缘平滑 (连续无断点) */
@@ -146,34 +162,41 @@ static void aa_ellipse(int cx, int cy, int rx, int ry, uint32_t c)
 {
     if (rx <= 0 || ry <= 0) return;
     float frx = (float)rx, fry = (float)ry;
-    for (int y = cy - ry - 1; y <= cy + ry + 1; y++)
-        for (int x = cx - rx - 1; x <= cx + rx + 1; x++) {
-            float dx = x - cx, dy = y - cy;
-            float f = (dx * dx) / (frx * frx) + (dy * dy) / (fry * fry);
-            float gx = 2.0f * dx / (frx * frx), gy = 2.0f * dy / (fry * fry);
-            float gm = sqrtf(gx * gx + gy * gy) + 1e-5f;
-            float dist = (f - 1.0f) / gm;              /* 到椭圆表面的近似距离 */
-            float cov = 0.5f - fabsf(dist);            /* 1px 描边带 */
-            if (cov <= 0) continue; if (cov > 1) cov = 1;
-            aa_blend(x, y, c, (int)(cov * 255));
+    for (int dy = -ry; dy <= ry; dy++) {
+        int y = cy + dy;
+        float t = 1.0f - (float)(dy * dy) / (fry * fry);
+        if (t < 0) t = 0;
+        int gx = (int)(frx * sqrtf(t));
+        for (int dd = gx - 1; dd <= gx + 1; dd++) {   /* 只扫椭圆边缘带 ~3px */
+            float f = (float)(dd * dd) / (frx * frx) + (float)(dy * dy) / (fry * fry);
+            float gxm = 2.0f * dd / (frx * frx), gym = 2.0f * dy / (fry * fry);
+            float gm = sqrtf(gxm * gxm + gym * gym) + 1e-5f;
+            float dist = (f - 1.0f) / gm;
+            float cov = 0.5f - fabsf(dist);
+            if (cov <= 0) continue;
+            if (cov > 1) cov = 1;
+            aa_blend(cx - dd, y, c, (int)(cov * 255));
+            aa_blend(cx + dd, y, c, (int)(cov * 255));
         }
+    }
 }
 
-/* 抗锯齿实心椭圆: 内部 f<1 全覆盖, 边缘平滑淡出 */
+/* 抗锯齿实心椭圆 (扫描线: 每行填充内部 + 只混 2 个边缘列) */
 static void aa_fill_ellipse(int cx, int cy, int rx, int ry, uint32_t c)
 {
     if (rx <= 0 || ry <= 0) return;
     float frx = (float)rx, fry = (float)ry;
-    for (int y = cy - ry - 1; y <= cy + ry + 1; y++)
-        for (int x = cx - rx - 1; x <= cx + rx + 1; x++) {
-            float dx = x - cx, dy = y - cy;
-            float f = (dx * dx) / (frx * frx) + (dy * dy) / (fry * fry);
-            float gx = 2.0f * dx / (frx * frx), gy = 2.0f * dy / (fry * fry);
-            float gm = sqrtf(gx * gx + gy * gy) + 1e-5f;
-            float dist = (f - 1.0f) / gm;
-            float cov = 0.5f - dist;
-            if (cov <= 0) continue; if (cov > 1) cov = 1;
-            aa_blend(x, y, c, (int)(cov * 255));
+    for (int dy = -ry; dy <= ry; dy++) {
+        int y = cy + dy;
+        float t = 1.0f - (float)(dy * dy) / (fry * fry);
+        if (t < 0) t = 0;
+        int dx = (int)(frx * sqrtf(t));
+        int x0 = cx - dx, x1 = cx + dx;
+        for (int x = x0 + 1; x < x1; x++) aa_blend(x, y, c, 255);
+        /* 边缘列: 近似 50% 覆盖 */
+        int ic = (x0 == x1) ? 200 : 128;
+        aa_blend(x0, y, c, ic);
+        if (x0 != x1) aa_blend(x1, y, c, 128);
         }
 }
 
@@ -319,7 +342,8 @@ int fx_canvas_enable_buf(fx_widget_t *cv)
 
 void fx_canvas_size(fx_widget_t *cv, int *w, int *h)
 {
-    if (!cv) { if (w) *w = 0; if (h) *h = 0; return; }
+    if (!cv) { if (w) *w = 0;
+    if (h) *h = 0; return; }
     int x1, y1, x2, y2;
     fx_widget_rect(cv, &x1, &y1, &x2, &y2);
     if (w) *w = x2 - x1 + 1;
@@ -416,7 +440,7 @@ void fx_fill_rect(int x1, int y1, int x2, int y2)
     if (y1 < 0) y1 = 0;
     if (x2 >= s_drv->width) x2 = s_drv->width - 1;
     { int y2c = y2, hc = s_drv->height;
-      if (y2c >= hc) { y2 = hc - 1; } }
+    if (y2c >= hc) { y2 = hc - 1; } }
     if (x1 > x2 || y1 > y2) return;
     if (s_offing && s_offbuf_active) {   /* v2.2 离屏快刷: 直接写 offbuf 行, 免去逐像素调用/边界检查 */
         int cx1 = x1 > 0 ? x1 : 0, cy1 = y1 > 0 ? y1 : 0;
@@ -729,16 +753,16 @@ void fxtk_text_blit(void *tex,int x,int y,int w,int h)
     int y1=y>s_clip_y1?y:s_clip_y1;
     int x2=(x+w-1)<s_clip_x2?(x+w-1):s_clip_x2;
     int y2=(y+h-1)<s_clip_y2?(y+h-1):s_clip_y2;
-    if(x1>x2||y1>y2)return;
+    if (x1>x2||y1>y2)return;
     s_drv->blit_tex(tex,x1-x,y1-y,x2-x1+1,y2-y1+1,x1+s_ox,y1+s_oy);
 }
 
 int fxtk_image_rot_gpu(const fx_image_t *img,int cx,int cy,int dw,int dh,double ang)
 {
     if(s_offing||!s_drv||!s_drv->blit_img_rot||!img||!img->px)return 0;
-    if(s_drv->set_clip_rect) s_drv->set_clip_rect(s_clip_x1+s_ox,s_clip_y1+s_oy,s_clip_x2+s_ox,s_clip_y2+s_oy);   /* 画布裁剪 */
+    if (s_drv->set_clip_rect) s_drv->set_clip_rect(s_clip_x1+s_ox,s_clip_y1+s_oy,s_clip_x2+s_ox,s_clip_y2+s_oy);   /* 画布裁剪 */
     s_drv->blit_img_rot(img->px,img->w,img->h,cx+s_ox,cy+s_oy,dw,dh,ang);
-    if(s_drv->set_clip_rect) s_drv->set_clip_rect(0,0,32767,32767);
+    if (s_drv->set_clip_rect) s_drv->set_clip_rect(0,0,32767,32767);
     return 1;
 }
 

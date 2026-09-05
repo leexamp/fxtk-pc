@@ -101,9 +101,12 @@ void fx_image_brightness(fx_image_t *img, int delta)
         int r = ((c >> 16) & 0xFF) + delta;
         int g = ((c >> 8) & 0xFF) + delta;
         int b = (c & 0xFF) + delta;
-        if (r < 0) r = 0; if (r > 255) r = 255;
-        if (g < 0) g = 0; if (g > 255) g = 255;
-        if (b < 0) b = 0; if (b > 255) b = 255;
+        if (r < 0) r = 0;
+        if (r > 255) r = 255;
+        if (g < 0) g = 0;
+        if (g > 255) g = 255;
+        if (b < 0) b = 0;
+        if (b > 255) b = 255;
         img->px[i] = (uint32_t)((r << 16) | (g << 8) | b);
     }
 }

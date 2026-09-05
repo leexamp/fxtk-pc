@@ -68,6 +68,7 @@ typedef enum {
     FX_A_ANIM,
     FX_A_IMAGE,
     FX_A_MAXLEN,
+    FX_A_SIDEBAR,
 } fx_attr_tag_t;
 
 typedef struct {
@@ -107,12 +108,19 @@ fx_attr_t radius(int n);
 #define FX_F_FIT   (1<<8)   /* 适应: 封顶+居中 */
 #define FX_F_READONLY (1<<9)   /* 文本框只读 */
 void fx_textedit_set_readonly(fx_widget_t *w,int ro);
+const char *fx_textedit_text(fx_widget_t *w);   /* v2.3: 取文本框当前内容(可能为 NULL 或空串) */
 void fx_set_fit(fx_widget_t *w, int on);
 void fxtk_fit_rect(fx_widget_t *w,int*x1,int*y1,int*x2,int*y2);
 int  fxtk_max_scale1000(void);
 fx_attr_t dense(void);
 fx_attr_t value(int n);
 fx_attr_t page(int n);
+/* 标签页侧边栏方位: 0=上, 1=左, 2=右, 3=下 (英文标签较长时常用左右侧; 默认上) */
+#define FX_TAB_TOP 0
+#define FX_TAB_LEFT 1
+#define FX_TAB_RIGHT 2
+#define FX_TAB_BOTTOM 3
+fx_attr_t sidebar(int side);
 fx_attr_t anim(int n);
 fx_attr_t fx_wptr(fx_widget_t *w);
 
@@ -152,6 +160,7 @@ void fx_delete_impl(fx_attr_t attrs[]);
 
 void fx_set_title(fx_widget_t *w, const char *s);
 void fx_set_color_w(fx_widget_t *w, fx_color_t c);
+void fx_set_fgcolor_w(fx_widget_t *w, fx_color_t c);   /* v2.3: 改控件前景/文字色 */
 void fx_set_value(fx_widget_t *w, int v);
 int  fx_get_value(const fx_widget_t *w);
 void fx_set_cb(fx_widget_t *w, fx_cb_t cb, void *ud);
@@ -258,6 +267,7 @@ fx_color_t fx_get_bg(void);
 /* 核心丝滑滚动 */
 int  fx_scroll_update(fx_widget_t *w,int content_h);
 void fx_scrollbar_draw(fx_widget_t *w,int off,int content_h);
+void fx_set_scroll(fx_widget_t *w,int off);   /* v2.3 统一滚动: 设目标(拖滚动条用), 走同套缓动 */
 void fx_canvas_set_buf(fx_widget_t *w,int on);
 
 /* ---- extra: 多尺寸文字 / 列表 / 下拉 ---- */
@@ -270,6 +280,7 @@ fx_widget_t *fx_list_new(const char *r1, const char *r2);
 void fx_list_add(fx_widget_t *w, const char *t);
 void fx_list_set_cb(fx_widget_t *w, void (*cb)(fx_widget_t*, void*));
 int  fx_list_sel(fx_widget_t *w);
+void fx_list_clear(fx_widget_t *w);   /* v2.3: 清空列表(供重建/删除) */
 fx_widget_t *fx_drop_new(const char *r1, const char *r2);
 void fx_drop_add(fx_widget_t *w, const char *t);
 void fx_set_fontsize(fx_widget_t *w, int size);

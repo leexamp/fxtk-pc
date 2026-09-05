@@ -104,6 +104,21 @@ cd demo-main
 
 见 `docs/windows.md`：WSL2+WSLg 零改动 / MSYS2 原生 exe / MSVC+vcpkg。
 
+### 2.5 可选控件编译（v2.3，减小体积）
+
+默认全编译所有控件；对 ESP32 等体积受限平台，可**按需裁掉用不到的控件**以减小二进制：
+
+```bash
+# 裁掉按钮与复选框(示例): 全开 170KB → 142KB
+gcc -O2 -s -pthread -DFXTK_WIDGET_BUTTON=0 -DFXTK_WIDGET_CHECKBOX=0 ... -o app
+```
+
+可裁剪的控件（默认 1=开，设 0=关）：`FXTK_WIDGET_BUTTON/LABEL/GRID/CANVAS/SLIDER/PROGRESS/CHECKBOX/PANEL/TAB/IMAGE/TEXTEDIT/LIST/DROP`。
+
+- 关掉的控件**仍可创建**（类型枚举不变，创建宏仍在），只是**不再被绘制**——所以请只裁掉确实不用的控件，并实际跑一遍确认。
+- `FXTK_WIDGET_CANVAS`/`TEXTEDIT`/`IMAGE` 是基础/扩展，别轻易关；`CANVAS` 一旦关掉整个框架基本不可用。
+- PC demo 默认全开，行为不变。
+
 ---
 
 ## 3. 坐标系统与布局
@@ -379,6 +394,12 @@ fx_parent(NULL);
 - `page(n)` 决定控件在第 n 页显示，`tab` 的 `value`（当前页）由点击页签切换。
 - 页签选中态有**立体凸起**（亮底深字 + 高光），未选中下凹。
 - tab 标题用逗号分隔页签名。
+- **侧边栏方位 `sidebar(side)`（v2.3）**：把标签条放到上/左/右/下四边——英文标签较长时常用左右边（`FX_TAB_SIDE=88` 宽），顶部/底部用 `FX_TAB_H=24` 高。
+
+```c
+fx_tab_new(pixel("6,24","438,236"), title("主页,设置,关于"), sidebar(FX_TAB_LEFT));
+/* 或 FX_TAB_TOP(默认) / FX_TAB_RIGHT / FX_TAB_BOTTOM */
+```
 
 ### 7.3 canvas 当容器
 
@@ -484,6 +505,18 @@ static void on_view(fx_widget_t *w, void *ud) {
 > `fx_canvas_size` / `fx_canvas_clear` 专门替代这两段样板，画布代码更短。
 
 ---
+
+### 8.6 跨平台文件 API（v2.3）
+
+`fxtk_fs.h`：系统对话框选文件夹 + 列目录内容，Linux/Windows 各走对应系统 API。
+
+```c
+#include "fxtk_fs.h"
+char d[512]; if (fx_fs_pick_dir(d, sizeof(d))) { /* d = 选中路径 */ }
+fx_fs_entry_t e[64]; int n = fx_fs_list(d, e, 64);   /* name / is_dir / size / date */
+```
+
+demo 的**组件页**用它做了文件浏览器：文件夹内容以表格呈现（名称/大小/日期），带**平滑滚动条**（拖拽跟手、悬停变宽变蓝）、**悬停提示**（跟鼠标显示完整信息）、点击行选中+悬停边框；`fx_grid_map(dense())` 网格名字编辑器；两套 RGB 颜色选择器改按钮底色/字色。
 
 ## 9. 输入：触摸/键盘/滚轮
 

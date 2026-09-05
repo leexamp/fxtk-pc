@@ -21,6 +21,7 @@ static fx_color_t btn_mix(fx_color_t a, fx_color_t b, int t)
     int r=(ar*(256-t)+br*t+128)>>8, g=(ag*(256-t)+bg*t+128)>>8, bl=(ab*(256-t)+bb*t+128)>>8;
     return (fx_color_t)((r<<16)|(g<<8)|bl);
 }
+#if FXTK_WIDGET_BUTTON
 void fxtk_draw_button(fx_widget_t *w)
 {
     /* Adwaita 经典: 纯平圆角 + 锐利1px高光/阴影 (锐线不产生灰阶) */
@@ -54,6 +55,8 @@ void fxtk_draw_button(fx_widget_t *w)
     }
 }
 
+#endif
+#if FXTK_WIDGET_LABEL
 void fxtk_draw_label(fx_widget_t *w)
 {
     /* line(n)=字号(缺省18), row(0/1/2)=左/中/右, 垂直自动居中 */
@@ -71,6 +74,8 @@ void fxtk_draw_label(fx_widget_t *w)
     else fxtk_draw_text_size(fs, x, w->y1 + (ch - th) / 2 + 2, w->title, w->fg, tbg);
 }
 
+#endif
+#if FXTK_WIDGET_GRID
 void fxtk_draw_grid(fx_widget_t *w)
 {
     fx_set_color(w->bg);
@@ -88,6 +93,8 @@ void fxtk_draw_grid(fx_widget_t *w)
     }
 }
 
+#endif
+#if FXTK_WIDGET_CANVAS
 void fxtk_draw_canvas(fx_widget_t *w)
 {
     fxtk_apply_fit(w);   /* 铺底前强制收拢, 杜绝二次变大 */
@@ -104,6 +111,8 @@ void fxtk_draw_canvas(fx_widget_t *w)
     }
 }
 
+#endif
+#if FXTK_WIDGET_SLIDER
 void fxtk_draw_slider(fx_widget_t *w)
 {
     int h = w->y2 - w->y1 + 1;
@@ -123,6 +132,8 @@ void fxtk_draw_slider(fx_widget_t *w)
     fx_fill_rect(kx, w->y1, kx + 6, w->y2);
 }
 
+#endif
+#if FXTK_WIDGET_PROGRESS
 void fxtk_draw_progress(fx_widget_t *w)
 {
     fx_set_color(w->fg);
@@ -140,6 +151,8 @@ void fxtk_draw_progress(fx_widget_t *w)
 }
 
 /* 【修复】复选框: 默认透明背景不铺色块; 方框+文字垂直居中 (缩放后不变形) */
+#endif
+#if FXTK_WIDGET_CHECKBOX
 void fxtk_draw_checkbox(fx_widget_t *w)
 {
     int h = w->y2 - w->y1 + 1;
@@ -162,6 +175,8 @@ void fxtk_draw_checkbox(fx_widget_t *w)
     }
 }
 
+#endif
+#if FXTK_WIDGET_PANEL
 void fxtk_draw_panel(fx_widget_t *w)
 {
     fx_set_color(w->bg);
@@ -172,28 +187,37 @@ void fxtk_draw_panel(fx_widget_t *w)
     }
 }
 
+#endif
+#if FXTK_WIDGET_TAB
 void fxtk_draw_tab(fx_widget_t *w)
 {
+    int side = w->tab_side;
     fx_set_color(w->bg);
-    fx_fill_rect(w->x1, w->y1 + FX_TAB_H, w->x2, w->y2);
+    fx_fill_rect(w->x1, w->y1, w->x2, w->y2);
     int n = w->lines > 0 ? w->lines : 1;
-    int tw = (w->x2 - w->x1 + 1) / n;
     const char *p = w->title;
     for (int i = 0; i < n && p[0]; i++) {
-        int tx1 = w->x1 + i * tw;
-        int tx2 = (i == n - 1) ? w->x2 : tx1 + tw - 1;
+        int tx1, ty1, tx2, ty2;
+        if (side == FX_TAB_LEFT || side == FX_TAB_RIGHT) {   /* 垂直侧边栏 */
+            int th = (w->y2 - w->y1 + 1) / n;
+            ty1 = w->y1 + i * th; ty2 = (i == n - 1) ? w->y2 : ty1 + th - 1;
+            if (side == FX_TAB_LEFT) { tx1 = w->x1; tx2 = w->x1 + FX_TAB_SIDE - 1; }
+            else                    { tx1 = w->x2 - FX_TAB_SIDE + 1; tx2 = w->x2; }
+        } else {                                            /* 水平标签条 */
+            int tw = (w->x2 - w->x1 + 1) / n;
+            tx1 = w->x1 + i * tw; tx2 = (i == n - 1) ? w->x2 : tx1 + tw - 1;
+            if (side == FX_TAB_BOTTOM) { ty1 = w->y2 - FX_TAB_H + 1; ty2 = w->y2; }
+            else                      { ty1 = w->y1; ty2 = w->y1 + FX_TAB_H - 1; }
+        }
         int sel = (i == w->value);
-        /* 立体感: 选中=凸起(亮底+顶高光+底明线), 未选中=下凹(深底+顶暗线) */
         fx_color_t bg = sel ? btn_mix(w->bg, FX_WHITE, 24) : darken(w->bg);
         fx_set_color(bg);
-        fx_fill_rect(tx1, w->y1, tx2, w->y1 + FX_TAB_H - 1);
+        fx_fill_rect(tx1, ty1, tx2, ty2);
+        /* 立体感: 选中=凸起(上+左高光), 未选中=下凹 */
         fx_set_color(sel ? btn_mix(bg, FX_WHITE, 90) : darken(bg));
-        fx_draw_hline(tx1, tx2, w->y1 + (sel ? 1 : 0));                    /* 顶高光/暗边 */
+        fx_draw_vline(tx1, ty1, ty2);   fx_draw_hline(tx1, tx2, ty1);
         fx_set_color(sel ? btn_mix(bg, FX_WHITE, 40) : darken(bg));
-        fx_draw_hline(tx1, tx2, w->y1 + FX_TAB_H - 1);                     /* 底明线(凸起感) */
-        fx_set_color(sel ? btn_mix(bg, FX_WHITE, 60) : darken(bg));
-        fx_draw_vline(tx1, w->y1, w->y1 + FX_TAB_H - 1);                   /* 左缘 */
-        fx_draw_vline(tx2, w->y1, w->y1 + FX_TAB_H - 1);                   /* 右缘 */
+        fx_draw_hline(tx1, tx2, ty2);   fx_draw_vline(tx2, ty1, ty2);
         const char *comma = strchr(p, ',');
         char seg[96];
         int len = comma ? (int)(comma - p) : (int)strlen(p);
@@ -201,18 +225,26 @@ void fxtk_draw_tab(fx_widget_t *w)
         memcpy(seg, p, (size_t)len);
         seg[len] = 0;
         int sw = fx_text_width(seg);
-        fx_draw_text_c(tx1 + (tw - sw) / 2, w->y1 + (FX_TAB_H - 16) / 2,
-                       seg, sel ? FX_RGB(40, 40, 40) : FX_LGRAY, bg);   /* 选中页签深字, 亮底可读 */
+        fx_draw_text_c(tx1 + (tx2 - tx1 + 1 - sw) / 2, ty1 + (ty2 - ty1 - 16) / 2,
+                       seg, sel ? FX_RGB(40, 40, 40) : FX_LGRAY, bg);
         p = comma ? comma + 1 : p + strlen(p);
     }
-    /* 页签与内容区之间: 深阴影线 + 1px 高光, 增强分层 */
+    /* 标签条与内容区之间: 深阴影 + 高光, 增强分层 (按方位) */
     fx_set_color(darken(w->bg));
-    fx_draw_hline(w->x1, w->x2, w->y1 + FX_TAB_H);
+    if (side == FX_TAB_LEFT)       fx_draw_vline(w->x1 + FX_TAB_SIDE, w->y1, w->y2);
+    else if (side == FX_TAB_RIGHT) fx_draw_vline(w->x2 - FX_TAB_SIDE, w->y1, w->y2);
+    else if (side == FX_TAB_BOTTOM)fx_draw_hline(w->x1, w->x2, w->y2 - FX_TAB_H);
+    else                           fx_draw_hline(w->x1, w->x2, w->y1 + FX_TAB_H);
     fx_set_color(btn_mix(w->bg, FX_WHITE, 60));
-    fx_draw_hline(w->x1, w->x2, w->y1 + FX_TAB_H + 1);
+    if (side == FX_TAB_LEFT)       fx_draw_vline(w->x1 + FX_TAB_SIDE + 1, w->y1, w->y2);
+    else if (side == FX_TAB_RIGHT) fx_draw_vline(w->x2 - FX_TAB_SIDE - 1, w->y1, w->y2);
+    else if (side == FX_TAB_BOTTOM)fx_draw_hline(w->x1, w->x2, w->y2 - FX_TAB_H + 1);
+    else                           fx_draw_hline(w->x1, w->x2, w->y1 + FX_TAB_H + 1);
 }
 
 /* ---------- 图片控件 (交互: 按压缩暗 + 缩放) ---------- */
+#endif
+#if FXTK_WIDGET_IMAGE
 void fxtk_draw_image(fx_widget_t *w)
 {
     if (w->bg != FX_BLACK) {
@@ -233,6 +265,8 @@ void fxtk_draw_image(fx_widget_t *w)
     fx_draw_image_ex(w->img, x, y, dw, dh, (w->flags & FX_F_PRESSED));
 }
 /* ---------- 输入框 (桌面扩展) ---------- */
+#endif
+#if FXTK_WIDGET_TEXTEDIT
 static int te_nx(const char *s, int off)
 {
     int len = (int)strlen(s), i2 = off + 1;
@@ -327,3 +361,5 @@ fx_fill_rect(rw2 - 3, ty, rw2, ty + th);
         fx_draw_text_c(w->x2 - cw2 - 6, w->y1 + 4, cnt, FX_GRAY, bg);
     }
 }
+
+#endif

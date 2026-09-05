@@ -1,6 +1,6 @@
 #!/bin/bash
 # fxtk v2.2 二进制发布: 编译 Linux demo + Windows 交叉, 打包到 dist/fxtk-v2.2-bin/
-VER=v2.2
+VER=v2.3
 BIN=dist/fxtk-$VER-bin
 rm -rf "$BIN" dist/fxtk-$VER-bin-*
 mkdir -p "$BIN/linux" "$BIN/windows"

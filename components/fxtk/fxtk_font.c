@@ -15,7 +15,7 @@ extern int fxtk_is_offing(void);
 extern void fxtk_text_blit(void *tex,int x,int y,int w,int h);
 extern void fxtk_put_px(int x, int y, uint16_t c);
 
-#define TEXT_CACHE_SIZE 256
+#define TEXT_CACHE_SIZE 64   /* 文本贴图缓存上限(v2.3: 256 减到 64, 省内存; 命中不足会自动重建) */
 typedef struct {
     TTF_Font *font;
     char *key;
@@ -145,7 +145,6 @@ void fx_draw_text_c(int x, int y, const char *s, fx_color_t fg, fx_color_t bg)
         }
     }
     SDL_FreeSurface(fmt_surf);
-
     if (fxtk_is_offing() && argb_buf) {   /* 离屏画布(3D): 像素路径 */
         for (int ty = 0; ty < h; ty++)
             for (int tx = 0; tx < w; tx++) {
@@ -207,7 +206,8 @@ void fx_draw_text_c_n(int x, int y, const char *s, int n, fx_color_t fg, fx_colo
 #define FC_N 8
 static struct { int size; TTF_Font *f; } s_fc[FC_N];
 static void tc_drop_font(TTF_Font *ft)
-{ for(int i=0;i<TEXT_CACHE_SIZE;i++) if(s_tc[i].font==ft){ if(s_tc[i].tex)SDL_DestroyTexture(s_tc[i].tex); if(s_tc[i].key)free(s_tc[i].key); s_tc[i].tex=NULL;s_tc[i].key=NULL;s_tc[i].font=NULL;s_tc[i].age=0; } }
+{ for(int i=0;i<TEXT_CACHE_SIZE;i++) if(s_tc[i].font==ft){ if(s_tc[i].tex)SDL_DestroyTexture(s_tc[i].tex);
+if (s_tc[i].key)free(s_tc[i].key); s_tc[i].tex=NULL;s_tc[i].key=NULL;s_tc[i].font=NULL;s_tc[i].age=0; } }
 void fxtk_font_set_size(int size)
 {
     TTF_Font *f = (TTF_Font *)fxtk_font_size(size);
@@ -222,8 +222,10 @@ void *fxtk_font_size(int size)
     for (int k=0;k<8;k++) if(s_fail[k]==size) return g_font;
     TTF_Font *f = TTF_OpenFont(s_font_path, size);
     if (!f) { for(int k=0;k<8;k++) if(!s_fail[k]){s_fail[k]=size;break;} fprintf(stderr, "[fontcache] size=%d OPEN FAIL: %s\n", size, TTF_GetError()); return g_font; }
-    int slot=-1; for (int k=0;k<FC_N;k++) if(!s_fc[k].f){slot=k;break;}
-    if(slot<0){ slot=0; tc_drop_font(s_fc[0].f); TTF_CloseFont(s_fc[0].f); s_fc[0].f=NULL; s_fc[0].size=0; }
+    int slot=-1; 
+    for(int k=0;k<FC_N;k++) if(!s_fc[k].f){slot=k;break;}
+    if(slot<0){ slot=0;
+    if (s_fc[0].f!=g_font){ tc_drop_font(s_fc[0].f); TTF_CloseFont(s_fc[0].f); } s_fc[0].f=NULL; s_fc[0].size=0; }   /* 别关正在用的 g_font, 防 use-after-free */
     s_fc[slot].f=f; s_fc[slot].size=size;
     return f;
 }
@@ -237,6 +239,8 @@ int fxtk_text_width_size(int size, const char *t)
 }
 void fxtk_draw_text_size(int size, int x, int y, const char *t, fx_color_t fg, fx_color_t bg)
 {
+    if (size <= 0) size = 16;
+    if (size > 120) size = 120;   /* 防超大窗口字号撑爆 */
     TTF_Font *old = g_font;
     g_font = (TTF_Font *)fxtk_font_size(size);
     fx_draw_text_c(x, y, t, fg, bg);

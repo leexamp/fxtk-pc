@@ -65,9 +65,12 @@ static float shadow(v3 ro, v3 rd, float t, v3 sc, float sr)
 
 static uint32_t to888(float r, float g, float b)
 {
-    if (r<0) r=0; if (r>1) r=1;
-    if (g<0) g=0; if (g>1) g=1;
-    if (b<0) b=0; if (b>1) b=1;
+    if (r<0) r=0;
+    if (r>1) r=1;
+    if (g<0) g=0;
+    if (g>1) g=1;
+    if (b<0) b=0;
+    if (b>1) b=1;
     return ((uint32_t)(r*255.99f)<<16) | ((uint32_t)(g*255.99f)<<8) | (uint32_t)(b*255.99f);
 }
 
@@ -112,9 +115,11 @@ static void shade_reflect(v3 pos, v3 n, v3 rd, float time, v3 sc, float sr,
     float t2 = scene_hit(vadd(pos, vmul(n, 0.01f)), rdir, 12.0f, 24, time, sc, sr, &m2);
     if (m2 == 0) {
         /* 天空渐变 + 太阳 */
-        float sk = 0.5f + 0.5f * rdir.y; if (sk < 0) sk = 0;
+        float sk = 0.5f + 0.5f * rdir.y;
+        if (sk < 0) sk = 0;
         *rr = 0.15f + 0.35f*sk; *gg = 0.25f + 0.45f*sk; *bb = 0.45f + 0.5f*sk;
-        float sd = vdot(rdir, ldir); if (sd < 0) sd = 0;
+        float sd = vdot(rdir, ldir);
+        if (sd < 0) sd = 0;
         sd = sd*sd*sd*sd;
         *rr += 0.6f*sd; *gg += 0.45f*sd; *bb += 0.2f*sd;
         return;
@@ -133,7 +138,8 @@ static void shade_reflect(v3 pos, v3 n, v3 rd, float time, v3 sc, float sr,
         n2 = torus_normal(p2, time);
         mc2 = V(0.9f, 0.2f, 0.7f);
     }
-    float d2 = vdot(n2, ldir); if (d2 < 0) d2 = 0;
+    float d2 = vdot(n2, ldir);
+    if (d2 < 0) d2 = 0;
     float li2 = 0.25f + 1.4f * d2;
     *rr = mc2.x*li2; *gg = mc2.y*li2; *bb = mc2.z*li2;
     /* 反射点雾 */
@@ -168,9 +174,11 @@ static void shade_rows(job_t *J)
 
             float r, g, b;
             if (!mat) {
-                float sk = 0.5f + 0.5f*rd.y; if (sk<0) sk=0;
+                float sk = 0.5f + 0.5f*rd.y;
+                if (sk<0) sk=0;
                 r = 0.15f + 0.35f*sk; g = 0.25f + 0.45f*sk; b = 0.45f + 0.5f*sk;
-                float sd = vdot(rd, J->ldir); if (sd<0) sd=0;
+                float sd = vdot(rd, J->ldir);
+                if (sd<0) sd=0;
                 sd = sd*sd*sd*sd;
                 r += 0.6f*sd; g += 0.45f*sd; b += 0.2f*sd;
             } else {
@@ -188,9 +196,11 @@ static void shade_rows(job_t *J)
                     n = torus_normal(pos, J->time);
                     mcol = V(0.9f, 0.2f, 0.7f);
                 }
-                float dif = vdot(n, J->ldir); if (dif<0) dif=0;
+                float dif = vdot(n, J->ldir);
+                if (dif<0) dif=0;
                 float sh = shadow(vadd(pos, vmul(n,0.02f)), J->ldir, J->time, J->sc, J->sr);
-                float spe = vdot(n, vnorm(vsub(J->ldir, rd))); if (spe<0) spe=0;
+                float spe = vdot(n, vnorm(vsub(J->ldir, rd)));
+                if (spe<0) spe=0;
                 spe = powf(spe, 16.0f) * sh * 1.5f;   /* 高光增强 */
                 float li = 0.25f + 1.4f*dif*sh;
                 r = mcol.x*li + spe;
@@ -248,7 +258,6 @@ void raymarch_render(uint32_t *px, int w, int h, float time, int max_steps)
     if (n < 1) n = 1;
     if (n > RM_MAX_THREADS) n = RM_MAX_THREADS;
     if (n > h) n = h;
-
     if (n <= 1) {
         base.y0 = 0; base.y1 = h;
         shade_rows(&base);

@@ -1,9 +1,9 @@
 #!/bin/bash
 # fxtk v2.2 源码发布: 打包核心库 + PC 模拟器 + 全部示例(含画布/抗锯齿) + 无头测试 + 文档/许可/CI
-VER=v2.2
+VER=v2.3
 OUT=fxtk-$VER
 rm -rf $OUT fxtk-$VER.tar.gz
-mkdir -p $OUT/demo-main/test $OUT/examples/canvas $OUT/docs $OUT/.github/workflows
+mkdir -p $OUT/demo-main/test $OUT/examples/canvas $OUT/docs $OUT/docs_en $OUT/tools $OUT/.github/workflows
 
 # 核心库 (纯 C, 布局/绘图/控件/字体/特效/扩展)
 cp -r ../components $OUT/
@@ -24,6 +24,8 @@ cp "$EXDIR"/canvas/*.c $OUT/examples/canvas/ 2>/dev/null && echo "✅ 画布示�
 # 文档 / 许可 / README / CHANGELOG / CI
 cp ../README.md ../LICENSE ../CHANGELOG.md $OUT/ 2>/dev/null
 cp ../docs/*.md $OUT/docs/ 2>/dev/null
+cp ../docs_en/*.md $OUT/docs_en/ 2>/dev/null
+cp ../tools/*.sh $OUT/tools/ 2>/dev/null
 cp ../.github/workflows/ci.yml $OUT/.github/workflows/ 2>/dev/null
 cp ../graph.png ../texting.png ../image.png ../rending.png $OUT/ 2>/dev/null
 cp ../screenshot_aa.png ../screenshot_gauge.png ../screenshot_checker.png ../screenshot_gradient.png $OUT/ 2>/dev/null

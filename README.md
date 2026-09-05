@@ -1,7 +1,14 @@
-# fxtk — 轻量GUI框架 (v2.2)
+# fxtk — 轻量GUI框架 (v2.3)
 
-fxtk 是一个**单线程、脏区重绘、属性宏驱动**的轻量 GUI 框架。核心用纯 C 编写，
-并额外提供桌面级扩展（输入框/滚动/滚轮/剪贴板）与渲染引擎能力（贴图/旋转/光追演示）。
+<p>
+  <img alt="version" src="https://img.shields.io/badge/version-v2.3-blue">
+  <img alt="license" src="https://img.shields.io/badge/license-MIT-green">
+  <img alt="c" src="https://img.shields.io/badge/language-C99-9cf">
+  <img alt="platform" src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20ESP32-lightgrey">
+</p>
+
+**一个单帧、脏区重绘、属性宏驱动的 C GUI 框架**——核心纯 C、热路径零分配、480×272 响应式设计、
+一份头文件就能上手。PC 用 SDL，ESP32 用 `fx_driver_t` 抽象，几乎零改动跨平台。
 
 **画布与抗锯齿（v2.2 无头渲染示意图）**：
 | 抗锯齿 `fx_set_aa(1)` | 渐变 `fx_fill_rect_gradient` | 自定义控件（仪表盘） | 棋盘格（缩放安全） |
@@ -33,6 +40,9 @@ fxtk 是一个**单线程、脏区重绘、属性宏驱动**的轻量 GUI 框架
 - **性能**：脏区合并重绘、GPU 顶点批、行级持久线程池光追、GPU 呈现（SDL2 加速渲染器）
 - **动态压测**：压测页帧率富余时自动生长控件（全屏 1080P 可容数千个），实时显示总控件数
 - **工程化**：统一 Makefile 单一源清单、无头单元测试、GitHub CI（Linux + Windows 交叉）
+- **体积裁剪（v2.3）**：`-DFXTK_WIDGET_XXX=0` 编译时裁掉用不到的控件，减小二进制（ESP32 等受限平台用，如裁按钮+复选框 170KB→142KB）；`tools/autotrim.sh <源码>` 自动扫描用到的控件并生成这些开关（示例 100KB→88KB）
+- **国际化（v2.3）**：英文文档在 `docs_en/`、英文 demo 在 `demo-main/app_en.c`（用左侧边栏标签放长英文标签），中文保持 `docs/` + `app.c`；标签页支持 `sidebar(FX_TAB_TOP/LEFT/RIGHT/BOTTOM)` 四方位
+- **跨平台文件 API（v2.3）**：`fxtk_fs.h/.c` 的 `fx_fs_pick_dir()`（系统对话框选文件夹：Win32 `SHBrowseForFolderW` / Linux `zenity`）与 `fx_fs_list()`（列目录：Win32 `FindFirstFileW` / POSIX `opendir+stat`）；demo **组件页**含文件浏览器（平滑滚动条+悬停提示+行选中）、颜色选择器（两套 RGB 改按钮底色/字色）、`fx_grid_map(dense())` 网格名字编辑器、可拖动组件区。
 
 ## 目录结构
 
@@ -89,7 +99,7 @@ make clean
 
 ```bash
 cd demo-main
-./make_release.sh      # → fxtk-v2.2.tar.gz           (源码包: 核心库+模拟器+全部示例+文档/许可/CI)
+./make_release.sh      # → fxtk-v2.3.tar.gz           (源码包: 核心库+模拟器+全部示例+文档/许可/CI)
 ./make_bin_release.sh  # → dist/fxtk-v2.2-bin-*.tar.gz/.zip (Linux demo + Windows 交叉二进制)
 ```
 
