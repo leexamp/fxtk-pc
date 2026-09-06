@@ -23,7 +23,8 @@ cp dist/win/*.dll "$BIN/windows/" 2>/dev/null
 [ -x "$(command -v x86_64-w64-mingw32-strip)" ] && \
   for f in "$BIN"/windows/*.dll; do x86_64-w64-mingw32-strip "$f" 2>/dev/null; done
 # 同时也剥 exe 的调试符号
-[ -x "$(command -v x86_64-w64-mingw32-strip)" ] && x86_64-w64-mingw32-strip "$BIN/windows/fxtk_win.exe" 2>/dev/null
+[ -x "$(command -v x86_64-w64-mingw32-strip)" ] && \
+  for f in "$BIN"/windows/*.exe; do x86_64-w64-mingw32-strip "$f" 2>/dev/null; done
 
 cat > "$BIN/README.txt" <<EOF
 fxtk $VER 二进制包 (已剥调试符号, 体积最小化)

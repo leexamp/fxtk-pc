@@ -36,6 +36,10 @@
   在交叉编译前先执行 `setup_win_cross.sh` 下载 vendored SDL2 开发包（此前 third_party/ 不在仓库, job 必红）。
 - **`tools/autotrim.sh`**: 匹配正则补 `_p` 变体（`fx_list_new_p` 等）。旧正则对只用 `_p` 变体的源码会误判
   "未用 LIST"并产出让链接失败的 `-DFXTK_WIDGET_LIST=0`——对自家 demo 即复现。
+- **Windows 交叉编译依赖自举**：`build_win_cross.sh` 检测到缺编译器/vendored SDL 时自动调用
+  `setup_win_cross.sh`（不再直接失败）；setup 改为幂等（已就绪秒退），工具链按 apt/pacman/dnf 自动安装，
+  SDL2/SDL2_ttf/SDL2_image mingw 开发包下载带重试与解压校验（URL 已逐一验证）。
+  实测：Linux 上产出 PE32+ exe + 三个 DLL，wine 冒烟进入主循环。
 - **ESP32 `CMakeLists.txt`**: 补齐缺失的 `fxtk_effects.c` / `fxtk_extra.c` / `fxtk_fs.c`（旧清单组件链接必败）。
 - `test/headless_test.c` 内过时的手动构建注释改为与 Makefile 一致。
 

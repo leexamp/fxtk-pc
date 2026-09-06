@@ -7,6 +7,11 @@
 # 虚拟机里 Z: 盘直接双击 exe, 无需拷贝/解压!
 # ============================================================
 TARGET=${1:-app}; MODE=$2
+# ---- 依赖自举: 编译器或 vendored SDL 缺一即自动补 (v2.3: 不再直接失败) ----
+if ! command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1 || [ ! -d third_party/SDL2-win/SDL2-2.30.10 ]; then
+    echo "[setup] 交叉编译依赖不全, 自动执行 setup_win_cross.sh ..."
+    ./setup_win_cross.sh
+fi
 W=third_party/SDL2-win
 S2=$W/SDL2-2.30.10/x86_64-w64-mingw32
 TT=$W/SDL2_ttf-2.22.0/x86_64-w64-mingw32
@@ -37,7 +42,7 @@ x86_64-w64-mingw32-gcc -O2 -I. -I../components/fxtk $INC \
 if [ ! -f dist/win/SDL2.dll ]; then
     for d in "$S2/bin" "$TT/bin" "$IM/bin"; do cp -u "$d"/*.dll dist/win/ 2>/dev/null; done
 fi
-[ "$MODE" = "--zip" ] && { (cd dist && rm -f fxtk-v1.0-windows.zip && zip -qr fxtk-v1.0-windows.zip win); echo "📦 zip 已更新"; }
+[ "$MODE" = "--zip" ] && { (cd dist && rm -f fxtk-v2.3-windows.zip && zip -qr fxtk-v2.3-windows.zip win); echo "📦 zip 已更新"; }
 echo "✅ 完成: 虚拟机双击 dist/win/$OUT 即玩"
 
 # 冒烟: ./build_win_cross.sh app --wine
