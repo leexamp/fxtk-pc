@@ -4,6 +4,9 @@
 #ifndef FXTK_H
 #define FXTK_H
 
+/* 框架版本 (发布标记) */
+#define FXTK_VERSION "2.3"
+
 #include <stdint.h>
 #include <stddef.h>
 

@@ -32,10 +32,11 @@ int fx_fs_pick_dir(char *out, int cap)
     if (!pidl) { CoUninitialize(); return 0; }
     wchar_t path[MAX_PATH];
     if (!SHGetPathFromIDListW(pidl, path)) { CoTaskMemFree(pidl); CoUninitialize(); return 0; }
-    WideCharToMultiByte(CP_UTF8, 0, path, -1, out, cap, NULL, NULL);
+    /* v2.3.1: 检查转换结果 — 截断(返回0)时 out 可能未写, 旧代码误报成功 */
+    int wn = WideCharToMultiByte(CP_UTF8, 0, path, -1, out, cap, NULL, NULL);
     CoTaskMemFree(pidl);
     CoUninitialize();
-    return out[0] ? 1 : 0;
+    return (wn > 0 && out[0]) ? 1 : 0;
 #else
     /* Linux: 用 zenity (多数桌面自带); 没有则回退为空 */
     FILE *p = popen("zenity --file-selection --directory --title='Select a folder' 2>/dev/null", "r");
@@ -54,18 +55,21 @@ int fx_fs_list(const char *dir, fx_fs_entry_t *out, int max)
 {
     if (!dir || !out || max <= 0) return -1;
 #ifdef _WIN32
+    /* v2.3.1: 检查转换并显式限长拼接 — 旧代码转换失败时 pattern 未初始化,
+     * 且 wcscat 无界拼接, 长目录名即栈溢出 */
     wchar_t pattern[1024];
-    MultiByteToWideChar(CP_UTF8, 0, dir, -1, pattern, 1024);
-    wcscat(pattern, L"\\*");
+    int dn = MultiByteToWideChar(CP_UTF8, 0, dir, -1, pattern, 1024);
+    if (dn <= 0 || dn > 1020) return -1;
+    pattern[dn-1] = L'\\'; pattern[dn] = L'*'; pattern[dn+1] = L'\0';
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileW(pattern, &fd);
     if (h == INVALID_HANDLE_VALUE) return -1;
     int n = 0;
     do {
         if (fd.cFileName[0] == L'.') continue;   /* 跳过 . .. 及隐藏 */
-        WideCharToMultiByte(CP_UTF8, 0, fd.cFileName, -1, out[n].name, sizeof(out[n].name), NULL, NULL);
+        if (!WideCharToMultiByte(CP_UTF8, 0, fd.cFileName, -1, out[n].name, sizeof(out[n].name), NULL, NULL)) continue;
         out[n].is_dir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? 1 : 0;
-        out[n].size   = (long)fd.nFileSizeLow;
+        out[n].size   = (long)(((long long)fd.nFileSizeHigh << 32) | fd.nFileSizeLow);   /* v2.3.1: 64 位大小, 旧代码丢高 32 位 */
         SYSTEMTIME st; FileTimeToSystemTime(&fd.ftLastWriteTime, &st);
         snprintf(out[n].date, sizeof(out[n].date), "%04d-%02d-%02d %02d:%02d",
                  (int)st.wYear, (int)st.wMonth, (int)st.wDay, (int)st.wHour, (int)st.wMinute);

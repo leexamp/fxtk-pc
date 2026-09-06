@@ -19,7 +19,9 @@ out=""
 for w in $WIDGETS; do
     type="${w%%:*}"; sym="${w##*:}"
     # 该工厂宏是否出现在任何源文件里? (list/drop 用 fx_list_new / fx_drop_new, 会同时匹配 _p 变体)
-    if ! grep -qE "${sym}\(" $SRCS; then
+    # v2.3.1: ${sym}_p?\( 同时匹配 fx_list_new( 与 fx_list_new_p( —
+    # 否则只用 _p 变体的源码会被误判"未用 LIST", 裁掉后 fx_list_sel/fx_list_clear 链接失败
+    if ! grep -qE "${sym}_p?\(" $SRCS; then
         out="$out -DFXTK_WIDGET_$(echo "$type" | tr 'a-z' 'A-Z')=0"
     fi
 done

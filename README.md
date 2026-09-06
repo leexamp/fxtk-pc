@@ -7,10 +7,6 @@
   <img alt="platform" src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20ESP32-lightgrey">
 </p>
 
-** English version available at **
-
-[docs_en/README_en.md](docs_en/README_en.md)
-
 **一个单帧、脏区重绘、属性宏驱动的 C GUI 框架**——核心纯 C、热路径零分配、480×272 响应式设计、
 一份头文件就能上手。PC 用 SDL，ESP32 用 `fx_driver_t` 抽象，几乎零改动跨平台。
 
@@ -72,7 +68,7 @@ sudo apt install libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev \
 cd demo-main
 ./build.sh                # 编译并运行完整演示 (12 个标签页)
 ./build_ex.sh ex01_hello  # 运行独立示例
-./make_release.sh         # 打包正式版 fxtk-v2.1.tar.gz
+./make_release.sh         # 打包正式版 fxtk-v2.3.tar.gz
 ```
 
 也可以用统一入口 `Makefile`（单一源清单）：
@@ -97,14 +93,14 @@ make clean
 
 波形(动画画布) / 图形(旋转贴图+矢量动效) / 控件(网格键盘) / 图片(缩放/切换) /
 3D(CPU 多线程光追, 超频+GPU 开关) / 输入(文本框全家桶) / 画板(鼠标作画) /
-键鼠(事件监视) / 压测(动态控件生长) / 滚动(长列表+滚动条) / 组件(列表/下拉) / 粒子(万级图元)
+键鼠(事件监视) / 压测(动态控件生长) / 滚动(长列表+滚动条) / 组件(文件浏览器/名字编辑器/可拖动组件/颜色选择器) / 粒子(万级图元)
 
 ## 发布
 
 ```bash
 cd demo-main
 ./make_release.sh      # → fxtk-v2.3.tar.gz           (源码包: 核心库+模拟器+全部示例+文档/许可/CI)
-./make_bin_release.sh  # → dist/fxtk-v2.2-bin-*.tar.gz/.zip (Linux demo + Windows 交叉二进制)
+./make_bin_release.sh  # → dist/fxtk-v2.3-bin-*.tar.gz/.zip (Linux demo + Windows 交叉二进制)
 ```
 
 ## 文档

@@ -19,6 +19,9 @@ static fx_color_t ex_darken(fx_color_t c)
 {   int r=(c>>16)&0xFF, g=(c>>8)&0xFF, b=c&0xFF;
     return (fx_color_t)(((r*3/4)<<16)|((g*3/4)<<8)|(b*3/4)); }
 static ex_slot_t s_ex[8];
+#if FXTK_WIDGET_DROP
+static void ex_close_pop(ex_slot_t *o);   /* v2.3.1: 前向声明 (定义在下方 DROP 段, fx_list_clear 需要提前用) */
+#endif
 static ex_slot_t *ex_get(fx_widget_t *w){ for(int i=0;i<8;i++) if(s_ex[i].w==w) return &s_ex[i]; return 0; }
 static ex_slot_t *ex_new(fx_widget_t *w){ for(int i=0;i<8;i++) if(!s_ex[i].w){ memset(&s_ex[i],0,sizeof(ex_slot_t)); s_ex[i].w=w; s_ex[i].row_h=22; s_ex[i].sel=-1; return &s_ex[i]; } return 0; }
 static int ex_rh(ex_slot_t *s){ int rh=s->row_h*fxtk_ui_scale()/100;
@@ -91,7 +94,10 @@ void fx_list_set_cb(fx_widget_t *w,void(*cb)(fx_widget_t*,void*)){ ex_slot_t*s=e
 if (s)s->cb=cb; }
 int fx_list_sel(fx_widget_t *w){ ex_slot_t*s=ex_get(w); return s?s->sel:-1; }
 void fx_list_clear(fx_widget_t *w){ ex_slot_t*s=ex_get(w);
-if (!s)return; 
+if (!s)return;
+#if FXTK_WIDGET_DROP
+if (s->pop) ex_close_pop(s);   /* v2.3.1: 弹层条目是别名指针(非拷贝), 先关弹层再 free, 防 UAF */
+#endif
 for(int i=0;i<s->n;i++)free(s->items[i]); s->n=0; s->sel=-1; }
 /* ---------- 下拉: 池化弹层 (建一次, 复用, 开合零布局) ---------- */
 #endif
@@ -122,7 +128,13 @@ static void ex_pop_cb(fx_widget_t *w, void *ud)
     ex_slot_t *s=ex_get(w);
     if (!s)return;
     ex_slot_t *o=ex_get(s->owner);
-    if (!o){ ex_close_pop(s); return; }
+    if (!o){   /* v2.3.1: 属主已删除/槽已复用 — 旧代码 ex_close_pop(s) 因弹层槽 pop==0 空转, 会继续画悬垂条目 */
+        s->owner=0; s->n=0; s->sel=-1;
+        w->page=-1;
+        fx_widget_set_rect(w,-2000,-2000,-1900,-1900);
+        fx_repaint();
+        return;
+    }
     int x1,y1,x2,y2; fx_widget_rect(w,&x1,&y1,&x2,&y2);
     int cw=x2-x1+1, ch=y2-y1+1;
     int mx,my,mp; fx_touch_state(&mx,&my,&mp);
@@ -202,5 +214,25 @@ fx_widget_t *fx_drop_new(const char*r1,const char*r2){return fx_drop_new_p(r1,r2
 void fx_drop_add(fx_widget_t *w,const char*t){ fx_list_add(w,t); }
 #endif
 #endif
+
+/* v2.3.1: 控件删除/系统重置时清掉按指针索引的槽位。
+ * 控件池地址复用会让新控件继承旧列表条目(悬垂/泄漏); s_pop 缓存指针在 fx_init 重置池后同样悬垂。 */
+void fxtk_extra_forget(const fx_widget_t *w)
+{
+#if FXTK_WIDGET_LIST || FXTK_WIDGET_DROP
+    if (!w) return;
+    for (int i = 0; i < 8; i++)
+        if (s_ex[i].w == w) memset(&s_ex[i], 0, sizeof(ex_slot_t));
+#endif
+}
+void fxtk_extra_reset(void)
+{
+#if FXTK_WIDGET_LIST || FXTK_WIDGET_DROP
+    memset(s_ex, 0, sizeof(s_ex));
+#if FXTK_WIDGET_DROP
+    s_pop = NULL;
+#endif
+#endif
+}
 void fx_set_fontsize(fx_widget_t *w,int size){ if(!w)return; w->lines=(int16_t)size; fx_repaint(); }
 void fx_set_align(fx_widget_t *w,int a){ if(!w)return; w->rows=(int16_t)a; fx_repaint(); }

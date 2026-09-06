@@ -143,6 +143,11 @@ static void aa_arc(int cx, int cy, int r, int a1, int a2, uint32_t c)
 {
     if (r <= 0) return;
     if (a1 > a2) { int t = a1; a1 = a2; a2 = t; }
+    /* v2.3.1: 负角度区间 (仪表盘常用 -90..90) 归一化后按模长比较;
+     * 旧逻辑 ang<a1||ang>a2 会把跨 0 段 (270..360) 整段丢掉 */
+    int span = a2 - a1;
+    if (span > 360) span = 360;
+    a1 = (a1 % 360 + 360) % 360;
     const float DEG = 57.2957795f;   /* 180/pi */
     for (int y = cy - r - 1; y <= cy + r + 1; y++)
         for (int x = cx - r - 1; x <= cx + r + 1; x++) {
@@ -151,7 +156,11 @@ static void aa_arc(int cx, int cy, int r, int a1, int a2, uint32_t c)
             if (cov <= 0) continue;
             float ang = atan2f((float)(y - cy), (float)(x - cx)) * DEG;   /* -180..180, 0=+x, +y往下 */
             if (ang < 0) ang += 360.0f;
-            if (ang < (float)a1 || ang > (float)a2) continue;
+            int ai = (int)(ang + 0.5f);
+            if (ai >= 360) ai = 0;
+            int rel = ai - a1;
+            if (rel < 0) rel += 360;
+            if (rel > span) continue;
             if (cov > 1) cov = 1;
             aa_blend(x, y, c, (int)(cov * 255));
         }
@@ -213,11 +222,26 @@ static void line_ensure(int need)
 
 static void flush_line(void)
 {
-    if (!s_run_on) return;
+    if (!s_run_on || !s_drv) return;
     s_drv->set_window((uint16_t)s_run_x0, (uint16_t)s_line_y,
                       (uint16_t)s_run_x1, (uint16_t)s_line_y);
     s_drv->push_pixels(&s_line[s_run_x0], (uint32_t)(s_run_x1 - s_run_x0 + 1));
     s_run_on = 0;
+}
+
+/* v2.3.1: GPU 快路径也必须遵守裁剪 —— 原先 draw_line/fill_tri 完全绕过 clip
+ * (注释"去clip保批"), 在 tab/滚动容器/画布上下文里线条会溢出到邻居控件,
+ * 而软件路径是裁剪的。参照 fx_draw_image_ex 的 set_clip_rect 包裹法。 */
+static int gpu_clip_push(void)
+{
+    if (s_offing || !s_drv || !s_drv->set_clip_rect) return 0;
+    if (s_clip_x1 <= 0 && s_clip_y1 <= 0 && s_clip_x2 >= 32767 && s_clip_y2 >= 32767) return 0;
+    s_drv->set_clip_rect(s_clip_x1 + s_ox, s_clip_y1 + s_oy, s_clip_x2 + s_ox, s_clip_y2 + s_oy);
+    return 1;
+}
+static void gpu_clip_pop(int pushed)
+{
+    if (pushed && s_drv && s_drv->set_clip_rect) s_drv->set_clip_rect(0, 0, 32767, 32767);
 }
 
 void fxtk_put_px(int x, int y, uint32_t c)
@@ -230,6 +254,8 @@ void fxtk_put_px(int x, int y, uint32_t c)
         return;
     }
     if (x < 0 || y < 0 || x >= s_drv->width || y >= s_drv->height) return;
+    line_ensure(x);                 /* 【修复】按需扩容行缓冲 */
+    if (x >= s_line_cap) return;    /* v2.3.1: realloc 失败直接丢弃, 不推进 run (防 flush 带出未写入像素) */
     if (y != s_line_y) {
         flush_line();
         s_line_y = y; s_run_x0 = s_run_x1 = x; s_run_on = 1;
@@ -239,8 +265,6 @@ void fxtk_put_px(int x, int y, uint32_t c)
         flush_line();                                   /* 断点: 先刷出上一段 */
         s_run_x0 = s_run_x1 = x; s_run_on = 1;
     }
-    line_ensure(x);                 /* 【修复】按需扩容行缓冲 */
-    if (x >= s_line_cap) return;    /* realloc 失败的保底保护 */
     s_line[x] = c;
 }
 
@@ -259,6 +283,8 @@ void fx_set_clip(int x1, int y1, int x2, int y2)
 {
     if (x1 > x2) { int t = x1; x1 = x2; x2 = t; }
     if (y1 > y2) { int t = y1; y1 = y2; y2 = t; }
+    if (x1 < -32768) x1 = -32768; if (x2 > 32767) x2 = 32767;   /* v2.3.1: 防 int16 截断回绕 */
+    if (y1 < -32768) y1 = -32768; if (y2 > 32767) y2 = 32767;
     s_clip_x1 = (int16_t)x1; s_clip_y1 = (int16_t)y1;
     s_clip_x2 = (int16_t)x2; s_clip_y2 = (int16_t)y2;
 }
@@ -289,6 +315,7 @@ void fx_canvas_end(void)
 
 void fxtk_off_begin(fx_widget_t *cv)
 {
+    flush_line();   /* v2.3.1: 先刷掉上个目标的滞留行, 防止之后被 blit 盖到新画布上 (z-order) */
     if (!cv->offbuf) return;
     int w = cv->x2 - cv->x1 + 1;
     int h = cv->y2 - cv->y1 + 1;
@@ -315,9 +342,30 @@ void fxtk_off_begin(fx_widget_t *cv)
 
 void fxtk_off_end(fx_widget_t *cv)
 {
-    if (!s_offbuf_active) return;
-    s_drv->set_window((uint16_t)cv->x1, (uint16_t)cv->y1, (uint16_t)cv->x2, (uint16_t)cv->y2);
-    s_drv->push_pixels(cv->offbuf, (uint32_t)(s_offw * s_offh));
+    if (!s_offbuf_active || !s_drv) return;
+    flush_line();   /* v2.3.1: blit 前先刷滞留行, 否则之后 flush 会把旧像素盖在画布上 (z-order 违例) */
+    int sx1 = cv->x1, sy1 = cv->y1, sx2 = cv->x2, sy2 = cv->y2;
+    /* v2.3.1: 与屏幕求交。旧代码直接 (uint16_t) 强转负坐标 → 回绕 65536 一侧, 整块内容丢失 */
+    int cut_l = sx1 < 0 ? -sx1 : 0;   /* 源缓冲左侧被裁列数 */
+    int cut_t = sy1 < 0 ? -sy1 : 0;
+    int dw = s_offw - cut_l, dh = s_offh - cut_t;
+    if (sx2 >= s_drv->width)  dw -= (sx2 - s_drv->width + 1);
+    if (sy2 >= s_drv->height) dh -= (sy2 - s_drv->height + 1);
+    int dx = sx1 + cut_l, dy = sy1 + cut_t;
+    if (dw > 0 && dh > 0 && dx < s_drv->width && dy < s_drv->height) {
+        if (cut_l == 0 && cut_t == 0 && sx2 < s_drv->width && sy2 < s_drv->height) {
+            /* 完全在屏内: 原快路径整块提交 */
+            s_drv->set_window((uint16_t)sx1, (uint16_t)sy1, (uint16_t)sx2, (uint16_t)sy2);
+            s_drv->push_pixels(cv->offbuf, (uint32_t)(s_offw * s_offh));
+        } else {
+            /* 部分越屏: 逐行提交可见部分 */
+            for (int r = 0; r < dh; r++) {
+                s_drv->set_window((uint16_t)dx, (uint16_t)(dy + r),
+                                  (uint16_t)(dx + dw - 1), (uint16_t)(dy + r));
+                s_drv->push_pixels(cv->offbuf + (size_t)(cut_t + r) * s_offw + cut_l, (uint32_t)dw);
+            }
+        }
+    }
     s_offbuf_active = NULL;
     s_offing = 0;
     s_ox = 0; s_oy = 0;
@@ -395,9 +443,11 @@ void fx_draw_vline(int x, int y1, int y2)
 void fx_draw_line(int x1, int y1, int x2, int y2)
 {
     if (s_aa && s_offing) { aa_line(x1, y1, x2, y2, s_color); return; }   /* v2.2 抗锯齿 */
-    if (!s_offing && s_drv && s_drv->draw_line) {   /* v2: 折线GPU (去clip保批) */
+    if (!s_offing && s_drv && s_drv->draw_line) {   /* v2: 折线GPU; v2.3.1 补上 clip */
         flush_line();
+        int pushed = gpu_clip_push();
         s_drv->draw_line(x1+s_ox,y1+s_oy,x2+s_ox,y2+s_oy,s_color);
+        gpu_clip_pop(pushed);
         return;
     }
 
@@ -495,10 +545,11 @@ void fx_fill_rect_gradient(int x1, int y1, int x2, int y2, fx_color_t c1, fx_col
     if (y1 > y2) { int t = y1; y1 = y2; y2 = t; }
     int len = vertical ? (y2 - y1 + 1) : (x2 - x1 + 1);
     if (len <= 0) return;
+    int denom = len > 1 ? len - 1 : 1;   /* v2.3.1: 旧 t=i*255/len 末行永远到不了 c2 */
     int cr = (c1 >> 16) & 0xFF, cg = (c1 >> 8) & 0xFF, cb = c1 & 0xFF;
     int er = (c2 >> 16) & 0xFF, eg = (c2 >> 8) & 0xFF, eb = c2 & 0xFF;
     for (int i = 0; i < len; i++) {
-        int t = i * 255 / len;
+        int t = i * 255 / denom;
         int r = (cr * (255 - t) + er * t) / 255;
         int g = (cg * (255 - t) + eg * t) / 255;
         int b = (cb * (255 - t) + eb * t) / 255;
@@ -674,9 +725,11 @@ void fx_fill_polygon(const int16_t *pts, int n)
 
 void fx_fill_triangle(int x1, int y1, int x2, int y2, int x3, int y3)
 {
-    if (!s_offing && s_drv && s_drv->fill_tri) {   /* v2: 三角GPU (去clip保批) */
+    if (!s_offing && s_drv && s_drv->fill_tri) {   /* v2: 三角GPU; v2.3.1 补上 clip */
         flush_line();
+        int pushed = gpu_clip_push();
         s_drv->fill_tri(x1+s_ox,y1+s_oy,x2+s_ox,y2+s_oy,x3+s_ox,y3+s_oy,s_color);
+        gpu_clip_pop(pushed);
         return;
     }
 
@@ -696,6 +749,7 @@ void fx_draw_polygon(const int16_t *pts, int n)
 fx_image_t *fx_image_create(int w, int h)
 {
     if (w <= 0 || h <= 0) return NULL;
+    if (w > 32767 || h > 32767) return NULL;   /* v2.3.1: w/h 存 int16_t, 越界截断成负数会让 blit 越界读 (P0) */
     fx_image_t *img = (fx_image_t *)malloc(sizeof(fx_image_t));
     if (!img) return NULL;
     img->px = (uint32_t *)malloc((size_t)w * h * 4);
@@ -749,6 +803,7 @@ int fxtk_is_offing(void){ return s_offing; }
 void fxtk_text_blit(void *tex,int x,int y,int w,int h)
 {
     if(!s_drv||!s_drv->blit_tex)return;
+    flush_line();   /* v2.3.1: 文字 blit 绕过行缓冲, 先刷滞留行防顺序颠倒 */
     int x1=x>s_clip_x1?x:s_clip_x1;
     int y1=y>s_clip_y1?y:s_clip_y1;
     int x2=(x+w-1)<s_clip_x2?(x+w-1):s_clip_x2;
@@ -760,6 +815,7 @@ void fxtk_text_blit(void *tex,int x,int y,int w,int h)
 int fxtk_image_rot_gpu(const fx_image_t *img,int cx,int cy,int dw,int dh,double ang)
 {
     if(s_offing||!s_drv||!s_drv->blit_img_rot||!img||!img->px)return 0;
+    flush_line();   /* v2.3.1: 旋转 blit 同样绕过行缓冲 */
     if (s_drv->set_clip_rect) s_drv->set_clip_rect(s_clip_x1+s_ox,s_clip_y1+s_oy,s_clip_x2+s_ox,s_clip_y2+s_oy);   /* 画布裁剪 */
     s_drv->blit_img_rot(img->px,img->w,img->h,cx+s_ox,cy+s_oy,dw,dh,ang);
     if (s_drv->set_clip_rect) s_drv->set_clip_rect(0,0,32767,32767);

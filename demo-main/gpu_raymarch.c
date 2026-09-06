@@ -301,17 +301,39 @@ static void *gpu_thread(void *a)
     return NULL;
 }
 
-int gpu_raymarch_ok(void) { return g_ok == 1; }
-const char *gpu_raymarch_renderer(void) { return g_renderer; }
+int gpu_raymarch_ok(void) {
+    pthread_mutex_lock(&g_mtx);   /* v2.3.1: g_ok 由 GPU 线程在锁内写, 旧代码无锁读 = 数据竞争 UB */
+    int ok = (g_ok == 1);
+    pthread_mutex_unlock(&g_mtx);
+    return ok;
+}
+const char *gpu_raymarch_renderer(void) {
+    static char buf[128];
+    pthread_mutex_lock(&g_mtx);
+    snprintf(buf, sizeof(buf), "%s", g_renderer);
+    pthread_mutex_unlock(&g_mtx);
+    return buf;
+}
 
 void gpu_raymarch_start(void)
 {
-    if (!g_started) { g_started = 1; pthread_create(&g_th, NULL, gpu_thread, NULL); }
+    if (!g_started) {
+        g_started = 1;
+        atexit(gpu_raymarch_shutdown);   /* v2.3.1: 退出时唤醒 GPU 线程, 不再仅靠 exit(0) 硬杀 */
+        pthread_create(&g_th, NULL, gpu_thread, NULL);
+    }
+}
+void gpu_raymarch_shutdown(void)
+{
+    pthread_mutex_lock(&g_mtx);
+    g_quit = 1;
+    pthread_cond_broadcast(&g_creq);
+    pthread_mutex_unlock(&g_mtx);
 }
 void gpu_raymarch_render(uint32_t *px, int w, int h, float time)
 {
     gpu_raymarch_start();
-    if (g_ok != 1) return;
+    if (!gpu_raymarch_ok()) return;   /* v2.3.1: 锁内读 g_ok */
     pthread_mutex_lock(&g_mtx);
     g_job.w = w; g_job.h = h; g_job.time = time; g_job.dst = px;
     long seq = ++g_req;

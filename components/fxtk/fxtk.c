@@ -94,6 +94,7 @@ static void ctx_draw_abs(void){ if(!s_ctxpop)return; int x1,y1,x2,y2; fx_widget_
   for(int i=0;i<5;i++){ if(i==s_ctx_hl){fx_set_color(FX_RGB(33,150,243));fx_fill_rect(x1+1,y1+1+i*rh,x2-1,y1+1+i*rh+rh-1);}
     fxtk_draw_text_size(14,x1+6,y1+3+i*rh,s_ctx_items[i], i==s_ctx_hl?FX_WHITE:FX_RGB(40,40,40), i==s_ctx_hl?FX_RGB(33,150,243):FX_WHITE); } }
 typedef struct { fx_widget_t *w; float off, tgt; int last; } fx_scroll_state_t;
+static fx_scroll_state_t s_scroll_pool[8];   /* v2.3.1: unlink_free/fx_init 也要清它, 故随 typedef 前移至此 */
 static fx_scroll_state_t *scroll_state(fx_widget_t *w);
 static void scroll_drag_to(fx_widget_t *w, int y);
 static void te_sel_para(fx_widget_t*);
@@ -138,7 +139,11 @@ static int parse_xy(const char *s, int16_t *a, int16_t *b)
 if (sscanf(s, "%d,%d", &x, &y) != 2) return 0; *a = (int16_t)x; *b = (int16_t)y; return 1; }
 static int parse_pct(const char *s, int16_t *a, int16_t *b)
 { float x, y;
-if (sscanf(s, "%f,%f", &x, &y) != 2) return 0; *a = (int)(x*1000); *b = (int)(y*1000); return 1; }
+if (sscanf(s, "%f,%f", &x, &y) != 2) return 0;
+/* v2.3.1: percent() 收 0~1 小数; 误写 "100,100" 会在 int16 里回绕成负数把控件甩出屏幕, 钳到合法域 */
+if (x < -1.0f) x = -1.0f; if (x > 1.0f) x = 1.0f;
+if (y < -1.0f) y = -1.0f; if (y > 1.0f) y = 1.0f;
+*a = (int)(x*1000); *b = (int)(y*1000); return 1; }
 fx_attr_t pixel(const char *a, const char *b)
 { fx_attr_t at = { FX_A_PIXEL, { {0} } }; parse_xy(a,&at.v.rect.x1,&at.v.rect.y1); parse_xy(b,&at.v.rect.x2,&at.v.rect.y2); return at; }
 fx_attr_t percent(const char *a, const char *b)
@@ -188,8 +193,11 @@ fx_widget_t *fx_widget_new_impl(int type, fx_attr_t attrs[])
         switch (attrs[i].tag) {
         case FX_A_PIXEL: w->pos_mode=FX_POS_PIXEL; w->ox1=attrs[i].v.rect.x1; w->oy1=attrs[i].v.rect.y1; w->ox2=attrs[i].v.rect.x2; w->oy2=attrs[i].v.rect.y2; break;
         case FX_A_PERCENT: w->pos_mode=FX_POS_PERCENT; w->px1=attrs[i].v.pct.p1; w->py1=attrs[i].v.pct.p2; w->px2=attrs[i].v.pct.p3; w->py2=attrs[i].v.pct.p4; break;
-        case FX_A_GRID: w->pos_mode=FX_POS_GRID; w->grid_ref=fx_find(attrs[i].v.grid.name); w->gr1=attrs[i].v.grid.r1; w->gc1=attrs[i].v.grid.c1; w->gr2=attrs[i].v.grid.r2; w->gc2=attrs[i].v.grid.c2; break;
-        case FX_A_TITLE: strncpy(w->title, attrs[i].v.str.s?attrs[i].v.str.s:"", sizeof(w->title)-1); w->title[sizeof(w->title)-1]=0; break;
+        case FX_A_GRID: w->pos_mode=FX_POS_GRID; w->grid_ref=fx_find(attrs[i].v.grid.name); w->gname=attrs[i].v.grid.name; w->gr1=attrs[i].v.grid.r1; w->gc1=attrs[i].v.grid.c1; w->gr2=attrs[i].v.grid.r2; w->gc2=attrs[i].v.grid.c2; break;
+        case FX_A_TITLE: { const char *ts0 = attrs[i].v.str.s?attrs[i].v.str.s:"";
+            size_t tl0 = strlen(ts0); if (tl0 > sizeof(w->title)-1) tl0 = sizeof(w->title)-1;
+            while (tl0 > 0 && ((unsigned char)ts0[tl0] & 0xC0) == 0x80) tl0--;   /* v2.3.1: UTF-8 边界回退 */
+            memcpy(w->title, ts0, tl0); w->title[tl0]=0; break; }
         case FX_A_NAME: strncpy(w->name, attrs[i].v.str.s?attrs[i].v.str.s:"", sizeof(w->name)-1); w->name[sizeof(w->name)-1]=0; break;
         case FX_A_CALL: w->cb=attrs[i].v.cb.cb; break;
         case FX_A_LINE: w->lines=attrs[i].v.iv.v; break;
@@ -238,6 +246,13 @@ static void unlink_free(fx_widget_t *w)
     if (s_pressed==w) s_pressed=NULL;
     if (s_focus==w) s_focus=NULL;
     if (s_scroll_drag==w) s_scroll_drag=NULL;
+    if (s_wheel_tgt==w) s_wheel_tgt=NULL;      /* v2.3.1: 补齐悬垂清理 */
+    if (s_ctx_te==w) s_ctx_te=NULL;
+    if (s_ctxpop==w) { s_ctxpop=NULL; s_ctx_open=0; }
+    /* v2.3.1: 池地址复用会让新控件继承旧状态, 一并回收 */
+    for (int i = 0; i < 8; i++)
+        if (s_scroll_pool[i].w == w) memset(&s_scroll_pool[i], 0, sizeof(s_scroll_pool[i]));
+    fxtk_extra_forget(w);   /* v2.3.1: 清 list/drop 模块按指针索引的槽位 (防池复用悬垂) */
     if (w->text_buf) { free(w->text_buf); w->text_buf=NULL; }
     if (w->offbuf) { free(w->offbuf); w->offbuf=NULL; }
     fxtk_free(w);
@@ -327,6 +342,12 @@ static void layout_children(fx_widget_t *p)
         case FX_POS_FIXED: break;   /* 弹层: 保留直写坐标 */
         case FX_POS_GRID: {
             fx_widget_t *g=c->grid_ref;
+            /* v2.3.1: grid 晚于子件创建时布局期重解析 (旧逻辑只在创建瞬间解析一次,
+             * 先子后父/名字打错 → 子件永远停在 (0,0,0,0) 且无任何提示) */
+            if (!g && c->gname) {
+                g = c->grid_ref = fx_find(c->gname);
+                if (!g) ESP_LOGW(TAG, "grid '%s' not found (widget '%s')", c->gname, c->name);
+            }
             if (g && g->lines>0 && g->rows>0) {
                 int cw=(g->x2-g->x1+1)/g->rows, ch=(g->y2-g->y1+1)/g->lines;
                 c->x1=(int16_t)(g->x1+(c->gc1-1)*cw); c->y1=(int16_t)(g->y1+(c->gr1-1)*ch);
@@ -343,9 +364,14 @@ static fx_widget_t *hit_test(fx_widget_t *w, int x, int y)
 {
     fx_widget_t *r = NULL;
     if (w->type == FX_W_SCROLL) {
-        for (fx_widget_t *c=w->child; c && !r; c=c->sibling) r = hit_test(c, x, y + w->scroll_y);
-        if (!r && x>=w->x1 && x<=w->x2 && y>=w->y1 && y<=w->y2) return w;
-        return r;
+        /* v2.3.1: ①容器自身隐藏 → 整体不可命中; ②触点不在视口内直接拒绝
+         * (旧逻辑对滚动框外的任何点击都按 +scroll_y 映射进内容坐标, 会命中
+         * 滚出去的"看不见的"子件); ③子件检查自身可见性, 与通用分支一致 */
+        if (!(w->flags & FX_F_VISIBLE)) return NULL;
+        if (x < w->x1 || x > w->x2 || y < w->y1 || y > w->y2) return NULL;
+        for (fx_widget_t *c=w->child; c && !r; c=c->sibling)
+            if (c->flags & FX_F_VISIBLE) r = hit_test(c, x, y + w->scroll_y);
+        return r ? r : w;
     }
     if (w->type == FX_W_TAB) {
         /* 命中标签条: 侧边栏方位决定判定区域 */
@@ -599,6 +625,13 @@ void fx_init(const fx_driver_t *drv)
     memset(&s_root,0,sizeof(s_root)); s_root.type=FX_W_PANEL; s_root.flags=FX_F_VISIBLE; s_root.bg=s_bg;
     memset(s_pool,0,sizeof(s_pool));
     s_pressed=NULL; s_touch_prev=0; s_repaint=1; s_autorepaint=0;
+    /* v2.3.1: 重初始化时清干净全部悬垂状态 (旧代码残留 ctx 弹层/滚轮目标/滚动池,
+     * 重新 fx_init 后弹层指向已清零槽位而失效) */
+    s_full=0; s_dirty_n=0; s_last_tx=-1; s_last_ty=-1;
+    s_focus=NULL; s_scroll_drag=NULL; s_wheel_tgt=NULL; s_wheel_acc=0;
+    s_ctxpop=NULL; s_ctx_te=NULL; s_ctx_open=0; s_ctx_hl=-1; s_sel_mode=0;
+    memset(s_scroll_pool,0,sizeof(s_scroll_pool));
+    fxtk_extra_reset();   /* v2.3.1: 清 list/drop 模块静态池与 s_pop 缓存指针 */
     fx_layout(); ESP_LOGI(TAG,"fxtk ready: %dx%d",drv->width,drv->height);
 }
 void fx_poll(void)
@@ -663,11 +696,11 @@ void fx_poll(void)
                 if (ev.mod && ev.utf8[0]) {
                     char c=ev.utf8[0]|32; int a,b;
                     if (c=='a') { s_focus->anchor=0; s_focus->caret=te_len(s_focus); }
-                    else if (c=='l') { if(s_focus->text_buf) s_focus->text_buf[0]=0; s_focus->caret=0; s_focus->anchor=0; }   /* Ctrl+L 清空 */
+                    else if (c=='l' && !ro) { if(s_focus->text_buf) s_focus->text_buf[0]=0; s_focus->caret=0; s_focus->anchor=0; }   /* Ctrl+L 清空 (v2.3.1: 只读时禁止) */
                     else if (c=='c'||c=='x') {
                         if (te_sel(s_focus,&a,&b) && s_drv->clip_set) { static char cb[4096]; int n=b-a;
                         if (n>4095)n=4095; memcpy(cb,s_focus->text_buf+a,(size_t)n); cb[n]=0; s_drv->clip_set(cb); }
-                        if (c=='x' && te_sel(s_focus,&a,&b)) te_del_range2(s_focus,a,b);
+                        if (c=='x' && !ro && te_sel(s_focus,&a,&b)) te_del_range2(s_focus,a,b);   /* v2.3.1: 只读时禁止剪切删除 */
                     }
                     else if (c=='v' && s_drv->clip_get) te_insert(s_focus,s_drv->clip_get());
                 } else if (ev.utf8[0]&&!ro) te_insert(s_focus,ev.utf8);
@@ -856,10 +889,10 @@ static void te_sel_word(fx_widget_t *w){ const char *s=w->text_buf?w->text_buf:"
 static int te_len(fx_widget_t *w){return (int)strlen(w->text_buf?w->text_buf:"");}
 static int te_chars_n(const char *s,int n){int c=0,i=0;while(i<n&&s[i]){if(((unsigned char)s[i]&0xC0)!=0x80)c++;i++;}return c;}
 static int te_chars(fx_widget_t *w){return te_chars_n(w->text_buf?w->text_buf:"",te_len(w));}
-static void te_grow(fx_widget_t *w,int need){ if(need<w->text_cap)return; int nc=need*2; char *nb=(char*)realloc(w->text_buf,(size_t)nc);
-if (nb){w->text_buf=nb;w->text_cap=nc;} }
-static int te_prev_off(const char *s,int off){int i=off-1;while(i>0&&(((unsigned char)s[i]&0xC0)==0x80))i--;return i<0?0:i;}
-static int te_next_off(const char *s,int off){int len=(int)strlen(s),i=off+1;while(i<len&&(((unsigned char)s[i]&0xC0)==0x80))i++;return i>len?len:i;}
+static int te_grow(fx_widget_t *w,int need){ if(need<w->text_cap)return 1; int nc=need*2; char *nb=(char*)realloc(w->text_buf,(size_t)nc);
+if (nb){w->text_buf=nb;w->text_cap=nc;return 1;} return 0; }   /* v2.3.1: 返回成败, OOM 调用方必须放弃插入 */
+static int te_prev_off(const char *s,int off){ if(!s)return 0; int i=off-1;while(i>0&&(((unsigned char)s[i]&0xC0)==0x80))i--;return i<0?0:i;}
+static int te_next_off(const char *s,int off){ if(!s)return 0; int len=(int)strlen(s),i=off+1;while(i<len&&(((unsigned char)s[i]&0xC0)==0x80))i++;return i>len?len:i;}
 static int te_sel(fx_widget_t *w,int *a,int *b){int x=w->caret,y=w->anchor;
 if (x>y){int t=x;x=y;y=t;}*a=x;*b=y;return y>x;}
 static void te_del_range2(fx_widget_t *w,int a,int b){char *s=w->text_buf;
@@ -876,7 +909,8 @@ static void te_insert(fx_widget_t *w,const char *utf8)
     if (te_chars_n(utf8,ul)>free_n) { int i=0,c=0; 
     while(i<ul&&c<free_n){if(((unsigned char)utf8[i]&0xC0)!=0x80)c++;i++;} ul=i;
     if (ul<=0)return; } }
-    int len=(int)strlen(s); te_grow(w,len+ul+1); s=w->text_buf;
+    int len=(int)strlen(s); if (!te_grow(w,len+ul+1)) return;   /* v2.3.1: OOM 放弃本次插入, 防越界写 */
+    s=w->text_buf;
     memmove(s+w->caret+ul,s+w->caret,(size_t)(len-w->caret)+1);
     memcpy(s+w->caret,utf8,(size_t)ul);
     w->caret+=ul; w->anchor=w->caret;
@@ -937,7 +971,7 @@ static void scroll_drag_to(fx_widget_t *w,int y)
     if (sc>total-vis)sc=total-vis;
     if (sc!=w->scroll_y) {
         w->scroll_y=(int16_t)sc;
-        if (w->type==FX_W_CANVAS) { fx_scroll_state_t *st=scroll_state(w); st->tgt=(float)sc; st->off=(float)sc; st->last=sc; }   /* canvas 滑块拖动: 同步滚动状态池 */
+        if (w->type==FX_W_CANVAS) { fx_scroll_state_t *st=scroll_state(w); if (st){ st->tgt=(float)sc; st->off=(float)sc; st->last=sc; } }   /* canvas 滑块拖动: 同步滚动状态池 (v2.3.1: 池满判空) */
         fx_repaint_rect(w->x1,w->y1,w->x2,w->y2);
     }
 }
@@ -989,15 +1023,16 @@ void fx_set_grid_lines(int on) { s_grid_lines = on; fx_repaint(); }
 int fxtk_grid_lines_on(void) { return s_grid_lines; }
 
 /* ---- 核心丝滑滚动: 目标像素 + 25% 逐帧插值 (rc 手感), 应用层一行调用 ---- */
-/* 状态池: 多控件并行滚动互不干扰 */
-static fx_scroll_state_t s_scroll_pool[8];
+/* 状态池: 多控件并行滚动互不干扰 (定义已前移至文件头部静态区, 供 unlink_free/fx_init 清理) */
 static fx_scroll_state_t *scroll_state(fx_widget_t *w)
 {
     for (int i = 0; i < 8; i++)
         if (s_scroll_pool[i].w == w) return &s_scroll_pool[i];
     for (int i = 0; i < 8; i++)
         if (!s_scroll_pool[i].w) { s_scroll_pool[i].w = w; return &s_scroll_pool[i]; }
-    return &s_scroll_pool[0];
+    /* v2.3.1: 池满不再静默别名到 [0] (第 9 个控件会和第 1 个互踩), 由调用方退化处理 */
+    ESP_LOGW(TAG, "scroll pool full (>8 concurrent)");
+    return NULL;
 }
 /* 更新滚动: 返回当前偏移(整数); 滚轮转多少内容滚多少(像素), 停后 25%/帧 收尾
  * 有变化才请求重绘(静止零重绘); 状态池支持多控件并行滚动 */
@@ -1009,6 +1044,13 @@ int fx_scroll_update(fx_widget_t *w, int content_h)
     if (maxs<0)maxs=0;
     w->content_h = (int16_t)(content_h > 32000 ? 32000 : content_h);   /* 供滑块拖动/滚动条使用 */
     fx_scroll_state_t *s = scroll_state(w);
+    if (!s) {   /* v2.3.1: 池满退化: 无缓动直滚, 行为仍正确 */
+        int cur = w->scroll_y - (int16_t)fx_wheel_take(w);
+        if (cur < 0) cur = 0;
+        if (cur > maxs) cur = maxs;
+        w->scroll_y = (int16_t)cur;
+        return cur;
+    }
     s->tgt -= (float)fx_wheel_take(w);          /* 轮上=内容上滚 */
     if (s->tgt < 0) s->tgt = 0;
     if (s->tgt > maxs) s->tgt = (float)maxs;

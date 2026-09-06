@@ -49,6 +49,7 @@ static void flush_pixels(void)
 static void sdl_set_window(uint16_t x0,uint16_t y0,uint16_t x1,uint16_t y1){ cur_x0=x0;cur_y0=y0;cur_w=(uint16_t)(x1-x0+1);cur_idx=0;cur_pending=1; }
 static void sdl_push_pixels(const uint32_t *px,uint32_t n){ stat_px+=n; fb_ensure();
 if (!fb_rgba)return;
+    if (!cur_w) return;   /* v2.3.1: set_window 之前收到像素时 cur_w==0, 旧代码 %0 → SIGFPE */
     uint32_t col=cur_idx%cur_w, row=cur_idx/cur_w;   /* 增量推进, 免每像素除法 */
     for(uint32_t i=0;i<n;i++){
         uint32_t x=cur_x0+col, y=cur_y0+row;

@@ -7,6 +7,11 @@
 # 虚拟机里 Z: 盘直接双击 exe, 无需拷贝/解压!
 # ============================================================
 TARGET=${1:-app}; MODE=$2
+# ---- 依赖自举: 编译器或 vendored SDL 缺一即自动补 (v2.3: 不再直接失败) ----
+if ! command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1 || [ ! -d third_party/SDL2-win/SDL2-2.30.10 ]; then
+    echo "[setup] 交叉编译依赖不全, 自动执行 setup_win_cross.sh ..."
+    ./setup_win_cross.sh
+fi
 W=third_party/SDL2-win
 S2=$W/SDL2-2.30.10/x86_64-w64-mingw32
 TT=$W/SDL2_ttf-2.22.0/x86_64-w64-mingw32
@@ -16,6 +21,8 @@ LIB="-L$S2/lib -L$TT/lib -L$IM/lib"
 mkdir -p dist/win
 if [ "$TARGET" = "app" ]; then
     SRCS="app.c app_desktop.c raymarch.c gpu_stub_win.c"; OUT=fxtk_win.exe
+elif [ "$TARGET" = "app_en" ]; then
+    SRCS="app_en.c app_desktop_en.c raymarch.c gpu_stub_win.c"; OUT=fxtk_win_en.exe
 else
     EXDIR=examples; [ -d "$EXDIR" ] || EXDIR=../examples
     SRCS="$EXDIR/$TARGET.c"; OUT=${TARGET}_win.exe
@@ -35,7 +42,7 @@ x86_64-w64-mingw32-gcc -O2 -I. -I../components/fxtk $INC \
 if [ ! -f dist/win/SDL2.dll ]; then
     for d in "$S2/bin" "$TT/bin" "$IM/bin"; do cp -u "$d"/*.dll dist/win/ 2>/dev/null; done
 fi
-[ "$MODE" = "--zip" ] && { (cd dist && rm -f fxtk-v1.0-windows.zip && zip -qr fxtk-v1.0-windows.zip win); echo "📦 zip 已更新"; }
+[ "$MODE" = "--zip" ] && { (cd dist && rm -f fxtk-v2.3-windows.zip && zip -qr fxtk-v2.3-windows.zip win); echo "📦 zip 已更新"; }
 echo "✅ 完成: 虚拟机双击 dist/win/$OUT 即玩"
 
 # 冒烟: ./build_win_cross.sh app --wine

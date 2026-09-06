@@ -123,8 +123,10 @@ void fxtk_draw_slider(fx_widget_t *w)
     fx_fill_rect(w->x1, track_y, w->x2, track_y + 3);
     int rw = w->x2 - w->x1 + 1;
     int filled = rw * w->value / 100;
-    fx_set_color(w->bg);
-    fx_fill_rect(w->x1, track_y, w->x1 + filled - 1, track_y + 3);
+    if (filled > 1) {   /* v2.3.1: value=0 时 filled-1 是反向矩形, 交换后仍画出 1px 假填充 */
+        fx_set_color(w->bg);
+        fx_fill_rect(w->x1, track_y, w->x1 + filled - 1, track_y + 3);
+    }
     int kx = w->x1 + filled - 3;
     if (kx < w->x1) kx = w->x1;
     if (kx > w->x2 - 6) kx = w->x2 - 6;
@@ -222,6 +224,7 @@ void fxtk_draw_tab(fx_widget_t *w)
         char seg[96];
         int len = comma ? (int)(comma - p) : (int)strlen(p);
         if (len > 95) len = 95;
+        while (len > 0 && ((unsigned char)p[len] & 0xC0) == 0x80) len--;   /* v2.3.1: UTF-8 边界回退, 不切半字符 */
         memcpy(seg, p, (size_t)len);
         seg[len] = 0;
         int sw = fx_text_width(seg);

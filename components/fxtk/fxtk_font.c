@@ -13,7 +13,7 @@ extern SDL_Renderer *fxtk_get_sdl_renderer(void);
 extern void fxtk_flush_driver_batch(void);
 extern int fxtk_is_offing(void);
 extern void fxtk_text_blit(void *tex,int x,int y,int w,int h);
-extern void fxtk_put_px(int x, int y, uint16_t c);
+extern void fxtk_put_px(int x, int y, uint32_t c);   /* v2.3.1: 旧声明是 uint16_t, 与定义(fxtk_draw.c uint32_t)类型冲突 UB, LTO 实证 */
 
 #define TEXT_CACHE_SIZE 64   /* 文本贴图缓存上限(v2.3: 256 减到 64, 省内存; 命中不足会自动重建) */
 typedef struct {
@@ -189,6 +189,7 @@ int fx_text_width_n(const char *s, int n)
 {
     if (!s || n <= 0) return 0;
     char *t = (char *)malloc((size_t)n + 1);
+    if (!t) return 0;   /* v2.3.1: OOM 防护 (ESP32 现实场景) */
     memcpy(t, s, (size_t)n); t[n] = 0;
     int w = fx_text_width(t);
     free(t);
@@ -198,6 +199,7 @@ void fx_draw_text_c_n(int x, int y, const char *s, int n, fx_color_t fg, fx_colo
 {
     if (!s || n <= 0) return;
     char *t = (char *)malloc((size_t)n + 1);
+    if (!t) return;   /* v2.3.1: OOM 防护 */
     memcpy(t, s, (size_t)n); t[n] = 0;
     fx_draw_text_c(x, y, t, fg, bg);
     free(t);

@@ -5,16 +5,18 @@
  * 只验证布局(pixel/percent/grid)、命中测试(press/release)、控件生命周期,
  * 以及 value 读写。文字/纹理在无字体时为 no-op, 不影响布局结果。
  *
- * 构建(见 Makefile 的 test 目标):
- *   gcc -I.. -I../components/fxtk \
+ * 构建: cd demo-main && make test
+ * 手动等价:
+ *   gcc -I. -I../components/fxtk \
  *       ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
- *       ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_extra.c \
- *       ../components/fxtk/fxtk_effects.c \
- *       headless_test.c -o headless_test -lm
- *   ./headless_test
+ *       ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_effects.c \
+ *       ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_fs.c \
+ *       test/headless_test.c -o test/headless_test -lm
+ *   ./test/headless_test
  */
 #include "fxtk.h"
 #include "fxtk_desktop.h"
+#include "fxtk_image.h"
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
@@ -83,6 +85,8 @@ int  fxtk_ui_scale(void) { return 100; }   /* 480 设计宽=100 */
 
 /* ---------- 测试回调 ---------- */
 static void on_hit(fx_widget_t *w, void *ud) { (void)w; (void)ud; s_hit_cb_ok = 1; }
+static int s_sc_hit = 0;
+static void on_sc_hit(fx_widget_t *w, void *ud) { (void)w; (void)ud; s_sc_hit = 1; }
 
 static void check_rect(const char *what, fx_widget_t *w, int x1,int y1,int x2,int y2) {
     int ax1=-1,ay1=-1,ax2=-1,ay2=-1;
@@ -173,6 +177,61 @@ int main(void) {
     else printf("  [ok]   canvas size %dx%d\n", cw, ch);
     fx_canvas_clear(fx_find("cvx"), FX_WINDOW_BG);   /* 仅要求不崩溃 */
     printf("  [ok]   canvas_clear 无异常\n");
+
+    /* 9. v2.3.1 回归: fx_image_create 尺寸上限 (旧: int16 截断 → fx_draw_image_ex 越界读 SEGV) */
+    printf("[9] fx_image_create 边界\n");
+    {
+        fx_image_t *bad = fx_image_create(40000, 10);
+        fx_image_t *ok  = fx_image_create(320, 240);
+        if (bad) { printf("  [FAIL] 40000x10 应被拒绝\n"); fails++; fx_image_free(bad); }
+        else printf("  [ok]   超大图像已拒绝\n");
+        if (!ok) { printf("  [FAIL] 320x240 应创建成功\n"); fails++; }
+        else { fx_image_free(ok); printf("  [ok]   正常尺寸创建成功\n"); }
+    }
+
+    /* 10. v2.3.1 回归: SCROLL 命中分支的子件可见性 (旧: 隐藏子件仍可被点击/触发回调) */
+    printf("[10] SCROLL 命中: 隐藏子件不可点\n");
+    {
+        s_sc_hit = 0;
+        fx_scroll_new(pixel("10,10","200,200"), name("sc1"));
+        fx_button_new(pixel("20,20","80,60"), name("scbtn"), title("S"), call(on_sc_hit));
+        fx_layout();
+        fx_set_visible(fx_find("scbtn"), 0);
+        fx_layout();
+        fx_touch_press(50,40); fx_touch_release(50,40);
+        if (s_sc_hit) { printf("  [FAIL] 隐藏子件仍被命中\n"); fails++; }
+        else printf("  [ok]   隐藏子件不可点\n");
+        fx_set_visible(fx_find("scbtn"), 1);
+        fx_layout();
+        fx_touch_press(50,40); fx_touch_release(50,40);
+        if (!s_sc_hit) { printf("  [FAIL] 可见子件未命中(正例失效)\n"); fails++; }
+        else printf("  [ok]   可见子件正常命中\n");
+    }
+
+    /* 11. v2.3.1 回归: grid 晚于子件创建 (旧: 引用只在创建瞬间解析, 子件永远 (0,0,0,0)) */
+    printf("[11] grid 晚绑定\n");
+    {
+        fx_button_new(grid("g_late",1,1,1,1), name("late"), title("L"));
+        fx_grid_map(pixel("0,100","300,220"), line(2), row(2), name("g_late"));
+        fx_layout();
+        int a1=-1,b1=-1,a2=-1,b2=-1;
+        fx_widget_rect(fx_find("late"),&a1,&b1,&a2,&b2);
+        /* 网格 (0,100)-(300,220) 2x2: 单元(1,1) = (0,100)-(149,159) */
+        if (a1!=0||b1!=100||a2!=149||b2!=159) {
+            printf("  [FAIL] 晚绑定未解析: (%d,%d,%d,%d) want (0,100,149,159)\n",a1,b1,a2,b2); fails++;
+        } else printf("  [ok]   晚绑定解析成功 (0,100,149,159)\n");
+    }
+
+    /* 12. v2.3.1 回归: percent 误写 "100,100" 不再 int16 回绕 (旧: 坐标变负, 控件甩出屏幕) */
+    printf("[12] percent 钳制\n");
+    {
+        fx_label_new(percent("100,100","100,100"), name("pct_bad"), title("P"));
+        fx_layout();
+        int a1=-1,b1=-1,a2=-1,b2=-1;
+        fx_widget_rect(fx_find("pct_bad"),&a1,&b1,&a2,&b2);
+        if (a1 < 0 || b1 < 0) { printf("  [FAIL] 回绕: (%d,%d,%d,%d)\n",a1,b1,a2,b2); fails++; }
+        else printf("  [ok]   无回绕 (%d,%d,%d,%d)\n", a1,b1,a2,b2);
+    }
 
     printf("== done: %s (%d fail) ==\n", fails ? "FAIL" : "PASS", fails);
     return fails ? 1 : 0;

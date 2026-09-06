@@ -8,6 +8,7 @@ gcc -O2 -s -pthread \
     ../components/fxtk/fxtk_widgets.c \
     ../components/fxtk/fxtk_font.c \
     ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_extra.c \
+    ../components/fxtk/fxtk_fs.c \
     fxtk_sdl_driver.c \
     fxtk_image_sdl.c \
     raymarch.c \

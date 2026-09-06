@@ -10,6 +10,7 @@
 #include <math.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <sched.h>   /* v2.3.1: worker 启动自旋用 sched_yield */
 
 typedef struct { float x, y, z; } v3;
 static v3 V(float x, float y, float z) { v3 r = {x,y,z}; return r; }
@@ -282,11 +283,14 @@ static job_t s_jobs[RM_MAX_THREADS];
 static volatile int s_pool_n = 0;
 static volatile int s_quit = 0;
 
+static volatile int s_pool_go = 0;   /* v2.3.1: barrier 初始化完成前 worker 自旋等待, 消除初始化竞争 */
+
 /* 持久工作线程: 每帧被 barrier 唤醒, 避免反复 pthread_create/join */
 static void *rm_worker(void *a)
 {
     int id = (int)(intptr_t)a;
-    for (;;) {
+    while (!s_pool_go) sched_yield();   /* 等 barrier 就绪/创建结果定型 */
+    while (!s_quit) {
         pthread_barrier_wait(&s_bar_start);
         if (s_quit) break;
         shade_rows(&s_jobs[id]);
@@ -310,12 +314,23 @@ static int rm_cpu_count(void)
 /* 首次调用时固定线程数; 后续帧高度变小也保持, 空分区(y0==y1)无操作 */
 static void rm_pool_ensure(int n)
 {
-    if (s_pool_n > 0) return;
-    s_pool_n = n;
-    pthread_barrier_init(&s_bar_start, NULL, n + 1);
-    pthread_barrier_init(&s_bar_done,  NULL, n + 1);
-    for (int i = 0; i < n; i++)
-        pthread_create(&s_pool[i], NULL, rm_worker, (void *)(intptr_t)i);
+    if (s_pool_n != 0) return;
+    /* v2.3.1: 逐一检查创建结果 —— 旧代码 pthread_create/barrier_init 失败会让主线程
+     * 永久阻塞在 barrier(计数 n+1 缺员)。现按实际创建数定 barrier 计数, 全失败则单线程。 */
+    int created = 0;
+    for (int i = 0; i < n; i++) {
+        if (pthread_create(&s_pool[i], NULL, rm_worker, (void *)(intptr_t)i) != 0) break;
+        created++;
+    }
+    if (created > 0 &&
+        pthread_barrier_init(&s_bar_start, NULL, created + 1) == 0 &&
+        pthread_barrier_init(&s_bar_done,  NULL, created + 1) == 0) {
+        s_pool_n = created;
+    } else {
+        s_quit = 1;   /* worker 在触碰 barrier 前检查 s_quit, 已创建的直接退出 */
+        s_pool_n = -1;
+    }
+    s_pool_go = 1;
 }
 
 void raymarch_render(uint32_t *px, int w, int h, float time, int max_steps)
@@ -343,10 +358,15 @@ void raymarch_render(uint32_t *px, int w, int h, float time, int max_steps)
         return;
     }
     rm_pool_ensure(n);
-    for (int t = 0; t < n; t++) {
+    if (s_pool_n <= 0) {   /* v2.3.1: 线程资源不可用 → 优雅单线程, 不再死锁 */
+        base.y0 = 0; base.y1 = h;
+        shade_rows(&base);
+        return;
+    }
+    for (int t = 0; t < s_pool_n; t++) {
         s_jobs[t] = base;
-        s_jobs[t].y0 = h * t / n;
-        s_jobs[t].y1 = h * (t + 1) / n;
+        s_jobs[t].y0 = h * t / s_pool_n;
+        s_jobs[t].y1 = h * (t + 1) / s_pool_n;
     }
     pthread_barrier_wait(&s_bar_start);   /* 唤醒全部 worker */
     pthread_barrier_wait(&s_bar_done);    /* 等全部完成 */
