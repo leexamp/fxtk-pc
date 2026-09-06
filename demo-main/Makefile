@@ -12,7 +12,14 @@
 .PHONY: all test clean fxtk_sim fxtk_sim_en
 .DEFAULT_GOAL := fxtk_sim
 
-CFLAGS ?= -O2 -s
+# v2.3: 体积优化默认档 (-O2 基线 154KB → 101KB, -35%)
+#   -Os 优化体积 / LTO+gc-sections 跨编译单元死代码消除 /
+#   去 unwind 表(C 无异常, 失去回溯栈)与 .comment/.note 构建标识。
+#   需要 -O2 调试时: make CFLAGS="-O2 -g" LDFLAGS=
+CFLAGS ?= -Os -s -flto -ffunction-sections -fdata-sections \
+          -fno-asynchronous-unwind-tables -fno-unwind-tables \
+          -fno-stack-protector -fno-ident
+LDFLAGS ?= -Wl,--gc-sections -Wl,--build-id=none
 INC    := -I. -I../components/fxtk
 
 # demo 链接 (3D 页需要 EGL/GLES/X11)
@@ -37,11 +44,11 @@ all: fxtk_sim
 
 fxtk_sim: $(CORE) $(HDRS) $(DRIVER) raymarch.c gpu_raymarch.c app.c app_desktop.c
 	gcc $(CFLAGS) $(INC) $(CORE) $(DRIVER) raymarch.c gpu_raymarch.c \
-	    app.c app_desktop.c -o $@ $(LIBS)
+	    app.c app_desktop.c -o $@ $(LDFLAGS) $(LIBS)
 
 fxtk_sim_en: $(CORE) $(HDRS) $(DRIVER) raymarch.c gpu_raymarch.c app_en.c app_desktop_en.c
 	gcc $(CFLAGS) $(INC) $(CORE) $(DRIVER) raymarch.c gpu_raymarch.c \
-	    app_en.c app_desktop_en.c -o $@ $(LIBS)
+	    app_en.c app_desktop_en.c -o $@ $(LDFLAGS) $(LIBS)
 
 # ---- 无头单元测试 ----
 # 不链 fxtk_font.c: 测试文件自带文字/纹理桩 (无 SDL/字体依赖)。
@@ -54,10 +61,10 @@ test/headless_test: test/headless_test.c $(TEST_CORE) $(HDRS)
 
 # ---- 示例 (examples/ex*.c 与 examples/canvas/canvas_*.c) ----
 ex%: ../examples/ex%.c $(CORE) $(HDRS) $(DRIVER)
-	gcc $(CFLAGS) $(INC) $(CORE) $(DRIVER) $< -o $@ $(LIBS_EX)
+	gcc $(CFLAGS) $(INC) $(CORE) $(DRIVER) $< -o $@ $(LDFLAGS) $(LIBS_EX)
 
 canvas%: ../examples/canvas/canvas%.c $(CORE) $(HDRS) $(DRIVER)
-	gcc $(CFLAGS) $(INC) $(CORE) $(DRIVER) $< -o $@ $(LIBS_EX)
+	gcc $(CFLAGS) $(INC) $(CORE) $(DRIVER) $< -o $@ $(LDFLAGS) $(LIBS_EX)
 
 clean:
 	rm -f fxtk_sim fxtk_sim_en test/headless_test \

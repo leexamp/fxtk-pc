@@ -15,6 +15,11 @@
 - **自动裁剪 `tools/autotrim.sh`**：扫描源文件用到的控件工厂宏，自动输出"未使用控件"的 `-DFXTK_WIDGET_XXX=0` 开关，无需手动跟踪（示例 ex01 100KB→88KB）。
 - **内存微优化**：文本贴图缓存 `TEXT_CACHE_SIZE` 256→64（省缓存内存，命中不足自动重建）；`FXTK_MAXW` 真正生效（限制窗口上限，防大窗口撑爆窗口尺寸表面/GL 目标）。注：demo 的 ~180MB 驻留基准为 SDL2+GLES2 驱动基线（非泄漏，近 3000 控件压测稳 60 帧）。
 - **抗锯齿性能**：`aa_*` 全部改为扫描线（见 v2.2 修复）。
+- **发布产物体积优化**：默认构建档改为 `-Os + LTO + gc-sections + 去 unwind/ident`——
+  Linux demo 154KB→101KB（**-35%**），Windows exe 801KB→182KB（**-77%**，旧交叉脚本连 `-s` 都没加）。
+  需要 -O2 调试时 `make CFLAGS="-O2 -g" LDFLAGS=` 即可。
+  ⚠ mingw 坑实录: `-fdata-sections` 与 LTO 同用会让 PE 的 `.data` 实体化 ~44.6MB 零填充
+  （ELF 无此问题），Windows 侧必须剔除——`build_win_cross.sh` 注释里已立牌。
 - **跨平台文件 API `fxtk_fs.h/.c`**：`fx_fs_pick_dir(out,cap)` 系统对话框选文件夹（Win32 `SHBrowseForFolderW` / Linux `zenity`）；`fx_fs_list(dir,out,max)` 列目录内容（Win32 `FindFirstFileW` / POSIX `opendir+stat`），返回 name/is_dir/size/date。双平台编译通过；`build_win_cross.sh` 加 `-lshell32 -lole32`。
 - **demo 组件页（文件浏览器 + 颜色选择器 + 可拖动组件）**：
   - 左列名字列表编辑器：`fx_grid_map(dense())` 网格排列输入框+"+"，文本框添加+删除，字号滑杆（12~60）缩放"示例缩放文本"。
