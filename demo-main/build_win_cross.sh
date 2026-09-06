@@ -29,7 +29,14 @@ else
 fi
 [ -f gpu_stub_win.c ] || { echo "⚠️ 缺 gpu_stub_win.c, 先跑 fix_win_final.py"; exit 1; }
 echo "🔨 [$TARGET] -> dist/win/$OUT"
-x86_64-w64-mingw32-gcc -O2 -I. -I../components/fxtk $INC \
+# v2.3: 体积优化档 (与 Makefile 同步: -Os+LTO+gc-sections+去unwind, 801KB → 182KB, -77%)
+# ⚠ mingw 实测: -fdata-sections 与 LTO 同用会让 PE 的 .data 实体化 ~44.6MB 零填充
+#   (ELF 无此问题), 故 Windows 侧必须去掉它 —— 别"顺手加回来"。
+SZ="-Os -s -flto -ffunction-sections \
+    -fno-asynchronous-unwind-tables -fno-unwind-tables \
+    -fno-stack-protector -fno-ident \
+    -Wl,--gc-sections -Wl,--build-id=none"
+x86_64-w64-mingw32-gcc $SZ -I. -I../components/fxtk $INC \
     ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
     ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_font.c \
     ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_extra.c \
