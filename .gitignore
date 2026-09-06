@@ -1,0 +1,14 @@
+# 构建产物
+*.o
+demo-main/fxtk_sim
+demo-main/fxtk_sim_en
+demo-main/test/headless_test
+demo-main/ex*
+demo-main/canvas*
+*.ppm
+
+# 发布产物 (由 git archive 生成)
+dist/
+
+# 系统杂项
+.DS_Store
