@@ -111,27 +111,33 @@ static int widget_in_active_page(fx_widget_t *w)
 }
 
 /* ================= 控件池 ================= */
+static int s_alloc_hint = 0;    /* v2.3: 分配游标 —— 旧实现每次都从 0 扫, 压测页每帧建控件时是 O(n²) */
+static int s_widget_live = 0;   /* v2.3: 存活计数 —— 旧 fxtk_widget_count 每次扫 4096 项 (~40μs/次) */
 fx_widget_t *fxtk_alloc(void)
 {
-    for (int i = 0; i < FX_MAX_WIDGETS; i++)
+    for (int k = 0; k < FX_MAX_WIDGETS; k++) {
+        int i = (s_alloc_hint + k) % FX_MAX_WIDGETS;
         if (s_pool[i].type == FX_W_NONE) {
             memset(&s_pool[i], 0, sizeof(s_pool[i]));
+            s_alloc_hint = i;
+            s_widget_live++;
             return &s_pool[i];
         }
+    }
     ESP_LOGE(TAG, "widget pool full (%d)!", FX_MAX_WIDGETS);
     return NULL;
 }
-void fxtk_free(fx_widget_t *w) { if (!w || w == &s_root) return; w->type = FX_W_NONE; }
+void fxtk_free(fx_widget_t *w)
+{
+    if (!w || w == &s_root || w->type == FX_W_NONE) return;
+    s_widget_live--;
+    w->type = FX_W_NONE;
+}
 void fxtk_link(fx_widget_t *parent, fx_widget_t *child)
 { child->parent = parent; child->sibling = parent->child; parent->child = child; }
 void fx_parent(fx_widget_t *p) { s_parent = p; }
-int fxtk_widget_count(void)
-{
-    int n = 0;
-    for (int i = 0; i < FX_MAX_WIDGETS; i++)
-        if (s_pool[i].type != FX_W_NONE) n++;
-    return n;
-}
+int fxtk_widget_count(void) { return s_widget_live; }
+void fxtk_pool_reset_count(void) { s_widget_live = 0; s_alloc_hint = 0; }   /* fx_init 清池后同步 */
 
 /* ================= 属性构造器 ================= */
 static int parse_xy(const char *s, int16_t *a, int16_t *b)
@@ -632,6 +638,7 @@ void fx_init(const fx_driver_t *drv)
     s_ctxpop=NULL; s_ctx_te=NULL; s_ctx_open=0; s_ctx_hl=-1; s_sel_mode=0;
     memset(s_scroll_pool,0,sizeof(s_scroll_pool));
     fxtk_extra_reset();   /* v2.3.1: 清 list/drop 模块静态池与 s_pop 缓存指针 */
+    fxtk_pool_reset_count();   /* v2.3: 池已 memset, 存活计数与分配游标同步归零 */
     fx_layout(); ESP_LOGI(TAG,"fxtk ready: %dx%d",drv->width,drv->height);
 }
 void fx_poll(void)
