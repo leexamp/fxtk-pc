@@ -7,6 +7,9 @@
 > ASan+UBSan 全量清洗与真实 demo 运行验证。
 
 ### 新增
+- **渲染吞吐基准 `demo-main/test/bench.c`（`make bench`）**：dummy 驱动无 vsync 测纯吞吐，可注入窗口 resize
+  模拟大屏、切换任意页、输出「控件数 / ms-per-frame / poll / present」分段耗时，并支持回读渲染目标存 PPM
+  做 A/B 像素回归。压测页（页 8）在 1920×1080 下自动增长到 2816 控件，是本次性能问题的复现入口。
 - **可选控件编译（减小体积）**：`fxtk_internal.h` 新增 `FXTK_WIDGET_*` 配置宏（默认全 1）。用 `-DFXTK_WIDGET_XXX=0` 编译时裁掉对应控件的**绘制/创建实现**，减小二进制（为 ESP32 等体积受限平台）。可裁剪：BUTTON/LABEL/GRID/CANVAS/SLIDER/PROGRESS/CHECKBOX/PANEL/TAB/IMAGE/TEXTEDIT。
   - 实现：`fxtk_widgets.c` 各控件绘函数、`fxtk_extra.c` 的列表/下拉用 `#if FXTK_WIDGET_XXX` 包裹；`fxtk.c` 的 `draw_widget`/`redraw_widget_now`/`draw_canvas_only` 对应 case 用 `#if` 包裹。
   - 验证：默认全开行为不变；裁掉按钮+复选框 170KB→142KB，且编译/链接通过、无 undefined；甚至 `FXTK_WIDGET_CANVAS=0` 也能编译；关闭 list+drop 后无头测试仍通过。
@@ -53,6 +56,14 @@
 - **渲染**: GPU 快路径（draw_line/fill_tri）补上裁剪 —— 旧"去clip保批"使被 tab/滚动/画布上下文裁剪的线条溢出到邻居控件; 行缓冲滞留像素在离屏 blit/文字 blit/旋转 blit 前先刷出（修 z-order 违例）; 负坐标画布离屏 blit 与屏幕求交（旧 `(uint16_t)` 回绕整块丢失）; `aa_arc` 负角度区间（如 -90..90）归一化+模长比较（旧跨 0 段整段丢失）, 弧端点边界像素不再丢失; `fx_fill_rect_gradient` 末行到达 c2; `fx_set_clip` 饱和防 int16 回绕; 行缓冲扩容失败不再把未写入像素当数据刷出。
 - **核心**: `te_grow` 返回成败, OOM 时 `te_insert` 放弃插入（旧: 粘贴+OOM 堆越界写）; `hit_test` SCROLL 分支检查容器/子件可见性并拒绝视口外触点（旧: 点击滚动框外任意位置按 +scroll_y 命中看不见的子件）; grid 引用布局期重解析（旧: 先子后父/名字打错 → 子件 (0,0,0,0) 静默）; `percent()` 钳到 [-1,1]（旧: "100,100" int16 回绕把控件甩出屏幕）; 只读文本框禁止 Ctrl+L 清空 / Ctrl+X 剪切; `fx_init`/`unlink_free` 清理全部悬垂状态（ctx 弹层/滚轮目标/滚动状态池/extra 槽位）; scroll 状态池满退化为无缓动直滚（旧: 静默别名到 [0] 两控件互踩）; 列表弹层条目为别名指针, `fx_list_clear` 先关弹层再释放（修 UAF）, 属主删除后弹层安全停放; title/tab 标签截断按 UTF-8 边界回退; `te_next_off/te_prev_off` 判空。
 - **控件**: 滑条 value=0 不再画 1px 假填充（filled-1 反向矩形）。
+- **渲染性能（2816 控件压测，gprof 定位）**：1920×1080 下 **13.25ms → 9.31ms/帧（75 → 107 fps）**，
+  poll 6.82→4.52ms、present 6.43→4.79ms：
+  - `fx_fill_rect_round` 原来**逐行**调 `fx_draw_hline`，一个 20×16 圆角按钮要 16 次驱动矩形调用，
+    该函数独占 40% 自身耗时。现把裁剪量恒为 0 的中间带 `[y1+r, y2-r]` 合并成一次填充。
+  - SDL 驱动 `fill_rect` 原来「每矩形一次 SetRenderDrawColor + RenderFillRect」，压测下 **29,113 次/帧**。
+    现连续同色矩形攒批走一次 `SDL_RenderFillRects`，颜色变化 / 顶点批 / 纹理混合 / 呈现前自动冲刷，
+    绘制顺序完全保持。
+  - 正确性：优化前后 7 个画布示例 × 2 分辨率共 14 张渲染**逐字节一致**；demo 静态页回读像素一致。
 - **字体**: `fxtk_put_px` 声明修正为 uint32_t（旧与定义类型冲突, LTO 实证 UB）; `fx_text_width_n`/`fx_draw_text_c_n` OOM 判空。
 - **平台**: SDL 驱动 `push_pixels` 在 set_window 之前收到像素不再除零; raymarch 线程池创建失败按实际数降级（旧: 任一 pthread_create/barrier 失败 → 主线程永久死锁在 barrier）; gpu_raymarch 共享状态改锁内读取, 新增 `gpu_raymarch_shutdown`（atexit 注册）; `fx_init` 重置时同步清理 extra 模块静态池; fxtk_fs Win32 路径转换检查+限长拼接+64 位文件大小。
 
@@ -61,6 +72,9 @@
 - 验证矩阵: 28 目标干净构建 0 error; 7 画布示例 PPM 修复前后对比（6 个完全一致, canvas_07_aa 仅弧终点 3 像素为改善性差异）; ASan+UBSan 下无头测试与全部画布示例 CLEAN; 真实 demo（SDL dummy）运行干净。
 
 ### 说明
+- **已知问题（未修，待后续）**：1920×1080 压测页长跑（约 25% 概率）在**退出时** glibc 报
+  `corrupted size vs. prev_size in fastbins` 中止。ASan（3000 帧）与 TSan 采样运行均未捕获；
+  已确认与本次性能改动无关（优化前构建同样复现）。建议后续用 valgrind memcheck 或 gdb 捕撞定位。
 - 实测澄清: 裁剪 BUTTON+CHECKBOX 的体积收益在 .o 级约 2.3KB, 链接产物大小不变;
   此前所记 "170KB→142KB" 无法复现, 待用统一 Makefile 重新标定。
 

@@ -9,7 +9,7 @@
 #
 # 注意: `test` 目标显式声明了 .PHONY 且有真实规则 ——
 #       避免再次踩 "同名 test/ 目录被 make 当作已是最新" 的假成功坑。
-.PHONY: all test clean fxtk_sim fxtk_sim_en
+.PHONY: all test clean fxtk_sim fxtk_sim_en bench
 .DEFAULT_GOAL := fxtk_sim
 
 # v2.3: 体积优化默认档 (-O2 基线 154KB → 101KB, -35%)
@@ -59,6 +59,16 @@ TEST_CORE := $(filter-out ../components/fxtk/fxtk_font.c,$(CORE))
 test/headless_test: test/headless_test.c $(TEST_CORE) $(HDRS)
 	gcc -O2 $(INC) $(TEST_CORE) test/headless_test.c -o $@ -lm
 
+# ---- 渲染吞吐基准 (dummy 驱动, 无 vsync) ----
+#   SDL_VIDEODRIVER=dummy ./test/bench 1200 8 200
+bench: test/bench
+	SDL_VIDEODRIVER=dummy ./test/bench 1200 8 200
+
+test/bench: test/bench.c $(CORE) $(HDRS) fxtk_sdl_driver.c fxtk_image_sdl.c app.c app_desktop.c raymarch.c gpu_raymarch.c
+	gcc $(CFLAGS) $(INC) $(CORE) fxtk_sdl_driver.c fxtk_image_sdl.c \
+	    app.c app_desktop.c raymarch.c gpu_raymarch.c \
+	    test/bench.c -o $@ $(LDFLAGS) $(LIBS)
+
 # ---- 示例 (examples/ex*.c 与 examples/canvas/canvas_*.c) ----
 ex%: ../examples/ex%.c $(CORE) $(HDRS) $(DRIVER)
 	gcc $(CFLAGS) $(INC) $(CORE) $(DRIVER) $< -o $@ $(LDFLAGS) $(LIBS_EX)
@@ -67,5 +77,5 @@ canvas%: ../examples/canvas/canvas%.c $(CORE) $(HDRS) $(DRIVER)
 	gcc $(CFLAGS) $(INC) $(CORE) $(DRIVER) $< -o $@ $(LDFLAGS) $(LIBS_EX)
 
 clean:
-	rm -f fxtk_sim fxtk_sim_en test/headless_test \
+	rm -f fxtk_sim fxtk_sim_en test/headless_test test/bench \
 	      ex[0-9][0-9]_* canvas_[0-9][0-9]_* dist/win/*.exe fxtk_win.exe

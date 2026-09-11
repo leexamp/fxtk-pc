@@ -3,6 +3,7 @@
 demo-main/fxtk_sim
 demo-main/fxtk_sim_en
 demo-main/test/headless_test
+demo-main/test/bench
 demo-main/ex*
 demo-main/canvas*
 *.ppm

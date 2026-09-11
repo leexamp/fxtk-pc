@@ -23,8 +23,20 @@ static inline uint32_t rgba_from_rgb(uint32_t c){ return 0xFF000000u|c; }   /* 0
 #define VB_MAX 260000
 static SDL_Vertex vb[VB_MAX]; static int vb_n=0;
 static void flush_batch(void); static void vb_push(float,float,SDL_Color); static void vb_line(int,int,int,int,SDL_Color); static void vb_tri(int,int,int,int,int,int,SDL_Color);
-static void flush_batch(void){ if(!vb_n)return; SDL_RenderGeometry(renderer,NULL,vb,vb_n,NULL,0); vb_n=0; }
-static void vb_push(float x,float y,SDL_Color col){ stat_vb++; vb[vb_n].position.x=x;vb[vb_n].position.y=y;vb[vb_n].color=col;vb[vb_n].tex_coord.x=0;vb[vb_n].tex_coord.y=0;vb_n++; }
+/* v2.3 矩形批: 连续同色 fill_rect 攒成一次 SDL_RenderFillRects。
+ * 旧实现每个矩形一次 SetRenderDrawColor+RenderFillRect —— 2816 控件压测下 29K 次/帧,
+ * 圆角按钮的逐行填充把 SDL 调用开销顶成了瓶颈。颜色变化/换渲染操作时自动冲刷。 */
+#define RQ_MAX 2048
+static SDL_Rect rq[RQ_MAX]; static int rq_n = 0; static uint32_t rq_color = 0; static int rq_has = 0;
+static void flush_rects(void)
+{
+    if (!rq_n) return;
+    SDL_SetRenderDrawColor(renderer,(Uint8)((rq_color>>16)&0xFF),(Uint8)((rq_color>>8)&0xFF),(Uint8)(rq_color&0xFF),255);
+    SDL_RenderFillRects(renderer, rq, rq_n);
+    rq_n = 0;
+}
+static void flush_batch(void){ flush_rects(); if(!vb_n)return; SDL_RenderGeometry(renderer,NULL,vb,vb_n,NULL,0); vb_n=0; }
+static void vb_push(float x,float y,SDL_Color col){ stat_vb++; if (rq_n) flush_rects();   /* 保持绘制顺序: 先落矩形再上顶点 */ vb[vb_n].position.x=x;vb[vb_n].position.y=y;vb[vb_n].color=col;vb[vb_n].tex_coord.x=0;vb[vb_n].tex_coord.y=0;vb_n++; }
 static void vb_line(int x1,int y1,int x2,int y2,SDL_Color col){ float dx=(float)(x2-x1),dy=(float)(y2-y1); float len=sqrtf(dx*dx+dy*dy);
 if (len<0.001f)len=1; float nx=-dy/len*0.5f,ny=dx/len*0.5f;
 if (vb_n+6>VB_MAX)flush_batch(); vb_push(x1+nx,y1+ny,col);vb_push(x1-nx,y1-ny,col);vb_push(x2-nx,y2-ny,col);vb_push(x1+nx,y1+ny,col);vb_push(x2-nx,y2-ny,col);vb_push(x2+nx,y2+ny,col); }
@@ -66,9 +78,12 @@ if (!fb_rgba)return;
 static void sdl_fill_rect(uint16_t x0,uint16_t y0,uint16_t x1,uint16_t y1,uint32_t color)
 {
     if(x0>x1||y0>y1)return;
-    SDL_SetRenderDrawColor(renderer,(Uint8)((color>>16)&0xFF),(Uint8)((color>>8)&0xFF),(Uint8)(color&0xFF),255);
-    SDL_Rect rc={x0,y0,(int)(x1-x0+1),(int)(y1-y0+1)};
-    SDL_RenderFillRect(renderer,&rc);
+    if (rq_has && color != rq_color) flush_rects();   /* 颜色变化 → 先冲刷旧批 */
+    if (rq_n >= RQ_MAX) flush_rects();
+    rq_has = 1; rq_color = color;
+    rq[rq_n].x=(int)x0; rq[rq_n].y=(int)y0;
+    rq[rq_n].w=(int)(x1-x0+1); rq[rq_n].h=(int)(y1-y0+1);
+    rq_n++;
 }
 static void sdl_draw_line(int x1,int y1,int x2,int y2,uint32_t color){ flush_pixels(); SDL_Color col={(Uint8)((color>>16)&0xFF),(Uint8)((color>>8)&0xFF),(Uint8)(color&0xFF),255}; vb_line(x1,y1,x2,y2,col); }
 static void sdl_fill_tri(int x1,int y1,int x2,int y2,int x3,int y3,uint32_t color){ flush_pixels(); SDL_Color col={(Uint8)((color>>16)&0xFF),(Uint8)((color>>8)&0xFF),(Uint8)(color&0xFF),255}; vb_tri(x1,y1,x2,y2,x3,y3,col); }

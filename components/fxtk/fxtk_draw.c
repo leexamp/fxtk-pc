@@ -566,7 +566,17 @@ void fx_fill_rect_round(int x1, int y1, int x2, int y2, int r)
     int w = x2 - x1 + 1, h = y2 - y1 + 1;
     if (r * 2 > w) r = w / 2;
     if (r * 2 > h) r = h / 2;
-    for (int y = y1; y <= y2; y++) {
+    /* v2.3 性能: 中间带 [y1+r, y2-r] 各行裁剪量恒为 0 → 合并成一次填充。
+     * 旧实现整块逐行 fx_draw_hline, 一个 20x16 圆角按钮要 16 次驱动矩形调用
+     * (2816 控件压测实测该函数占 40% 自身耗时)。像素结果与逐行版本完全一致。 */
+    int my1 = y1 + r, my2 = y2 - r;
+    if (my1 <= my2) fx_fill_rect(x1, my1, x2, my2);
+    for (int y = y1; y < my1; y++) {
+        int lc, rc;
+        round_cut(y, y1, y2, r, &lc, &rc);
+        fx_draw_hline(x1 + lc, x2 - rc, y);
+    }
+    for (int y = my2 + 1; y <= y2; y++) {
         int lc, rc;
         round_cut(y, y1, y2, r, &lc, &rc);
         fx_draw_hline(x1 + lc, x2 - rc, y);
