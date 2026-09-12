@@ -19,7 +19,14 @@
 CFLAGS ?= -Os -s -flto -ffunction-sections -fdata-sections \
           -fno-asynchronous-unwind-tables -fno-unwind-tables \
           -fno-stack-protector -fno-ident
+# v2.4 体积: --gc-sections 已开; 再用 gold 的 --icf=all(相同代码折叠) + --as-needed 压掉冗余
+# (体积目标 Linux ≤150KB; 普通 bfd 链接器不支持 --icf, 探测不到 gold 就退回原参数)
+LD_GOLD := $(shell command -v ld.gold >/dev/null 2>&1 && echo yes)
+ifeq ($(LD_GOLD),yes)
+LDFLAGS ?= -Wl,--gc-sections -Wl,--build-id=none -Wl,--icf=all -Wl,--as-needed -fuse-ld=gold
+else
 LDFLAGS ?= -Wl,--gc-sections -Wl,--build-id=none
+endif
 INC    := -I. -I../components/fxtk
 
 # demo 链接 (3D 页需要 EGL/GLES/X11)

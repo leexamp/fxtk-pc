@@ -176,7 +176,7 @@ void fx_image_quad_set_corners(fx_widget_t *w, const float *xy8);   /* 编辑器
 | P3 GPU 抗锯齿 | ✅(分层) | 档 1 = 控件 SDF(命令数 1184→7)；档 2 = 图元羽化线段(过渡像素 0→5916)；掉帧自动降档 |
 | P4 GPU 四边形形变 + 伪 3D demo | ⏳ 下一轮 | 设计: 驱动加 `draw_image_quad` —— 顶点传 `(u/w, v/w, 1/w)`、片元重建 `uv = (u/w)/(1/w)`, 即单次 draw 两三角的**透视正确**插值(正解"两三角有对角缝"); HUD 显示四边形数/draw call/GPU 路径 |
 | P5 控件审美 + 设计令牌 | ⏳ | 依赖 P3/P4 稳定 |
-| P6 双语 + CI 金图 + ESP32 冒烟 + 发布 | ⏳ | 体积: SDL 版 151KB(sokol 版 361KB, 含 vendored sokol), 需再瘦 ~1KB 或按口径调整 |
+| P6 双语 + CI 金图 + ESP32 冒烟 + 发布 | ⏳ | 体积: **SDL 版 144KB / 英文版 143KB ✅ 达标 ≤150KB**(gold `--icf=all`+`--as-needed`); sokol 版 361KB(含 vendored sokol, 独立口径) |
 
 ### P3 与路线图的差异（已定案）
 - **MSAA 未按 §3.2.4 原样实现**: sokol 的 swapchain 采样数只能在窗口创建时确定, 运行时切档做不到;
