@@ -139,7 +139,11 @@ static void on_img_load(fx_widget_t *w, void *ud)
 {
     (void)w; (void)ud;
     char path[512];
-    if (!fx_backend_pick_file(path, (int)sizeof(path), "Select image", "png,jpg,jpeg,bmp,gif,tga")) {
+    /* 无头/CI 与脚本化验证: FXTK_IMPORT=<路径> 直接导入, 不走系统对话框
+     * (Linux 上对话框依赖 zenity/kdialog, 服务器与 CI 里通常没有)。 */
+    const char *env_import = getenv("FXTK_IMPORT");
+    if (env_import && env_import[0]) snprintf(path, sizeof(path), "%s", env_import);
+    else if (!fx_backend_pick_file(path, (int)sizeof(path), "Select image", "png,jpg,jpeg,bmp,gif,tga")) {
         img_info_set("cancelled / dialog unavailable");
         return;
     }

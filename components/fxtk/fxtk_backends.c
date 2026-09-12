@@ -792,14 +792,39 @@ static int run_dialog(const char *cmd, char *out, int cap)
     return out[0] ? 1 : 0;
 }
 
+/* 把 "png,jpg,..." 变成 "*.png *.jpg ..."(单一过滤器串 —— 旧实现往 96 字节小缓冲里反复
+ * 拼接多个 --file-filter, 6 个扩展名必然截断, zenity 收到畸形参数直接失败: 这就是"Linux 无法导入图片")。 */
+static void ext_patterns(const char *ext_csv, char *out, int cap)
+{
+    out[0] = 0;
+    if (!ext_csv || !ext_csv[0] || cap < 8) return;
+    char csv[160];
+    snprintf(csv, sizeof(csv), "%s", ext_csv);
+    int n = 0;
+    for (char *tok = strtok(csv, ",; "); tok; tok = strtok(NULL, ",; ")) {
+        int w = snprintf(out + n, (size_t)(cap - n), "%s*.%s", n ? " " : "", tok);
+        if (w <= 0 || w >= cap - n) break;
+        n += w;
+    }
+}
+
+/* 标题里若带单引号会截断 shell 命令, 直接剔除(标点而已, 不值得为它引号转义) */
+static void safe_title(const char *title, char *out, int cap)
+{
+    const char *t = (title && title[0]) ? title : "选择文件";
+    int i = 0;
+    for (; t[i] && i < cap - 1; i++) out[i] = (t[i] == '\'' || t[i] == '"' || t[i] == '\n') ? ' ' : t[i];
+    out[i] = 0;
+}
+
 int fx_backend_pick_dir(char *out, int cap)
 {
     if (!out || cap <= 0) return 0;
     out[0] = 0;
-    if (have_cmd("zenity"))
-        return run_dialog("zenity --file-selection --directory --title='选择文件夹' 2>/dev/null", out, cap);
-    if (have_cmd("kdialog"))
-        return run_dialog("kdialog --getexistingdirectory . 2>/dev/null", out, cap);
+    if (have_cmd("zenity") &&
+        run_dialog("zenity --file-selection --directory --title='选择文件夹' 2>/dev/null", out, cap)) return 1;
+    if (have_cmd("kdialog") &&
+        run_dialog("kdialog --getexistingdirectory . 2>/dev/null", out, cap)) return 1;
     return 0;
 }
 
@@ -807,26 +832,22 @@ int fx_backend_pick_file(char *out, int cap, const char *title, const char *ext_
 {
     if (!out || cap <= 0) return 0;
     out[0] = 0;
-    char filters[256] = "";
-    if (ext_csv && ext_csv[0]) {
-        char csv[128];
-        snprintf(csv, sizeof(csv), "%s", ext_csv);
-        for (char *tok = strtok(csv, ",; "); tok; tok = strtok(NULL, ",; ")) {
-            char one[96];
-            snprintf(one, sizeof(one), "%s--file-filter='%s | *.%s' ", filters, tok, tok);
-            snprintf(filters, sizeof(filters), "%s", one);
-        }
-    }
-    if (have_cmd("zenity")) {
-        char cmd[512];
-        snprintf(cmd, sizeof(cmd), "zenity --file-selection %s --title='%s' 2>/dev/null",
-                 filters, title ? title : "选择文件");
-        return run_dialog(cmd, out, cap);
+    char pats[256], ttl[128], cmd[768];
+    ext_patterns(ext_csv, pats, sizeof(pats));
+    safe_title(title, ttl, sizeof(ttl));
+    if (getenv("FXTK_PICK_DEBUG")) fprintf(stderr, "[pick] zenity=%d kdialog=%d pats='%s'\n",
+                                           have_cmd("zenity"), have_cmd("kdialog"), pats);
+    if (have_cmd("zenity")) {                       /* 失败必须继续尝试 kdialog: 只试一个就放弃是旧实现的第二个坑 */
+        if (pats[0]) snprintf(cmd, sizeof(cmd), "zenity --file-selection --title='%s' --file-filter='图片 | %s' 2>/dev/null", ttl, pats);
+        else         snprintf(cmd, sizeof(cmd), "zenity --file-selection --title='%s' 2>/dev/null", ttl);
+        if (getenv("FXTK_PICK_DEBUG")) fprintf(stderr, "[pick] %s\n", cmd);
+        if (run_dialog(cmd, out, cap)) return 1;
     }
     if (have_cmd("kdialog")) {
-        char cmd[512];
-        snprintf(cmd, sizeof(cmd), "kdialog --getopenfilename . 2>/dev/null");
-        return run_dialog(cmd, out, cap);
+        if (pats[0]) snprintf(cmd, sizeof(cmd), "kdialog --getopenfilename . '%s' --title '%s' 2>/dev/null", pats, ttl);
+        else         snprintf(cmd, sizeof(cmd), "kdialog --getopenfilename . 2>/dev/null");
+        if (getenv("FXTK_PICK_DEBUG")) fprintf(stderr, "[pick] %s\n", cmd);
+        if (run_dialog(cmd, out, cap)) return 1;
     }
     return 0;
 }

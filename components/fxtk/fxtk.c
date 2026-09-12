@@ -30,6 +30,8 @@ static fx_colorx_t s_global_bg = { FX_WINDOW_BG, FX_WINDOW_DARK };
 #define FX_DIRTY_MAX 8
 static int s_dirty[FX_DIRTY_MAX][4];
 static int s_dirty_n = 0;
+/* 绘制重入计数 (声明必须早于使用点: 立即重绘要用它防回调递归爆栈) */
+static int s_draw_depth = 0;
 static int s_tdbg_on = 0;
 static char s_tdbg_str[48] = "touch: -";
 
@@ -526,6 +528,10 @@ static void redraw_widget_now(fx_widget_t *w)
          * 会沿路留下一串滑块残影(用户报的"脏区未清除"就是这个; 文本光标/进度条同理)。
          * 现在与脏区路径 redraw_region 完全同语义: 先用窗口背景铺满该矩形, 再重画所有与之
          * 相交的控件(容器自己会铺自己的底色), 所以放在彩色卡片上的控件也不会被凿出洞。 */
+        if (s_draw_depth > 0) {                 /* 正在绘制 → 只标脏, 防回调递归爆栈 */
+            fx_repaint_rect(w->x1, w->y1, w->x2, w->y2);
+            return;
+        }
         redraw_region(w->x1, w->y1, w->x2, w->y2);
         return;
 #endif
@@ -542,7 +548,17 @@ static void redraw_widget_now(fx_widget_t *w)
 }
 
 /* ================= 绘制 ================= */
+/* 重入计数: 绘制期间若控件回调又要求"立即重绘", 只标脏交给本帧统一重绘 ——
+ * 否则会形成 draw_widget → redraw_region → redraw_widget_now → 控件回调(fx_set_value) → draw_widget
+ * 的无限递归, 直接压爆线程栈(压测页 1280x720 实测必崩, Wine 下报的就是 stack overflow)。 */
+static void draw_widget_inner(fx_widget_t *w, int cx1, int cy1, int cx2, int cy2);
 static void draw_widget(fx_widget_t *w, int cx1, int cy1, int cx2, int cy2)
+{
+    s_draw_depth++;
+    draw_widget_inner(w, cx1, cy1, cx2, cy2);
+    s_draw_depth--;
+}
+static void draw_widget_inner(fx_widget_t *w, int cx1, int cy1, int cx2, int cy2)
 {
     if (!(w->flags & FX_F_VISIBLE)) return;
     int x1=w->x1>cx1?w->x1:cx1, y1=w->y1>cy1?w->y1:cy1, x2=w->x2<cx2?w->x2:cx2, y2=w->y2<cy2?w->y2:cy2;

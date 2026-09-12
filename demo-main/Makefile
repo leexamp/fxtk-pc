@@ -107,3 +107,10 @@ canvas%: ../examples/canvas/canvas%.c $(CORE) $(HDRS) $(DRIVER)
 clean:
 	rm -f fxtk_sim fxtk_sim_en fxtk_sim_sokol test/headless_test test/headless_test_stub test/bench \
 	      ex[0-9][0-9]_* canvas_[0-9][0-9]_* dist/win/*.exe fxtk_win.exe
+
+# ---- v2.4 金图回归 (无头, 可进 CI) ----
+golden:
+	../tools/golden.sh
+golden-update:
+	../tools/golden.sh --update
+.PHONY: golden golden-update

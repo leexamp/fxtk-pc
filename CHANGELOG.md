@@ -92,6 +92,33 @@
 - **SDF 着色器不能复用带纹理绑定的 shader desc**: 复用会让 SDF 管线要求 view/sampler 绑定,
   未绑定直接 `VALIDATE_ABND_EXPECTED_VIEW_BINDING` panic。改用独立 desc。
 
+### 修复（压测页在 1280x720 段错误 / Windows 崩溃 —— 无限递归爆栈）
+- **根因**: 上一轮修"滑块残影"时, 我把立即重绘改成了 `redraw_region()`(会遍历控件树),
+  于是形成递归环: `draw_widget → redraw_region → redraw_widget_now → fx_set_value → 控件回调 → draw_widget …`,
+  直接把线程栈压爆。压测页(2816 控件)在大分辨率下必崩 —— 这正是用户 Wine 下
+  `virtual_setup_exception stack overflow` 以及金图跑批 `demo_p8 渲染失败` 的原因。
+- **修法**: 加绘制重入计数 `s_draw_depth`(=在 draw_widget 外层计数), 绘制期间到达的"立即重绘"
+  只标脏交给本帧统一重绘, 不再嵌套遍历。
+- **实测**: `SDL_VIDEODRIVER=dummy ./test/bench 30 8 1000 1280 720 out.png` 修复前 3/3 段错误(exit 139),
+  修复后 3/3 正常出图 + ASan 零报错; 同时滑块残影修复未回退(滑杆区纯白像素仍为 805)。
+
+### 修复（Linux 无法导入图片）
+- **两个真 bug**: ①文件过滤器是往 **96 字节小缓冲**里反复拼 `--file-filter`, 6 个扩展名必然截断 →
+  zenity 收到畸形参数直接失败; ②zenity 失败后**没有回退 kdialog**(哪怕系统里装着)。
+- **修法**: 过滤器改成**单一** `--file-filter='图片 | *.png *.jpg …'`(不再拼接); zenity 失败继续试 kdialog;
+  标题里的引号/换行先净化; 新增 `FXTK_PICK_DEBUG=1` 打印实际命令行便于排查。
+- **实测(用假 zenity/kdialog 脚本, 不弹窗)**: 过滤器串为 `*.png *.jpg *.jpeg *.bmp *.gif *.tga`;
+  正常路径返回选中文件; 把 zenity 换成"失败"脚本后**正确回退到 kdialog** 并返回其选中文件。
+- **新增无头导入通道** `FXTK_IMPORT=<路径>`: 不走系统对话框直接导入(服务器/CI 可用)。
+  实测: 设该变量启动 → 图片页画布出现导入图内容(11137 色 / 9290 深色像素)。
+
+### 新增（P6 金图回归）
+- `tools/imgdiff.c`: 零依赖像素比对(vendored stb), 输出差异像素数/最大通道差 + 差异可视化 PNG。
+- `tools/golden.sh` + `make golden` / `make golden-update`: 无头渲染 10 个画布示例(480x272, 纯软件驱动)
+  与 10 个演示静态页(1280x720, SDL dummy)共 **20 张**金图, 与 `test/golden/` 逐像素比对;
+  容差可选(`GOLDEN_TOL=2`)。**天然非确定的 p4(3D 页画 FPS 标签)与 p11(读真实文件系统+悬停)已排除**并在脚本里注明原因。
+- 实测: 20/20 一致(容差 0); 自检: 拿两张不同的图比对 → 报 116548/130560 像素不同(89.27%), 证明检测有效。
+
 ### 修复（伪 3D"到后面就没了"）
 - **场景周期性变空**: 伪 3D 原本让整个世界绕相机**连续旋转**, 转到背面时整条走廊都落在相机后面,
   所有四边形被投影丢弃 → 画面整个空掉(HUD 里四边形数从 105 掉到 7)。
