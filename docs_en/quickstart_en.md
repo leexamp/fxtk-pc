@@ -72,3 +72,26 @@ The demo's "stress test" page automatically adds widgets every frame and lets th
 | `FXTK_STAT=1` | Print rendering stats every second |
 | `FXTK_BENCH=1` | Disable vsync to measure the frame rate |
 | `FXTK_MAXW=1920` | Scaling cap |
+
+## v2.4 highlights (what changed in this version)
+
+- **Backend**: sokol (OpenGL) is now the default PC backend; SDL2 is legacy
+  (`make fxtk_sim_sdl`). `./build.sh` builds and runs the sokol demo.
+- **GPU anti-aliasing in two tiers**: `fx_set_widget_aa(0|1|2)` —
+  1 = SDF rounded rects/outlines (default), 2 = + feathered lines.
+  `FXTK_AA=0|1|2` overrides it at startup for A/B comparison; the driver
+  auto-downgrades the tier when frames drop.
+- **True-perspective quad warp on the GPU**: `fx_draw_image_quad()` maps an image onto any
+  convex quadrilateral in a single draw (per-corner weight goes into `gl_Position.w`, so the
+  hardware does perspective-correct interpolation — no diagonal seam). The demo's *Image* page
+  has an editor: import / zoom / four draggable handles / reset.
+- **Pseudo-3D demo** on the *Graphics* page (4th mode): floor & ceiling, corridor walls,
+  a rotating textured cube and billboards — all built from quad warps, with a HUD showing
+  quad count, fps and which path (GPU/CPU) is in use.
+- **Design tokens**: all control colours, radii and paddings live in
+  `components/fxtk/fxtk_tokens.h`; changing that one file restyles every control.
+- **Headless verification**: `make test` (unit tests, real + stub backend), `make golden`
+  (pixel regression), `make esp32-smoke` (ESP32 interface smoke test without the IDF toolchain).
+
+> The other English documents in this folder predate v2.4 and describe the v2.3 API surface;
+> the Chinese `docs/ROADMAP_v2.4.md` is the authoritative per-version status.
