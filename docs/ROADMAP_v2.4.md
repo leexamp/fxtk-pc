@@ -174,7 +174,7 @@ void fx_image_quad_set_corners(fx_widget_t *w, const float *xy8);   /* 编辑器
 | P1 canvas 变换栈 + 四边形形变 + 图片页 UI | ✅ | 真透视 CPU 路径、四角手柄/缩放/复位/导入, 示例 canvas_09/10 |
 | P2 vendored sokol 后端 | ✅ | 事件队列适配轮询契约、顶点批、软件像素层、stb 字形文本、逐帧回读与屏幕一致 |
 | P3 GPU 抗锯齿 | ✅(分层) | 档 1 = 控件 SDF(命令数 1184→7)；档 2 = 图元羽化线段(过渡像素 0→5916)；掉帧自动降档 |
-| P4 GPU 四边形形变 + 伪 3D demo | ⏳ 形变 ✅ / 伪 3D demo 待做 | GPU 真透视已落地并实测与 CPU 路径一致(>8 级差异 0 像素); 余下: 图形页伪 3D 场景 + HUD |
+| P4 GPU 四边形形变 + 伪 3D demo | ✅ | GPU 真透视与 CPU 逐像素一致(>8 级差异 0); 图形页伪 3D(地板/天花板/走廊/立方体/公告板+HUD) 105 四边形 60fps |
 | P5 控件审美 + 设计令牌 | ⏳ | 依赖 P3/P4 稳定 |
 | P6 双语 + CI 金图 + ESP32 冒烟 + 发布 | ⏳ | 体积: **SDL 版 144KB / 英文版 143KB ✅ 达标 ≤150KB**(gold `--icf=all`+`--as-needed`); sokol 版 361KB(含 vendored sokol, 独立口径) |
 
