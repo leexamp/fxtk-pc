@@ -256,6 +256,13 @@ void sdl_handle_events(void)
         else if(e.type==SDL_MOUSEMOTION){mouse_x=e.motion.x;mouse_y=e.motion.y;}
     }
 }
+/* v2.4: 回读当前渲染目标 (截图 / 金图回归)。SDL_RenderReadPixels 读的是当前 target,
+ * 而 target 纹理在 present 之后仍保有整帧内容 (v2.3 bench 的 PPM dump 已验证)。 */
+static int sdl_read_pixels(uint32_t *dst,int w,int h)
+{
+    if(!renderer||!dst||w<=0||h<=0)return 0;
+    return SDL_RenderReadPixels(renderer,NULL,SDL_PIXELFORMAT_ARGB8888,dst,w*4)==0;
+}
 fx_driver_t fx_sdl_driver={
     .width=INITIAL_WIDTH,.height=INITIAL_HEIGHT,
     .init=sdl_init,.set_window=sdl_set_window,.push_pixels=sdl_push_pixels,
@@ -263,10 +270,10 @@ fx_driver_t fx_sdl_driver={
     .clip_set=sdl_clip_set,.clip_get=sdl_clip_get,.wheel_read=sdl_wheel_read,
     .set_title=sdl_set_title,.blit_img=sdl_blit_img,.blit_tex=sdl_blit_tex,.blit_img_rot=sdl_blit_img_rot,.set_clip_rect=sdl_set_clip_rect,
     .fill_tri=sdl_fill_tri,.draw_line=sdl_draw_line,
+    .read_pixels=sdl_read_pixels,   /* v2.4: 截图/金图回归 */
 };
 int sdl_get_width(void){return s_width;}
-int sdl_get_height(void){return s_height;}
-void sdl_first_target(void){ if(renderer&&!target){target_create();SDL_SetRenderTarget(renderer,target);} }
+int sdl_get_height(void){return s_height;}void sdl_first_target(void){ if(renderer&&!target){target_create();SDL_SetRenderTarget(renderer,target);} }
 static int g_textinput_on=0;
 static int sdl_key_read(fx_keyev_t*ev)
 {

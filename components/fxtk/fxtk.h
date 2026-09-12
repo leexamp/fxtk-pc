@@ -245,6 +245,7 @@ typedef struct {
     void (*draw_line)(int x1,int y1,int x2,int y2,uint32_t c); /* GPU折线 */
     void (*blit_tex)(void *tex,int sx,int sy,int sw,int sh,int dx,int dy); /* GPU文字blit(src+dst) */
     void (*blit_img_rot)(const uint32_t *px,int w,int h,int cx,int cy,int dw,int dh,double ang); /* GPU旋转blit */
+    int  (*read_pixels)(uint32_t *dst,int w,int h);   /* v2.4 可选: 回读当前帧 (截图/金图回归); dst 填 0xRRGGBB 或 0xAARRGGBB */
 } fx_driver_t;
 
 void fx_init(const fx_driver_t *drv);
@@ -264,6 +265,9 @@ int fxtk_grid_lines_on(void);  /* 运行时改窗口标题 */
 void fxtk_set_fps_debug(int on); /* 左下角 FPS 调试信息 (默认关) */
 int fxtk_widget_count(void);   /* 当前存活的控件总数 */
 int fxtk_fps(void);            /* 驱动刷新率 (帧/秒) */
+/* v2.4: 回读当前帧并存为 PNG (依赖驱动的 read_pixels 钩子; 无该钩子返回 0)。
+ * 用途: 截图画廊 / CI 金图回归 / 用户级截图按钮。 */
+int fx_screenshot(const char *path);
 void fx_widget_fix(fx_widget_t *w, int x1, int y1);  /* 固定坐标模式: 防布局重算, 记录基准 */
 fx_color_t fx_get_bg(void);
 

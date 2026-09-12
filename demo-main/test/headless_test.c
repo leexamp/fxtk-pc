@@ -334,6 +334,12 @@ int main(void) {
         uint64_t t1 = fx_time_ms();
         if (t1 >= t0) printf("  [ok]   时间单调 (%llu → %llu ms)\n", (unsigned long long)t0, (unsigned long long)t1);
         else { printf("  [FAIL] 时间非单调\n"); fails++; }
+
+        /* --- 截图: 无 read_pixels 钩子的驱动必须优雅失败, 不得崩溃 --- */
+        int sc = fx_screenshot("/tmp/fxtk_should_not_exist.png");
+        if (sc == 0) printf("  [ok]   无 read_pixels 钩子时 fx_screenshot 优雅返回 0\n");
+        else { printf("  [FAIL] 假驱动不该能截图\n"); fails++; }
+        if (fx_file_exists("/tmp/fxtk_should_not_exist.png")) { printf("  [FAIL] 失败路径却写了文件\n"); fails++; }
     }
 
     printf("== done: %s (%d fail) ==\n", fails ? "FAIL" : "PASS", fails);

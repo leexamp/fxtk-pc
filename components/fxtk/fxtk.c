@@ -4,6 +4,7 @@
  */
 #include "fxtk_internal.h"
 #include "fxtk_desktop.h"
+#include "fxtk_backends.h"   /* v2.4: 截图走 backends 的 PNG 编码 */
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -138,6 +139,30 @@ void fxtk_link(fx_widget_t *parent, fx_widget_t *child)
 void fx_parent(fx_widget_t *p) { s_parent = p; }
 int fxtk_widget_count(void) { return s_widget_live; }
 void fxtk_pool_reset_count(void) { s_widget_live = 0; s_alloc_hint = 0; }   /* fx_init 清池后同步 */
+
+/* v2.4: 截图 —— 驱动回读当前帧, 统一走 backends 的 PNG 编码 (stb, 零额外依赖) */
+int fx_screenshot(const char *path)
+{
+    if (!path || !path[0] || !s_drv || !s_drv->read_pixels) return 0;
+    int w = (int)s_drv->width, h = (int)s_drv->height;
+    if (w <= 0 || h <= 0) return 0;
+    uint32_t *px = (uint32_t *)malloc((size_t)w * h * 4);
+    if (!px) return 0;
+    if (!s_drv->read_pixels(px, w, h)) { free(px); return 0; }
+    unsigned char *rgba = (unsigned char *)malloc((size_t)w * h * 4);
+    if (!rgba) { free(px); return 0; }
+    for (int i = 0; i < w * h; i++) {
+        uint32_t c = px[i];
+        rgba[i * 4 + 0] = (unsigned char)((c >> 16) & 0xFF);
+        rgba[i * 4 + 1] = (unsigned char)((c >> 8) & 0xFF);
+        rgba[i * 4 + 2] = (unsigned char)(c & 0xFF);
+        rgba[i * 4 + 3] = 255;
+    }
+    int ok = fx_img_save_png(path, rgba, w, h, 4);
+    free(px);
+    free(rgba);
+    return ok;
+}
 
 /* ================= 属性构造器 ================= */
 static int parse_xy(const char *s, int16_t *a, int16_t *b)

@@ -52,6 +52,13 @@ static void drv_push_pixels(const uint32_t *px, uint32_t n) {
 }
 static void drv_hold_begin(void) {}
 static void drv_hold_end(void) {}
+/* v2.4: 回读捕获的软件帧缓冲 → 让 fx_screenshot() 在无头 harness 里也能出 PNG (CI 金图) */
+static int drv_read_pixels(uint32_t *dst, int w, int h)
+{
+    if (!dst || !s_fb || w != s_fbw || h != s_fbh) return 0;
+    memcpy(dst, s_fb, (size_t)w * h * 4);
+    return 1;
+}
 /* 置空 fill_rect/draw_line/fill_tri/blit -> 强制走软件像素路径, 才能被捕获 */
 static int  drv_touch_read(int *x, int *y, int *pressed) {(void)x;(void)y;(void)pressed; return 0;}
 static int  drv_key_read(fx_keyev_t *ev) {(void)ev; return 0;}
@@ -93,6 +100,7 @@ static fx_driver_t s_drv = {
     /* 其余置空 -> 走软件像素路径 (fill_rect/draw_line/fill_tri/blit_tex/blit_img_rot) */
     .fill_rect = NULL, .draw_line = NULL, .fill_tri = NULL,
     .blit_img_rot = NULL, .blit_tex = NULL,
+    .read_pixels = drv_read_pixels,   /* v2.4 */
 };
 
 extern void app_init(void);
@@ -112,6 +120,16 @@ int main(int argc, char **argv) {
     app_init();
     fx_layout();
     fxtk_draw_all();
+
+    /* v2.4: 输出名以 .png 结尾时走 fx_screenshot (驱动 read_pixels 钩子), 否则写 PPM。
+     * 这样截图画廊与 CI 金图可以统一出 PNG, 不必外部转换。 */
+    const char *dot = strrchr(out, '.');
+    if (dot && strcmp(dot, ".png") == 0) {
+        if (!fx_screenshot(out)) { fprintf(stderr, "fx_screenshot 失败\n"); free(s_fb); return 1; }
+        free(s_fb);
+        fprintf(stderr, "wrote %s (%dx%d, PNG via fx_screenshot)\n", out, W, H);
+        return 0;
+    }
 
     /* 写 PPM (P6) */
     FILE *f = fopen(out, "wb");

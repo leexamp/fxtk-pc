@@ -22,9 +22,15 @@ extern int sdl_get_height(void);
 extern void app_init(void);
 extern SDL_Renderer *fxtk_get_sdl_renderer(void);
 
-/* 回读当前渲染目标 → PPM (A/B 像素回归用; SDL 软件/dummy 驱动均可) */
+/* 回读当前渲染目标 → PPM/PNG (A/B 像素回归与截图画廊用; SDL 软件/dummy 驱动均可) */
 static void dump_ppm(const char *path)
 {
+    size_t plen = strlen(path);
+    if (plen > 4 && strcmp(path + plen - 4, ".png") == 0) {   /* v2.4: 直接走框架截图 (stb PNG) */
+        if (fx_screenshot(path)) printf("# dumped %s (PNG via fx_screenshot)\n", path);
+        else printf("# dump: fx_screenshot 失败\n");
+        return;
+    }
     SDL_Renderer *r = fxtk_get_sdl_renderer();
     int w = 0, h = 0;
     if (!r || SDL_GetRendererOutputSize(r, &w, &h) != 0 || w <= 0) { printf("# dump: no renderer\n"); return; }
