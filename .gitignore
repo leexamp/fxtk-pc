@@ -19,3 +19,11 @@ demo-main/third_party/
 
 # 系统杂项
 .DS_Store
+
+# 构建产物 / FUSE 挂载临时文件
+demo-main/fxtk_sim
+demo-main/fxtk_sim_en
+demo-main/fxtk_sim_sokol
+demo-main/.fuse_hidden*
+*.o
+*.ppm
