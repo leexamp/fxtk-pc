@@ -943,9 +943,25 @@ static void drv_set_clip_rect(int x1, int y1, int x2, int y2)
 }
 static void drv_clip_set(const char *s) { (void)s; }
 static const char *drv_clip_get(void) { return ""; }
+/* v2.4 P4: 旋转贴图 —— 之前是空实现, 于是图形页那两张旋转图片在 sokol 后端整块消失
+ * (与 SDL 版一眼可见的差别)。现在直接用 P4 的 GPU 真透视四边形: 旋转是仿射特例(权重恒 1),
+ * 硬件自己做旋转 + 双线性。语义与 SDL 驱动严格对齐: 以 (cx,cy) 为中心、尺寸 dw x dh、角度取 -ang 度
+ * (SDL_RenderCopyEx 正角为顺时针, 框架传的是逆时针角)。 */
+static void drv_draw_image_quad(const uint32_t *px, int w, int h, const float *xy8, int bilinear);
 static void drv_blit_img_rot(const uint32_t *px, int w, int h, int cx, int cy, int dw, int dh, double ang)
 {
-    (void)px; (void)w; (void)h; (void)cx; (void)cy; (void)dw; (void)dh; (void)ang;   /* P2.4: 走 quadrilateral */
+    if (!px || w <= 0 || h <= 0 || dw <= 0 || dh <= 0) return;
+    px_flush();
+    const double th = -ang * 3.14159265358979323846 / 180.0;
+    const double c = cos(th), s = sin(th);
+    static const float ox[4] = { -1, 1, 1, -1 }, oy[4] = { -1, -1, 1, 1 };
+    float xy8[8];
+    for (int i = 0; i < 4; i++) {
+        double lx = ox[i] * (dw * 0.5), ly = oy[i] * (dh * 0.5);
+        xy8[i * 2]     = (float)(cx + lx * c - ly * s);
+        xy8[i * 2 + 1] = (float)(cy + lx * s + ly * c);
+    }
+    drv_draw_image_quad(px, w, h, xy8, 1);
 }
 
 #if !defined(_WIN32)

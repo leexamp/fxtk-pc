@@ -114,3 +114,8 @@ golden:
 golden-update:
 	../tools/golden.sh --update
 .PHONY: golden golden-update
+
+# ---- 动态库打包 (exe 只留 app 层) ----
+shared:
+	./build_shared.sh
+.PHONY: shared
