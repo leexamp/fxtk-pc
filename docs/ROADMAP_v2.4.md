@@ -181,6 +181,16 @@ void fx_image_quad_set_corners(fx_widget_t *w, const float *xy8);   /* 编辑器
 | P5 控件审美 + 设计令牌 | ✅ 9/9 完成 | `fxtk_tokens.h` 已落地(纯重构, 金图 20/20 不变); 按钮轮完成(圆角 7/描边 25%/按下整块压暗, 零额外绘制调用); 流程见 docs/design/README.md; 全部控件已过一轮(按钮/输入框/滑杆/标签页/列表/进度条/复选框/卡片/标签); 细节见 CHANGELOG |
 | P6 双语 + CI 金图 + ESP32 冒烟 + 发布 | ⏳ 金图 ✅ / Win 构建 ✅ / 单 exe 无 DLL ✅ / **ESP32 冒烟 ✅**(tools/esp32_smoke.sh + CI); 余 Win 体积口径(需拍板) + 双语文档 | 体积: **SDL 版 144KB / 英文版 143KB ✅ 达标 ≤150KB**(gold `--icf=all`+`--as-needed`); sokol 版 361KB(含 vendored sokol, 独立口径) |
 
+### Windows 体积口径 —— 待拍板（实测数据）
+单 exe(必须, 因为另一条验收项要求"单个 exe 无 DLL 依赖")实测 **431KB**, 构成:
+`.text` 298KB + `.rdata` 111KB(含 vendored sokol_app/gfx/glue + stb_truetype + 框架 + demo)。
+三条路与代价:
+1. **改走 exe + DLL**: 但 sokol_app 的实现段(含入口)必须在 exe 里, 核心库拆出去只能省约 100KB
+   → 估计仍在 **310KB 左右, 达不到 250KB**; 且与"单 exe 无 DLL"矛盾。
+2. **砍功能**: 去掉图片解码(stb_image)或 PNG 编码(stb_image_write)约省 60~90KB —— 会损失"导入图片/截图"能力。
+3. **调整口径**: 单 exe sokol 版按 ~450KB 计(仍无任何第三方 DLL 依赖)。
+建议选 3(能力完整、零第三方 DLL), 若要 ≤250KB 则必须接受 2 的功能缩水。
+
 ### P3 与路线图的差异（已定案）
 - **MSAA 未按 §3.2.4 原样实现**: sokol 的 swapchain 采样数只能在窗口创建时确定, 运行时切档做不到;
   而 SDF 已覆盖控件与线段两类主要锯齿源, MSAA 的增量收益集中在"旋转/交叉点"。

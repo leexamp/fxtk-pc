@@ -8,7 +8,7 @@
 </p>
 
 **一个单帧、脏区重绘、属性宏驱动的 C GUI 框架**——核心纯 C、热路径零分配、480×272 响应式设计、
-一份头文件就能上手。PC 用 SDL，ESP32 用 `fx_driver_t` 抽象，几乎零改动跨平台。
+一份头文件就能上手。PC 默认走 **sokol(OpenGL)**，ESP32 用 `fx_driver_t` 抽象，几乎零改动跨平台。
 
 **画布与抗锯齿（v2.2 无头渲染示意图）**：
 | 抗锯齿 `fx_set_aa(1)` | 渐变 `fx_fill_rect_gradient` | 自定义控件（仪表盘） | 棋盘格（缩放安全） |
@@ -37,7 +37,7 @@
   `fx_widget_set_rect` 运行时移动控件
 - **渲染引擎**：`fx_image_*` 24bit RGB 表面、`fx_draw_image_rot` 旋转贴图、图像后处理
   （翻转/灰度/染色/亮度）、多线程软件 Raymarching（SDF 软阴影/AO/雾）+ 可选 GPU(GLSL) 通道
-- **性能**：脏区合并重绘、GPU 顶点批、行级持久线程池光追、GPU 呈现（SDL2 加速渲染器）
+- **性能**：脏区合并重绘、GPU 顶点批、行级持久线程池光追、GPU 呈现(sokol 后端; 1080P 压测页 2819 控件约 108~111fps)
 - **动态压测**：压测页帧率富余时自动生长控件（全屏 1080P 可容数千个），实时显示总控件数
 - **工程化**：统一 Makefile 单一源清单、无头单元测试、GitHub CI（Linux + Windows 交叉）
 - **体积裁剪（v2.3）**：`-DFXTK_WIDGET_XXX=0` 编译时裁掉用不到的控件，减小二进制（ESP32 等受限平台用，如裁按钮+复选框 170KB→142KB）；`tools/autotrim.sh <源码>` 自动扫描用到的控件并生成这些开关（示例 100KB→88KB）
@@ -48,7 +48,7 @@
 
 ```
 components/fxtk/   核心库 (fxtk.c/draw/widgets/font/effects + 头文件)
-demo-main/         PC 模拟器 (SDL2 驱动 / 演示 app / GPU 光追 / examples)
+demo-main/         PC 模拟器 (sokol 驱动 / 演示 app / GPU 光追 / examples; SDL2 驱动为遗留对照)
 demo-main/Makefile 统一构建 (demo / examples / test 单一源清单)
 demo-main/test/     无头单元测试 (无需 SDL/窗口)
 .github/            CI (Linux 构建 + 测试 + Windows 交叉)
@@ -62,7 +62,7 @@ LICENSE            MIT 许可
 ## 快速开始 (Linux)
 
 ```bash
-# 必要依赖: SDL2 全家桶 + 3D/EGL/X11 (demo 的 3D 页需要)
+# 必要依赖(v2.4 起): X11/Xcursor + GL (sokol 后端); SDL2 全家桶仅遗留版 fxtk_sim_sdl 需要
 sudo apt install libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev \
                  libegl1-mesa-dev libgles2-mesa-dev libx11-dev
 cd demo-main
