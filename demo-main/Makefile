@@ -28,7 +28,7 @@ LIBS    := -lSDL2 -lSDL2_ttf -lSDL2_image -lm -pthread -lEGL -lGLESv2 -lX11
 LIBS_EX := -lSDL2 -lSDL2_ttf -lSDL2_image -lm -pthread -lX11
 
 # ---- 核心库单一源清单 (demo / examples / test 共用) ----
-# v2.3.1: 补上 fxtk_fs.c (fx_fs_pick_dir/fx_fs_list, app_desktop.c 与 canvas_08 依赖)。
+# v2.3.1: 补上 fxtk_backends.c (fx_fs_pick_dir/fx_fs_list, app_desktop.c 与 canvas_08 依赖)。
 # 此前 build.sh/build_ex.sh/build_win.sh 三处清单都漏了它, 链接必败。
 CORE := ../components/fxtk/fxtk.c \
         ../components/fxtk/fxtk_draw.c \
@@ -36,7 +36,7 @@ CORE := ../components/fxtk/fxtk.c \
         ../components/fxtk/fxtk_font.c \
         ../components/fxtk/fxtk_effects.c \
         ../components/fxtk/fxtk_extra.c \
-        ../components/fxtk/fxtk_fs.c
+        ../components/fxtk/fxtk_backends.c
 HDRS := ../components/fxtk/fxtk.h ../components/fxtk/fxtk_internal.h
 DRIVER := fxtk_sdl_driver.c fxtk_image_sdl.c main_linux.c
 
@@ -52,12 +52,18 @@ fxtk_sim_en: $(CORE) $(HDRS) $(DRIVER) raymarch.c gpu_raymarch.c app_en.c app_de
 
 # ---- 无头单元测试 ----
 # 不链 fxtk_font.c: 测试文件自带文字/纹理桩 (无 SDL/字体依赖)。
-test: test/headless_test
+# v2.4: 同时跑一份 stub 后端变体 (-DFXTK_BACKEND_STUB: 确定性时钟/定种子随机/内存文件系统),
+#       保证测试结果不依赖宿主机的时钟、随机源与文件系统。
+test: test/headless_test test/headless_test_stub
 	./test/headless_test
+	./test/headless_test_stub
 
 TEST_CORE := $(filter-out ../components/fxtk/fxtk_font.c,$(CORE))
 test/headless_test: test/headless_test.c $(TEST_CORE) $(HDRS)
 	gcc -O2 $(INC) $(TEST_CORE) test/headless_test.c -o $@ -lm
+
+test/headless_test_stub: test/headless_test.c $(TEST_CORE) $(HDRS)
+	gcc -O2 -DFXTK_BACKEND_STUB $(INC) $(TEST_CORE) test/headless_test.c -o $@ -lm
 
 # ---- 渲染吞吐基准 (dummy 驱动, 无 vsync) ----
 #   SDL_VIDEODRIVER=dummy ./test/bench 1200 8 200
@@ -77,5 +83,5 @@ canvas%: ../examples/canvas/canvas%.c $(CORE) $(HDRS) $(DRIVER)
 	gcc $(CFLAGS) $(INC) $(CORE) $(DRIVER) $< -o $@ $(LDFLAGS) $(LIBS_EX)
 
 clean:
-	rm -f fxtk_sim fxtk_sim_en test/headless_test test/bench \
+	rm -f fxtk_sim fxtk_sim_en test/headless_test test/headless_test_stub test/bench \
 	      ex[0-9][0-9]_* canvas_[0-9][0-9]_* dist/win/*.exe fxtk_win.exe

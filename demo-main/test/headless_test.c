@@ -10,15 +10,18 @@
  *   gcc -I. -I../components/fxtk \
  *       ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
  *       ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_effects.c \
- *       ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_fs.c \
+ *       ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c \
  *       test/headless_test.c -o test/headless_test -lm
  *   ./test/headless_test
+ * 另有一份 -DFXTK_BACKEND_STUB 变体 (make test 会一并运行)。
  */
 #include "fxtk.h"
 #include "fxtk_desktop.h"
 #include "fxtk_image.h"
+#include "fxtk_backends.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include <assert.h>
 
 /* ---------- 假驱动 ---------- */
@@ -231,6 +234,106 @@ int main(void) {
         fx_widget_rect(fx_find("pct_bad"),&a1,&b1,&a2,&b2);
         if (a1 < 0 || b1 < 0) { printf("  [FAIL] 回绕: (%d,%d,%d,%d)\n",a1,b1,a2,b2); fails++; }
         else printf("  [ok]   无回绕 (%d,%d,%d,%d)\n", a1,b1,a2,b2);
+    }
+
+    /* 13. v2.4 后端服务层: 随机可复现 / 路径 / 文件 / 图片 / 偏好 / 时间 */
+    printf("[13] fx_backends 服务层 (%s)\n", fx_backend_name());
+    {
+        /* --- 随机: 同种子同序列 (测试与 demo 可复现的基石) --- */
+        uint32_t a[4], b[4];
+        fx_rand_seed(42); for (int i = 0; i < 4; i++) a[i] = fx_rand_u32();
+        fx_rand_seed(42); for (int i = 0; i < 4; i++) b[i] = fx_rand_u32();
+        if (a[0]==b[0] && a[1]==b[1] && a[2]==b[2] && a[3]==b[3]) printf("  [ok]   PCG32 同种子可复现\n");
+        else { printf("  [FAIL] 同种子序列不一致\n"); fails++; }
+        fx_rand_seed(43); uint32_t c0 = fx_rand_u32();
+        if (c0 != a[0]) printf("  [ok]   不同种子序列不同\n");
+        else { printf("  [FAIL] 换种子后首值相同\n"); fails++; }
+        int rng_ok = 1;
+        for (int i = 0; i < 2000; i++) { int v = fx_rand_range(5, 10); if (v < 5 || v > 10) rng_ok = 0; }
+        for (int i = 0; i < 2000; i++) { uint32_t v = fx_rand_below(7); if (v >= 7) rng_ok = 0; }
+        for (int i = 0; i < 1000; i++) { float f = fx_randf(); if (f < 0.0f || f >= 1.0f) rng_ok = 0; }
+        if (rng_ok) printf("  [ok]   rand_range/rand_below/randf 边界正确\n");
+        else { printf("  [FAIL] 随机范围越界\n"); fails++; }
+
+        /* --- 路径工具 --- */
+        char p[256];
+        int pok = 1;
+        fx_path_join(p, sizeof p, "/a/b", "c.txt");   if (strcmp(p, "/a/b/c.txt")) pok = 0;
+        fx_path_join(p, sizeof p, "/a/b/", "c.txt");  if (strcmp(p, "/a/b/c.txt")) pok = 0;
+        fx_path_join(p, sizeof p, "", "c.txt");       if (strcmp(p, "c.txt")) pok = 0;
+        if (strcmp(fx_path_basename("/a/b/c.png"), "c.png")) pok = 0;
+        if (strcmp(fx_path_ext("/a/b/c.png"), ".png")) pok = 0;
+        if (strcmp(fx_path_ext("/a/b/c"), "")) pok = 0;
+        fx_path_dir(p, sizeof p, "/a/b/c.png");       if (strcmp(p, "/a/b")) pok = 0;
+        if (pok) printf("  [ok]   路径工具 join/basename/ext/dir\n");
+        else { printf("  [FAIL] 路径工具\n"); fails++; }
+
+        /* --- 文件读写往返 + 追加 --- */
+        const char *td = getenv("FXTK_TEST_DIR");
+        if (!td || !td[0]) td = "/tmp";
+        char fp[320];
+        fx_path_join(fp, sizeof fp, td, "fxtk_backend_test.bin");
+        const char payload[] = "fxtk-backends-往返";
+        int wok = fx_file_write(fp, payload, (int)sizeof(payload), 0);
+        int sz = 0;
+        char *back = (char *)fx_file_read(fp, &sz);
+        int rok = back && sz == (int)sizeof(payload) && memcmp(back, payload, (size_t)sz) == 0;
+        fx_file_free(back);
+        if (wok && rok && fx_file_exists(fp)) printf("  [ok]   文件写读往返 (%d 字节)\n", sz);
+        else { printf("  [FAIL] 文件写读往返 (w=%d r=%d)\n", wok, rok); fails++; }
+        fx_file_write(fp, "++", 2, 1);
+        long long fsz = 0; fx_file_size(fp, &fsz);
+        if (fsz == (long long)sizeof(payload) + 2) printf("  [ok]   追加写与文件大小\n");
+        else { printf("  [FAIL] 追加/大小 (=%lld)\n", fsz); fails++; }
+
+        /* --- 图片: PNG 存/取往返 (走 vendored stb) --- */
+        unsigned char img[4 * 3 * 4];
+        for (int i = 0; i < 4 * 3; i++) {
+            img[i*4+0] = (unsigned char)(i * 20); img[i*4+1] = 128;
+            img[i*4+2] = (unsigned char)(255 - i * 20); img[i*4+3] = 255;
+        }
+        char ip[320];
+        fx_path_join(ip, sizeof ip, td, "fxtk_backend_test.png");
+        if (fx_img_save_png(ip, img, 4, 3, 4)) {
+            fx_img_t im;
+            int lok = fx_img_load_file(ip, &im);
+            if (lok && im.w == 4 && im.h == 3 && im.channels == 4 &&
+                im.pixels[0] == img[0] && im.pixels[1] == img[1] && im.pixels[2] == img[2]) {
+                printf("  [ok]   PNG 存/取往返 (4x3, %d 通道)\n", im.channels);
+            } else { printf("  [FAIL] PNG 往返 (load=%d)\n", lok); fails++; }
+            if (lok) fx_img_free(&im);
+            if (fx_img_has_file_ext(ip)) printf("  [ok]   图片后缀识别\n");
+            else { printf("  [FAIL] 后缀识别\n"); fails++; }
+            if (!fx_img_has_file_ext("x.txt")) printf("  [ok]   非图片后缀被拒\n");
+            else { printf("  [FAIL] 非图片后缀误判\n"); fails++; }
+        } else { printf("  [FAIL] PNG 写入\n"); fails++; }
+
+        /* --- 偏好往返与持久化 --- */
+        fx_prefs_set("theme", "dark");
+        char v[64];
+        if (fx_prefs_get("theme", v, sizeof v) == 4 && strcmp(v, "dark") == 0) printf("  [ok]   偏好读写\n");
+        else { printf("  [FAIL] 偏好读写\n"); fails++; }
+        if (fx_prefs_save()) {
+            fx_prefs_set("theme", "light");
+            fx_prefs_load();
+            fx_prefs_get("theme", v, sizeof v);
+            if (strcmp(v, "dark") == 0) printf("  [ok]   偏好持久化往返\n");
+            else { printf("  [FAIL] 偏好持久化 (=%s)\n", v); fails++; }
+        } else printf("  [note] 偏好落盘跳过 (目录不可写)\n");
+
+        /* --- 能力协商 / 系统 / 时间 --- */
+        fx_caps_t caps = fx_backend_caps();
+        if (caps.platform && caps.max_texture > 0) {
+            printf("  [ok]   能力: %s gpu=%d aa=%d quad=%d clip=%d maxtex=%d\n",
+                   caps.platform, caps.has_gpu, caps.gpu_aa, caps.quad_warp, caps.clipboard, caps.max_texture);
+        } else { printf("  [FAIL] 能力查询\n"); fails++; }
+        if (fx_cpu_count() >= 1) printf("  [ok]   cpu_count=%d\n", fx_cpu_count());
+        else { printf("  [FAIL] cpu_count\n"); fails++; }
+        uint64_t t0 = fx_time_ms();
+        fx_sleep_ms(2);
+        uint64_t t1 = fx_time_ms();
+        if (t1 >= t0) printf("  [ok]   时间单调 (%llu → %llu ms)\n", (unsigned long long)t0, (unsigned long long)t1);
+        else { printf("  [FAIL] 时间非单调\n"); fails++; }
     }
 
     printf("== done: %s (%d fail) ==\n", fails ? "FAIL" : "PASS", fails);
