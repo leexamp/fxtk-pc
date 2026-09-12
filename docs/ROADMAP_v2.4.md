@@ -189,7 +189,12 @@ void fx_image_quad_set_corners(fx_widget_t *w, const float *xy8);   /* 编辑器
 - ✅ **ASan/UBSan 干净**: `gcc -O1 -g -fsanitize=address,undefined` 构建无头测试并运行 → `PASS (0 fail)`,
   零 `ERROR:` / 零 `runtime error`(第 17 轮实测; 命令见下)
 - ✅ bench 无回归(bench 页 0.36ms/帧); ✅ Linux 体积 144KB(≤150KB); ✅ 12 页 sweep panic=0
-- ⏳ Windows 交叉构建 + 单 exe 无 DLL(≤250KB)、ESP32 编译冒烟、14 张画布金图回归 —— 未做
+- ✅ **Windows 交叉构建通过**(第 18 轮实测): `demo-main/build_win_cross.sh` → `dist/win/fxtk_win.exe`
+- ✗ **"单个 exe 无 DLL 依赖"未达标(SDL 路径)**: `objdump -p` 显示该 exe 仍依赖 `SDL2.dll` + `SDL2_ttf.dll`
+  (其余 comdlg32/KERNEL32/msvcrt/ole32/SHELL32/USER32 都是 Windows 系统 DLL, 可接受)。
+  要达标必须走 **sokol 路径**(vendored、只链系统 opengl32), 即给交叉脚本加 `fxtk_sim_sokol` 的 Win 目标,
+  并顺带量体积(目标 ≤250KB)。这是 P6 交叉编译项的下一步。
+- ⏳ ESP32 编译冒烟、14 张画布金图回归 —— 未做
 - 已知非阻断警告: `fxtk_backends.c:816` format-truncation(255 字节源写进 96 字节缓冲, 有意的截断)
 
 ### 每轮必须留下的验证证据（至少跑一遍）
