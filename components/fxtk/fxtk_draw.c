@@ -276,7 +276,7 @@ void fxtk_draw_set_driver(const fx_driver_t *drv)
 }
 
 void fxtk_draw_flush_all(void) { flush_line(); }
-void fx_frame_begin(void) { if (!s_drv) return; s_framing = 1; }
+void fx_frame_begin(void) { if (!s_drv) return; s_framing = 1; fx_transform_reset(); }
 void fx_frame_end(void) { if (!s_drv) return; flush_line(); s_framing = 0; }
 void fx_set_color(fx_color_t c) { s_color = c; }
 
@@ -410,10 +410,76 @@ void fx_canvas_clear(fx_widget_t *cv, fx_color_t color)
     fx_fill_rect(0, 0, cw - 1, ch - 1);
 }
 
+/* ================= v2.4 canvas 变换栈 (2D 仿射) =================
+ * 用途: 伪 3D 场景里"按平面摆放"——旋转/缩放/平铺/斜切墙地。
+ * 只影响立即模式图元: 像素 / 线段 / 矩形填充(→实心四边形) / 图片(→透视四边形)。
+ * fx_draw_hline/vline 是内部构件(小控件也用), 不参与变换, 以免二重变换。
+ * 栈深 8, 栈满覆盖栈顶(不崩); 每帧开始自动复位。
+ */
+#define FX_XF_MAX 8
+static float s_xf[FX_XF_MAX][6];
+static int   s_xf_n = 0;
+static int   s_xf_active = 0;
+
+void fx_transform_reset(void) { s_xf_n = 0; s_xf_active = 0; }
+int  fx_transform_depth(void) { return s_xf_n; }
+
+void fx_canvas_push_affine(float a, float b, float c, float d, float e, float f)
+{
+    float m[6] = { a, b, c, d, e, f };
+    if (s_xf_n > 0) {                     /* 与当前栈顶复合: 新变换后应用 */
+        const float *p = s_xf[s_xf_n - 1];
+        float r[6];
+        r[0] = a * p[0] + c * p[1];
+        r[1] = b * p[0] + d * p[1];
+        r[2] = a * p[2] + c * p[3];
+        r[3] = b * p[2] + d * p[3];
+        r[4] = a * p[4] + c * p[5] + e;
+        r[5] = b * p[4] + d * p[5] + f;
+        memcpy(m, r, sizeof m);
+    }
+    if (s_xf_n < FX_XF_MAX) memcpy(s_xf[s_xf_n++], m, sizeof m);
+    else memcpy(s_xf[FX_XF_MAX - 1], m, sizeof m);
+    s_xf_active = 1;
+}
+
+void fx_canvas_pop_affine(void)
+{
+    if (s_xf_n > 0) s_xf_n--;
+    s_xf_active = (s_xf_n > 0);
+}
+
+void fx_canvas_transform_point(float x, float y, float *ox, float *oy)
+{
+    if (!s_xf_active) { if (ox) *ox = x; if (oy) *oy = y; return; }
+    const float *m = s_xf[s_xf_n - 1];
+    if (ox) *ox = m[0] * x + m[2] * y + m[4];
+    if (oy) *oy = m[1] * x + m[3] * y + m[5];
+}
+
+/* 矩形 → 变换后的四角 (顺时针, 右/下边界 +1 保持像素覆盖) */
+static void xf_rect_corners(int x1, int y1, int x2, int y2, float *xy8)
+{
+    float ax, ay;
+    fx_canvas_transform_point((float)x1, (float)y1, &ax, &ay);             xy8[0] = ax; xy8[1] = ay;
+    fx_canvas_transform_point((float)(x2 + 1), (float)y1, &ax, &ay);       xy8[2] = ax; xy8[3] = ay;
+    fx_canvas_transform_point((float)(x2 + 1), (float)(y2 + 1), &ax, &ay); xy8[4] = ax; xy8[5] = ay;
+    fx_canvas_transform_point((float)x1, (float)(y2 + 1), &ax, &ay);       xy8[6] = ax; xy8[7] = ay;
+}
+
 /* ================================================================
  * 基础图元
  * ================================================================ */
-void fx_draw_pixel(int x, int y) { fxtk_put_px(x, y, s_color); }
+void fx_draw_pixel(int x, int y)
+{
+    if (s_xf_active) {   /* v2.4: 变换栈 */
+        float ox, oy;
+        fx_canvas_transform_point((float)x, (float)y, &ox, &oy);
+        fxtk_put_px((int)lroundf(ox), (int)lroundf(oy), s_color);
+        return;
+    }
+    fxtk_put_px(x, y, s_color);
+}
 
 void fx_draw_hline(int x1, int x2, int y)
 {
@@ -441,7 +507,21 @@ void fx_draw_vline(int x, int y1, int y2)
     for (int y = y1; y <= y2; y++) fxtk_put_px(x, y, s_color);
 }
 
+static void fx_draw_line_plain(int x1, int y1, int x2, int y2);
+
 void fx_draw_line(int x1, int y1, int x2, int y2)
+{
+    if (s_xf_active) {   /* v2.4: 变换端点后走原路径 */
+        float ax, ay, bx, by;
+        fx_canvas_transform_point((float)x1, (float)y1, &ax, &ay);
+        fx_canvas_transform_point((float)x2, (float)y2, &bx, &by);
+        fx_draw_line_plain((int)lroundf(ax), (int)lroundf(ay), (int)lroundf(bx), (int)lroundf(by));
+        return;
+    }
+    fx_draw_line_plain(x1, y1, x2, y2);
+}
+
+static void fx_draw_line_plain(int x1, int y1, int x2, int y2)
 {
     if (s_aa && s_offing) { aa_line(x1, y1, x2, y2, s_color); return; }   /* v2.2 抗锯齿 */
     if (!s_offing && s_drv && s_drv->draw_line) {   /* v2: 折线GPU; v2.3.1 补上 clip */
@@ -481,6 +561,12 @@ int fxtk_drv_width(void) { return s_drv->width; }
 int fxtk_drv_height(void) { return s_drv->height; }
 void fx_fill_rect(int x1, int y1, int x2, int y2)
 {
+    if (s_xf_active) {   /* v2.4: 变换生效 → 变实心四边形填充 (旋转/斜切矩形) */
+        float xy8[8];
+        xf_rect_corners(x1, y1, x2, y2, xy8);
+        fx_fill_quad(xy8);
+        return;
+    }
     if (x1 > x2) { int t = x1; x1 = x2; x2 = t; }
     if (y1 > y2) { int t = y1; y1 = y2; y2 = t; }
     if (x1 < s_clip_x1) x1 = s_clip_x1;
@@ -787,6 +873,13 @@ static uint32_t img_darken(uint32_t c)
 void fx_draw_image_ex(fx_image_t *img, int x, int y, int dw, int dh, int dark)
 {
     if (!img || !img->px || dw <= 0 || dh <= 0) return;
+    if (s_xf_active) {   /* v2.4: 变换生效 → 走透视四边形 (旋转/缩放/斜切一次到位) */
+        (void)dark;
+        float xy8[8];
+        xf_rect_corners(x, y, x + dw - 1, y + dh - 1, xy8);
+        fx_draw_image_quad(img, xy8);
+        return;
+    }
     if (!s_offing && s_drv && s_drv->blit_img) {   /* v2: 图片上交 GPU 缩放 */
         flush_line();
         if (s_drv->set_clip_rect) s_drv->set_clip_rect(s_clip_x1+s_ox,s_clip_y1+s_oy,s_clip_x2+s_ox,s_clip_y2+s_oy);
@@ -906,6 +999,51 @@ static uint32_t sample_bilinear(const fx_image_t *img, float u, float v)
     int b = (int)(((c00 & 255) * w00 + (c10 & 255) * w10 + (c01 & 255) * w01 + (c11 & 255) * w11) + 0.5f);
     if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
     return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+}
+
+/* 四边形 → 包围盒(clip 后) + 逆单应; 退化返回 0 */
+static int quad_setup(const float *xy8, int *bx1, int *by1, int *bx2, int *by2, float Hi[9])
+{
+    static const float unit8[8] = { 0, 0, 1, 0, 1, 1, 0, 1 };
+    float H[9];
+    if (!fx_quad_homography(unit8, xy8, H)) return 0;
+    if (!fx_mat3_invert(H, Hi)) return 0;
+    float minx = xy8[0], maxx = xy8[0], miny = xy8[1], maxy = xy8[1];
+    for (int i = 1; i < 4; i++) {
+        if (xy8[i * 2] < minx) minx = xy8[i * 2];
+        if (xy8[i * 2] > maxx) maxx = xy8[i * 2];
+        if (xy8[i * 2 + 1] < miny) miny = xy8[i * 2 + 1];
+        if (xy8[i * 2 + 1] > maxy) maxy = xy8[i * 2 + 1];
+    }
+    int x1 = (int)floorf(minx), y1 = (int)floorf(miny);
+    int x2 = (int)ceilf(maxx), y2 = (int)ceilf(maxy);
+    if (x1 < s_clip_x1) x1 = s_clip_x1;
+    if (y1 < s_clip_y1) y1 = s_clip_y1;
+    if (x2 > s_clip_x2) x2 = s_clip_x2;
+    if (y2 > s_clip_y2) y2 = s_clip_y2;
+    if (x1 > x2 || y1 > y2) return 0;
+    *bx1 = x1; *by1 = y1; *bx2 = x2; *by2 = y2;
+    return 1;
+}
+
+/* 实心四边形填充 (自有图元: 墙/地/任意四边形色块) */
+void fx_fill_quad(const float *xy8)
+{
+    if (!xy8) return;
+    int x1, y1, x2, y2; float Hi[9];
+    if (!quad_setup(xy8, &x1, &y1, &x2, &y2, Hi)) return;
+    uint32_t col = s_color;
+    for (int y = y1; y <= y2; y++) {
+        for (int x = x1; x <= x2; x++) {
+            float px = (float)x + 0.5f, py = (float)y + 0.5f;
+            float wq = Hi[6] * px + Hi[7] * py + Hi[8];
+            if (fabsf(wq) < 1e-9f) continue;
+            float u = (Hi[0] * px + Hi[1] * py + Hi[2]) / wq;
+            float v = (Hi[3] * px + Hi[4] * py + Hi[5]) / wq;
+            if (u < 0.0f || u > 1.0f || v < 0.0f || v > 1.0f) continue;
+            fxtk_put_px(x, y, col);
+        }
+    }
 }
 
 /* 退化四边形回退: 用包围盒矩形映射 (并只告警一次, 不刷屏) */

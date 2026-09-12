@@ -18,6 +18,11 @@
   逆变换逐像素双线性采样；"uv∈[0,1]"即凸四边形内判定）。附 `fx_draw_image_quad_persp` 参数化便捷版、
   `fx_quad_homography`/`fx_mat3_invert` 工具函数、退化四边形自动回退与告警。无 GPU(ESP32)与离屏画布走 CPU 路径，
   GPU 路径由驱动 `draw_image_quad` 钩子接管（P4）。新示例 `examples/canvas/canvas_09_quad.c`（矩形/梯形/强透视/旋转/斜切）。
+- **canvas 变换栈 `fx_canvas_push_affine/pop_affine`**（P1）: 2D 仿射栈(深度 8, 每帧自动复位,
+  后 push 的变换在外层)。push 后立即模式图元自动过变换: 像素/线段 → 端点; **矩形填充 → 实心四边形**
+  (`fx_fill_quad`, 可旋转/斜切); **图片 → 透视四边形**(旋转/缩放/斜切一次到位)。附
+  `fx_canvas_transform_point`/`fx_transform_depth`/`fx_transform_reset`。
+  新示例 `examples/canvas/canvas_10_transform.c`(斜切墙面/旋转贴图/变换栈平铺地板/旋转网格线)。
 - **vendored 依赖**（P0）: `third_party/sokol`（app/gfx/glue/time/log/fetch，pin 到 commit）+
   `components/fxtk/vendor/stb`（truetype/image/image_write/rect_pack）提交入库，CI 无需联网拉依赖。
   `tools/ppm2png.c` 提供 PPM→PNG 转换。

@@ -381,5 +381,39 @@ int main(void) {
         else { printf("  [FAIL] 退化四边形竟求解成功\n"); fails++; }
     }
 
+    /* 15. v2.4 canvas 变换栈 (2D 仿射) */
+    printf("[15] canvas 变换栈\n");
+    {
+        float x = 0, y = 0;
+        fx_canvas_transform_point(10, 20, &x, &y);
+        if (x == 10 && y == 20) printf("  [ok]   栈空 = 恒等\n");
+        else { printf("  [FAIL] 空栈应恒等 (%g,%g)\n", x, y); fails++; }
+        fx_canvas_push_affine(1, 0, 0, 1, 5, 7);          /* 平移 (5,7) */
+        fx_canvas_transform_point(10, 20, &x, &y);
+        if (x == 15 && y == 27) printf("  [ok]   平移 (10,20)→(15,27)\n");
+        else { printf("  [FAIL] 平移 (%g,%g)\n", x, y); fails++; }
+        fx_canvas_push_affine(2, 0, 0, 2, 0, 0);          /* 后 push 在外层: 先平移后缩放 */
+        fx_canvas_transform_point(10, 20, &x, &y);
+        if (x == 30 && y == 54) printf("  [ok]   复合语义 (后 push 在外层): (10,20)→(30,54)\n");
+        else { printf("  [FAIL] 复合 (%g,%g)\n", x, y); fails++; }
+        if (fx_transform_depth() == 2) printf("  [ok]   栈深 = 2\n");
+        else { printf("  [FAIL] 栈深 %d\n", fx_transform_depth()); fails++; }
+        fx_canvas_pop_affine(); fx_canvas_pop_affine();
+        if (fx_transform_depth() == 0 && (fx_canvas_transform_point(3, 4, &x, &y), x == 3 && y == 4))
+            printf("  [ok]   pop 到底后恢复恒等\n");
+        else { printf("  [FAIL] pop\n"); fails++; }
+        fx_canvas_push_affine(0, 1, -1, 0, 0, 0);         /* 旋转 90°: (1,0)→(0,1) */
+        fx_canvas_transform_point(1, 0, &x, &y);
+        if (fabsf(x) < 0.001f && fabsf(y - 1) < 0.001f) printf("  [ok]   旋转 90°\n");
+        else { printf("  [FAIL] 旋转 (%g,%g)\n", x, y); fails++; }
+        fx_canvas_pop_affine();
+        for (int i = 0; i < 12; i++) fx_canvas_push_affine(1, 0, 0, 1, 1, 1);   /* 溢出保护 */
+        if (fx_transform_depth() == 8) printf("  [ok]   栈满封顶 8 (覆盖栈顶不崩)\n");
+        else { printf("  [FAIL] 溢出后栈深 %d\n", fx_transform_depth()); fails++; }
+        fx_transform_reset();
+        if (fx_transform_depth() == 0) printf("  [ok]   reset\n");
+        else { printf("  [FAIL] reset\n"); fails++; }
+    }
+
     printf("== done: %s (%d fail) ==\n", fails ? "FAIL" : "PASS", fails);    return fails ? 1 : 0;
 }

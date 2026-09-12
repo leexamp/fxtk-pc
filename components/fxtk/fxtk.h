@@ -219,6 +219,21 @@ int  fx_canvas_enable_buf(fx_widget_t *cv);
 void fx_canvas_size(fx_widget_t *cv, int *w, int *h);   /* 画布本地宽高 (canvas 回调内取 cw/ch) */
 void fx_canvas_clear(fx_widget_t *cv, fx_color_t color); /* 一键清空画布到 color (省去重复铺底样板) */
 
+/* ================= v2.4 canvas 变换栈 (2D 仿射) =================
+ * push 后, 立即模式图元的坐标会经过变换:
+ *   像素/线段 → 端点变换; 矩形填充 → 实心四边形(可旋转/斜切); 图片 → 透视四边形。
+ * 语义: p' = M·p, M 为 [[a,c,e],[b,d,f],[0,0,1]]; 连续 push 会与栈顶复合(新变换后应用)。
+ * 栈深 8(满则覆盖栈顶); 每帧自动复位, 但成对 push/pop 仍是好习惯。
+ * 例: 旋转 θ → fx_canvas_push_affine(cos,-sin 等); 平铺 → 多次 push 平移后画图再 pop。 */
+void fx_canvas_push_affine(float a, float b, float c, float d, float e, float f);
+void fx_canvas_pop_affine(void);
+void fx_transform_reset(void);
+int  fx_transform_depth(void);
+/* 把点过一遍当前变换 (栈空则原样返回) */
+void fx_canvas_transform_point(float x, float y, float *ox, float *oy);
+/* 实心四边形填充 (四角顺时针 xy8), 与 fx_draw_image_quad 同一套单应机制 */
+void fx_fill_quad(const float *xy8);
+
 /* 桌面扩展: 键盘事件 */
 typedef struct { char utf8[64]; int key; int down; int mod; } fx_keyev_t;
 enum { FX_KEY_BACKSPACE = 8, FX_KEY_RETURN = 13, FX_KEY_ESCAPE = 27,
