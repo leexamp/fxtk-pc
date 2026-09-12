@@ -40,7 +40,32 @@ int fx_band_index(void) { return -1; }
 #endif
 static int s_aa = FX_AA_DEFAULT;
 int fxtk_aa(void) { return s_aa; }
-void fx_set_aa(int on) { s_aa = on ? 1 : 0; }
+/* v2.4: GPU 控件层抗锯齿档位。与画布 CPU AA(上面那个 s_aa)解耦 ——
+ * 后者会把画布强制离屏并逐像素混合(开销大, 默认关), 前者是驱动的 SDF 钩子(默认开)。 */
+static int s_widget_aa = 1;
+int  fx_widget_aa_level(void) { return s_widget_aa; }
+void fx_set_widget_aa(int level)
+{
+    if (level < 0) level = 0;
+    if (level > 2) level = 2;
+    if (level == s_widget_aa) return;
+    s_widget_aa = level;
+    fx_repaint();
+}
+void fx_set_aa(int level)
+{
+    s_aa = level > 0 ? 1 : 0;                 /* 兼容 v2.2 语义: 非 0 即开画布 CPU AA */
+    fx_set_widget_aa(level);
+}
+/* 供驱动在掉帧时调用: 降一档(0 档到底), 只打印一次, 并请求重绘让画面换到低档 */
+int fx_aa_autodegrade(void)
+{
+    if (s_widget_aa <= 0) return 0;
+    s_widget_aa--;
+    fx_log(FX_LOG_WARN, "[aa] 帧率不足, 抗锯齿自动降档 -> 档位 %d", s_widget_aa);
+    fx_repaint();
+    return s_widget_aa;
+}
 
 /* 覆盖度混合: cov 0..255, 写回离屏缓冲 */
 static inline void aa_blend(int x, int y, uint32_t c, int cov)
@@ -649,10 +674,19 @@ void fx_fill_rect_gradient(int x1, int y1, int x2, int y2, fx_color_t c1, fx_col
 void fx_fill_rect_round(int x1, int y1, int x2, int y2, int r)
 {
     if (r <= 0) { fx_fill_rect(x1, y1, x2, y2); return; }
-    if (s_aa && s_offing) { aa_fill_rect_round(x1, y1, x2, y2, r, s_color); return; }   /* v2.2 抗锯齿 */
     int w = x2 - x1 + 1, h = y2 - y1 + 1;
     if (r * 2 > w) r = w / 2;
     if (r * 2 > h) r = h / 2;
+    /* v2.4: 有 GPU SDF 钩子时一次 draw 完成 —— 边缘由片元按距离羽化(天然抗锯齿),
+     * 比下面逐行填充更快也更平滑。离屏画布/变换栈上下文仍走原路径(那里坐标语义不同)。 */
+    if (!s_offing && !s_xf_active && s_widget_aa >= 1 && s_drv && s_drv->fill_rect_round) {
+        flush_line();
+        int pushed = gpu_clip_push();
+        s_drv->fill_rect_round(x1 + s_ox, y1 + s_oy, x2 + s_ox, y2 + s_oy, r, s_color);
+        gpu_clip_pop(pushed);
+        return;
+    }
+    if (s_aa && s_offing) { aa_fill_rect_round(x1, y1, x2, y2, r, s_color); return; }   /* v2.2 抗锯齿 */
     /* v2.3 性能: 中间带 [y1+r, y2-r] 各行裁剪量恒为 0 → 合并成一次填充。
      * 旧实现整块逐行 fx_draw_hline, 一个 20x16 圆角按钮要 16 次驱动矩形调用
      * (2816 控件压测实测该函数占 40% 自身耗时)。像素结果与逐行版本完全一致。 */
@@ -673,6 +707,13 @@ void fx_fill_rect_round(int x1, int y1, int x2, int y2, int r)
 void fx_draw_rect_round(int x1, int y1, int x2, int y2, int r)
 {
     if (r <= 0) { fx_draw_rect(x1, y1, x2, y2); return; }
+    if (!s_offing && !s_xf_active && s_widget_aa >= 1 && s_drv && s_drv->stroke_rect_round) {
+        flush_line();
+        int pushed = gpu_clip_push();
+        s_drv->stroke_rect_round(x1 + s_ox, y1 + s_oy, x2 + s_ox, y2 + s_oy, r, 1, s_color);
+        gpu_clip_pop(pushed);
+        return;
+    }
     fx_draw_hline(x1 + r, x2 - r, y1);
     fx_draw_hline(x1 + r, x2 - r, y2);
     fx_draw_vline(x1, y1 + r, y2 - r);

@@ -3,6 +3,7 @@
  * 页5 输入 / 页6 画板 / 页7 键鼠 / 页8 压测 / 页9 滚动
  */
 #include "fxtk.h"
+#include <stdlib.h>
 #include "fxtk_image.h"
 #include "fxtk_effects.h"
 #include "fxtk_desktop.h"
@@ -45,6 +46,11 @@ static void on_paint(fx_widget_t *w, void *ud)
     if (!s_pbuf) { s_pbuf = fx_image_create(PW, PH); if (s_pbuf) on_clear(NULL, NULL); }
     if (!s_pbuf) return;
     int mx, my, mp; fx_touch_state(&mx, &my, &mp);
+    if (getenv("FXTK_PAINTDBG")) {
+        static int n = 0;
+        if (n++ < 400) fx_log(FX_LOG_INFO, "[paint] mx=%d my=%d mp=%d hit=%d px=%d py=%d rect=%d,%d..%d,%d",
+                             mx, my, mp, fx_pressed() == w, s_px, s_py, x1, y1, x2, y2);
+    }
     if (mp && fx_pressed() == w) {
         int px = (mx - x1) * PW / cw, py = (my - y1) * PH / ch;
         if (s_px >= 0) paint_line(s_pbuf, s_px, s_py, px, py);

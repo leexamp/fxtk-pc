@@ -457,6 +457,10 @@ void app_init(void) {
     if (s_pics[1]) fx_image_grayscale(s_pics[1]);
     if (s_pics[2]) fx_image_tint(s_pics[2], FX_RGB(0, 200, 255), 90);
     fx_set_bg(FX_WINDOW_BG);
+    {   /* v2.4: 控件层抗锯齿档位可由环境变量覆盖, 便于"同页同帧"对比截图(0=关, 1=SDF, 2=+图元羽化) */
+        const char *aa = getenv("FXTK_AA");
+        if (aa) fx_set_widget_aa(atoi(aa));
+    }
     /* 键鼠页已有坐标监视; 不叠加高频 T: 调试文本, 避免滚动页污染画面/文字缓存 */
     fx_set_touch_debug(0);
     {   /* 标题统一取 FXTK_VERSION, 不再手写版本号 (此前写着 v2.2 已过时) */

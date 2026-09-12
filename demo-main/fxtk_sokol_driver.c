@@ -41,7 +41,13 @@
 
 /* ================= 顶点/命令表 ================= */
 
-typedef struct { float x, y, u, v; uint32_t rgba; } vtx_t;
+/* 顶点: pos(NDC) + uv + color + 4 个 SDF 参数槽。
+ * SDF 参数(v2.4 抗锯齿)复用同一条顶点流: 普通四边形填 0, 圆角矩形填 (半宽,半高,圆角,描边宽) —
+ * 这样只需多一条管线, 不必再开一个顶点缓冲/第二套命令流。其局部坐标借用 uv 传。 */
+/* 【字段顺序必须与管线属性声明顺序一致】sokol 按 attrs[] 的先后紧密排布偏移:
+ * pos(0) uv(8) color(16) sdf(20) —— 把 rgba 写到结构体末尾会让颜色属性从 32 读到 16 处,
+ * 结果整屏全黑(踩过两次: 第一次漏了 attr, 第二次字段顺序反了)。 */
+typedef struct { float x, y, u, v; uint32_t rgba; float s0, s1, s2, s3; } vtx_t;
 
 #define VB_MAX   262144     /* 顶点数上限 (~4MB) */
 #define CMD_MAX  8192
@@ -77,7 +83,7 @@ static int s_tex_n = 0;
 /* ================= 驱动状态 ================= */
 
 static int s_w = 480, s_h = 272;
-static sg_pipeline s_pip_solid, s_pip_tex, s_pip_raymarch;
+static sg_pipeline s_pip_sdf, s_pip_solid, s_pip_tex, s_pip_raymarch;
 static sg_shader s_sh_raymarch;
 static sg_buffer   s_vbuf;
 static sg_sampler  s_smp_nearest, s_smp_linear;
@@ -153,6 +159,8 @@ static sg_image s_img_tex[IMG_SLOTS]; static sg_view s_img_view[IMG_SLOTS];
 static int s_img_w[IMG_SLOTS], s_img_h[IMG_SLOTS];
 static int s_img_slot = 0;                 /* 帧内轮转游标, 每帧归零 */
 static int s_img_over = 0, s_img_used_max = 0, s_img_used = 0;   /* 诊断: 本帧用了几个 */
+static int s_sdf_n = 0, s_sdf_max = 0;
+int s_dbg_calls = 0;     /* 诊断: 本帧 SDF 圆角矩形数(抗锯齿档≥1 时应 >0) */
 static uint32_t *s_img_stage = NULL; static int s_img_cap = 0;
 
 /* ================= 输入事件队列 (按类型分队列) =================
@@ -246,6 +254,19 @@ static inline uint32_t rgba_pack(uint32_t rgb)
 }
 
 /* 像素坐标 → NDC (在 CPU 侧算好, 免掉 uniform block 及其名字查找/420pack 扩展等一整类坑) */
+static void vtx_push_sdf(float x, float y, float u, float v, uint32_t c,
+                        float s0, float s1, float s2, float s3)
+{
+    if (s_vb_n >= VB_MAX) return;
+    float rw = (float)(s_w > 0 ? s_w : 1), rh = (float)(s_h > 0 ? s_h : 1);
+    s_vb[s_vb_n].x = x / rw * 2.0f - 1.0f;
+    s_vb[s_vb_n].y = y / rh * 2.0f - 1.0f;
+    s_vb[s_vb_n].u = u; s_vb[s_vb_n].v = v;
+    s_vb[s_vb_n].s0 = s0; s_vb[s_vb_n].s1 = s1; s_vb[s_vb_n].s2 = s2; s_vb[s_vb_n].s3 = s3;
+    s_vb[s_vb_n].rgba = rgba_pack(c);
+    s_vb_n++;
+}
+
 static void vtx_push(float x, float y, float u, float v, uint32_t c)
 {
     if (s_vb_n >= VB_MAX) return;
@@ -255,6 +276,7 @@ static void vtx_push(float x, float y, float u, float v, uint32_t c)
      * 屏幕 y=0 必须映射到 NDC -1。实测踩坑: 原写法让整幅画面上下颠倒。 */
     s_vb[s_vb_n].y = y / rh * 2.0f - 1.0f;
     s_vb[s_vb_n].u = u; s_vb[s_vb_n].v = v;
+    s_vb[s_vb_n].s0 = 0.0f; s_vb[s_vb_n].s1 = 0.0f; s_vb[s_vb_n].s2 = 0.0f; s_vb[s_vb_n].s3 = 0.0f;
     /* 顶点色字节序(2026-09 修正, 这条以前写错了):
      * sokol 的 SG_VERTEXFORMAT_UBYTE4N 把【内存里第 0 个字节】喂给 vec4 的 x 分量。
      * 小端下直接写 0xAARRGGBB 的内存布局是 B,G,R,A → 着色器拿到 vec4(B,G,R,A),
@@ -263,6 +285,39 @@ static void vtx_push(float x, float y, float u, float v, uint32_t c)
      * 老注释"直接写即正确"是被【同样互换了两次的截图回读】骗出来的结论, 勿再改回。 */
     s_vb[s_vb_n].rgba = rgba_pack(c);
     s_vb_n++;
+}
+
+static void emit_quad(int pip, int tex, float x0, float y0, float x1, float y1,
+                      float u0, float v0, float u1, float v1, uint32_t c);
+/* v2.4: 发出一个 SDF 四边形(圆角矩形填充 border=0 / 描边 border>0)。
+ * uv 通道传【相对矩形中心的像素偏移】—— 光栅化在片元中心线性插值, 于是片元里的 uv 就是
+ * 它相对中心的局部坐标, 交给片元着色器求到边界的距离即可。 */
+static void emit_round(int x1, int y1, int x2, int y2, int rad, int border, uint32_t c)
+{
+    if (x2 < x1 || y2 < y1) return;
+    float fx0 = (float)x1, fy0 = (float)y1;
+    float fx1 = (float)x2 + 1.0f, fy1 = (float)y2 + 1.0f;      /* 右下边界取开区间, 与 fill_rect 一致 */
+    float cx = (fx0 + fx1) * 0.5f, cy = (fy0 + fy1) * 0.5f;
+    float hw = (fx1 - fx0) * 0.5f, hh = (fy1 - fy0) * 0.5f;
+    if (rad * 2 > (int)(hw * 2)) rad = (int)hw;
+    if (rad * 2 > (int)(hh * 2)) rad = (int)hh;
+    if (getenv("FXTK_SDFCMP")) emit_quad(0, -1, fx0, fy0, fx1, fy1, 0,0,0,0, 0xFF00FF00u);
+    /* 与 emit_quad 同款合并: 相邻 SDF 四边形共用一条命令(否则一个控件一条 draw call) */
+    if (s_cmd_n == 0 || s_cmd[s_cmd_n - 1].pip != 3 || s_cmd[s_cmd_n - 1].tex != -1) {
+        if (cmd_new(3, -1) < 0) return;
+    }
+    s_sdf_n++;
+    if (s_vb_n + 4 > VB_MAX || s_ib_n + 6 > IB_MAX) return;
+    cmd_t *cm = &s_cmd[s_cmd_n - 1];
+    uint32_t b = (uint32_t)s_vb_n;
+    float r = (float)rad, bw = (float)border;
+    vtx_push_sdf(fx0, fy0, fx0 - cx, fy0 - cy, c, hw, hh, r, bw);
+    vtx_push_sdf(fx1, fy0, fx1 - cx, fy0 - cy, c, hw, hh, r, bw);
+    vtx_push_sdf(fx1, fy1, fx1 - cx, fy1 - cy, c, hw, hh, r, bw);
+    vtx_push_sdf(fx0, fy1, fx0 - cx, fy1 - cy, c, hw, hh, r, bw);
+    s_ib[s_ib_n++] = b;     s_ib[s_ib_n++] = b + 1; s_ib[s_ib_n++] = b + 2;
+    s_ib[s_ib_n++] = b;     s_ib[s_ib_n++] = b + 2; s_ib[s_ib_n++] = b + 3;
+    cm->count += 6;
 }
 
 /* 追加一个矩形(两三角); pip/tex 与"当前命令"一致则续用, 否则新建命令 */
@@ -417,9 +472,12 @@ static int drv_init(void)
 
     /* 顶点布局两端共用: pos(0) + uv(1) + color(2) */
     sg_vertex_layout_state layout = {0};
-    layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;
-    layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2;
-    layout.attrs[2].format = SG_VERTEXFORMAT_UBYTE4N;
+    layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;    /* position (NDC) */
+    layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2;    /* uv / SDF 局部坐标 */
+    layout.attrs[2].format = SG_VERTEXFORMAT_UBYTE4N;   /* 颜色 */
+    /* v2.4: 第 4 个属性是 SDF 参数。sokol 按声明顺序紧密排列属性偏移 ——
+     * 漏掉它, color 就会被放在偏移 16 而结构体里实际在 36 → 整屏全黑(踩过)。 */
+    layout.attrs[3].format = SG_VERTEXFORMAT_FLOAT4;    /* (半宽, 半高, 圆角, 描边宽) */
     layout.buffers[0].stride = sizeof(vtx_t);
 
     static const char *vs_src =
@@ -427,8 +485,9 @@ static int drv_init(void)
         "layout(location=0) in vec2 position;\n"   /* 已是 NDC */
         "layout(location=1) in vec2 texcoord0;\n"
         "layout(location=2) in vec4 color0;\n"
-        "out vec2 uv; out vec4 vcol;\n"
-        "void main() { uv = texcoord0; vcol = color0; gl_Position = vec4(position, 0.0, 1.0); }\n";
+        "layout(location=3) in vec4 sdf0;\n"
+        "out vec2 uv; out vec4 vcol; out vec4 vsdf;\n"
+        "void main() { uv = texcoord0; vcol = color0; vsdf = sdf0; gl_Position = vec4(position, 0.0, 1.0); }\n";
 
     sg_shader_desc shd;
     memset(&shd, 0, sizeof(shd));
@@ -437,6 +496,7 @@ static int drv_init(void)
     shd.attrs[0].glsl_name = "position";
     shd.attrs[1].glsl_name = "texcoord0";
     shd.attrs[2].glsl_name = "color0";
+    shd.attrs[3].glsl_name = "sdf0";
 
     static const char *fs_solid_src =
         "#version 330\n"
@@ -463,6 +523,39 @@ static int drv_init(void)
     shd.texture_sampler_pairs[0].glsl_name = "u_tex";
     sg_shader sh_tex = sg_make_shader(&shd);
 
+    sg_shader sh_sdf = {0};
+    /* SDF 圆角矩形/描边: 片元按到边界的有符号距离求覆盖度 → 边缘天然抗锯齿, 且每控件只需一次 draw。
+     * fwidth() 给出该像素的距离梯度, 用它做 1px 羽化(距离场抗锯齿的标准做法)。 */
+    static const char *fs_sdf_src =
+        "#version 330\n"
+        "in vec2 uv; in vec4 vcol; in vec4 vsdf; out vec4 frag_color;\n"
+        "float sd_rbox(vec2 p, vec2 h, float r) {\n"
+        "    vec2 q = abs(p) - h + vec2(r);\n"
+        "    return min(max(q.x, q.y), 0.0) + length(max(q, vec2(0.0))) - r;\n"
+        "}\n"
+        "void main() {\n"
+        "    float d = sd_rbox(uv, vsdf.xy, vsdf.z);\n"
+        "    if (vsdf.w > 0.0) d = abs(d) - vsdf.w * 0.5;\n"   /* 描边: 以边界为中心 */
+        "    float aa = max(fwidth(d), 0.0001);\n"
+        "    float cov = clamp(0.5 - d / aa, 0.0, 1.0);\n"
+        "    if (cov <= 0.0) discard;\n"
+        "    frag_color = vec4(vcol.rgb, vcol.a * cov);\n"
+        "}\n";
+    {   /* 注意: 不能复用上面带 u_tex 视图/采样器绑定的 shd —— SDF 管线不绑纹理,
+         * 复用会让 sokol 校验 "view/sampler binding is missing" 直接 panic。 */
+        sg_shader_desc sd;
+        memset(&sd, 0, sizeof(sd));
+        sd.vertex_func.source = vs_src;
+        sd.vertex_func.entry = "main";
+        sd.fragment_func.source = fs_sdf_src;
+        sd.fragment_func.entry = "main";
+        sd.attrs[0].glsl_name = "position";
+        sd.attrs[1].glsl_name = "texcoord0";
+        sd.attrs[2].glsl_name = "color0";
+        sd.attrs[3].glsl_name = "sdf0";
+        sh_sdf = sg_make_shader(&sd);
+    }
+
     sg_pipeline_desc pd = {0};
     pd.layout = layout;
     pd.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
@@ -480,6 +573,20 @@ static int drv_init(void)
     s_pip_solid = sg_make_pipeline(&pd);
     pd.shader = sh_tex; pd.label = "fxtk-tex";
     s_pip_tex = sg_make_pipeline(&pd);
+    {   sg_pipeline_desc spd = {0};
+        spd.layout = layout; spd.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
+        spd.index_type = SG_INDEXTYPE_UINT32;
+        spd.depth.pixel_format = SG_PIXELFORMAT_NONE;
+        spd.depth.write_enabled = false; spd.depth.compare = SG_COMPAREFUNC_ALWAYS;
+        spd.color_count = 1;
+        spd.colors[0].blend.enabled = true;
+        spd.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+        spd.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        spd.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+        spd.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        spd.shader = sh_sdf; spd.label = "fxtk-sdf";
+        s_pip_sdf = sg_make_pipeline(&spd);
+    }
 
     /* ---- 光追管线: 同一个全屏四边形, 片元着色器做光线步进 ---- */
     {
@@ -597,6 +704,19 @@ static void drv_fill_tri(int x1, int y1, int x2, int y2, int x3, int y3, uint32_
 }
 
 /* 纹理 blit (文字/离屏画布): tex 指向文本层或本驱动创建的 fxtk_sokol_tex_t */
+/* v2.4: GPU SDF 抗锯齿钩子 (框架的 fx_fill_rect_round / fx_draw_rect_round 在档位≥1 时走这里) */
+static void drv_fill_rect_round(int x1, int y1, int x2, int y2, int r, uint32_t c)
+{
+    px_flush();                                  /* 保持与像素层的 z 序 */
+    emit_round(x1, y1, x2, y2, r, 0, 0xFF000000u | (c & 0xFFFFFFu));
+}
+static void drv_stroke_rect_round(int x1, int y1, int x2, int y2, int r, int bw, uint32_t c)
+{
+    px_flush();
+    if (bw < 1) bw = 1;
+    emit_round(x1, y1, x2, y2, r, bw, 0xFF000000u | (c & 0xFFFFFFu));
+}
+
 static void drv_blit_tex(void *tex, int sx, int sy, int sw, int sh, int dx, int dy)
 {
     fxtk_sokol_tex_t *t = (fxtk_sokol_tex_t *)tex;
@@ -805,6 +925,8 @@ fx_driver_t fx_sokol_driver = {
     .draw_line = drv_draw_line,
     .read_pixels = drv_read_pixels,
     .raymarch = fxtk_sokol_raymarch,   /* v2.4: GPU 实时光线步进 */
+    .fill_rect_round = drv_fill_rect_round,     /* v2.4: GPU SDF 圆角矩形 (抗锯齿) */
+    .stroke_rect_round = drv_stroke_rect_round, /* v2.4: GPU SDF 圆角描边 (抗锯齿) */
 };
 
 /* ================= 帧的呈现 (由 sokol_app 回调触发) ================= */
@@ -864,7 +986,18 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
             int cx2 = c->cx2 > s_w - 1 ? s_w - 1 : c->cx2;
             int cy2 = c->cy2 > s_h - 1 ? s_h - 1 : c->cy2;
             if (cx2 < cx1 || cy2 < cy1) continue;
-            sg_apply_scissor_rect(cx1, cy1, cx2 - cx1 + 1, cy2 - cy1 + 1, true);
+            /* 【v2.4 关键修正】裁剪矩形是"屏幕坐标(左上原点)", 而本 pass 是【离屏 render target】:
+             * sokol 对 render target pass 的原点是左下(GL 约定), 只有 swapchain pass 才是左上。
+             * 之前这里传 origin_top_left=true → 裁剪框在垂直方向被镜像, 于是"控件自己的紧裁剪"
+             * 把该控件整块裁掉(表现为: 圆角按钮填充全部消失, SDF 抗锯齿无效)。
+             * 画布裁剪之所以"看起来没问题", 只是因为画布矩形接近满屏、镜像后仍大面积重合。
+             * 与光追分支里的 u[1] = s_h-(y+h) 是同一套换算是同一件事。 */
+            /* 【实测结论, 别再改】origin_top_left 必须传 false + 直接用屏幕坐标的 y。
+             * render-target pass 里 sokol 不做 y 翻转(与它在 swapchain pass 上的行为不同),
+             * 传 true 会让裁剪框垂直镜像 → 控件用自己的紧裁剪时被整块裁掉(圆角填充全消失)。
+             * 四种组合实测: (x,y,true)=0px, (x,y,false)=8784px 全中, (x,H-y-h,false)=0px,
+             * (x,H-y-h,true)=8784px 全中 —— 等价的两组正好互为镜像, 选直接写法。 */
+            sg_apply_scissor_rect(cx1, cy1, cx2 - cx1 + 1, cy2 - cy1 + 1, false);
         }
         if (c->pip == 2) {
             /* 光追: 视口=目标矩形, 用整屏 blit 四边形(NDC), fs 依据 u_rect 反推局部像素 */
@@ -885,7 +1018,7 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
             sg_apply_viewport(0, 0, s_w, s_h, true);   /* 复原, 免得影响后续命令 */
             continue;
         }
-        sg_apply_pipeline(c->pip == 0 ? s_pip_solid : s_pip_tex);
+        sg_apply_pipeline(c->pip == 0 ? s_pip_solid : (c->pip == 3 ? s_pip_sdf : s_pip_tex));
         sg_bindings b = {0};
         b.vertex_buffers[0] = s_vbuf;
         b.index_buffer = s_ibuf;
@@ -933,17 +1066,21 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
                     s_lat_us_max / 1000.0, s_lat_n ? s_lat_us_sum / 1000.0 / s_lat_n : 0.0, s_lat_n, s_merge_n, s_depth_max,
                     s_frame_us_max / 1000.0, s_frame_us_sum / 1000.0 / sec,
                     s_px_us_max / 1000.0, s_px_area / sec, s_px_calls / sec,
-                    s_sub_us_max / 1000.0, s_sub_us_sum / 1000.0 / sec, s_img_used_max, s_img_over);
+                    s_sub_us_max / 1000.0, s_sub_us_sum / 1000.0 / sec, s_img_used_max, s_img_over,
+                    s_sdf_max, fx_widget_aa_level());
                 s_stat_t0 = t;
                 s_lat_us_max = s_lat_us_sum = 0; s_lat_n = 0; s_merge_n = 0; s_depth_max = 0;
                 s_frame_us_max = 0; s_frame_us_sum = 0;
                 s_px_us_max = 0; s_px_area = 0; s_px_calls = 0;
-                s_sub_us_max = 0; s_sub_us_sum = 0; s_img_used_max = 0;
+                s_sub_us_max = 0; s_sub_us_sum = 0; s_img_used_max = 0; s_sdf_max = 0;
             }
         }
     }
+    if (s_sdf_n > s_sdf_max) s_sdf_max = s_sdf_n;
+
     s_vb_n = 0; s_ib_n = 0; s_cmd_n = 0; s_tex_n = 0;
     s_img_slot = 0; s_img_used = 0;
+    s_sdf_n = 0;
 }
 
 /* ================= SDL 驱动同款辅助 API (框架/演示依赖) ================= */

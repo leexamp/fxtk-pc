@@ -88,7 +88,12 @@ static void frame_cb(void)
             extern void fxtk_sokol_drag_loop_start(int, int, int, int, int, int);
             extern void fxtk_sokol_drag_loop_tick(void);
             static int started = 0;
-            if (!started && s_frames >= 20) {
+            static int dl_frame = -1;
+            if (dl_frame < 0) {
+                dl_frame = 20;
+                { int a,b,c,d,e,f,g; if (sscanf(dl, "%d,%d,%d,%d,%d,%d,%d", &a,&b,&c,&d,&e,&f,&g) == 7) dl_frame = g; }
+            }
+            if (!started && s_frames + 1 >= dl_frame) {
                 int x0 = 0, y0 = 0, x1 = 0, y1 = 0, st = 24, pf = 3;
                 if (sscanf(dl, "%d,%d,%d,%d,%d,%d", &x0, &y0, &x1, &y1, &st, &pf) >= 4) {
                     fxtk_sokol_drag_loop_start(x0, y0, x1, y1, st, pf);

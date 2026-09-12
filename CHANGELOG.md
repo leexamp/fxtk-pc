@@ -63,6 +63,28 @@
   `FXTK_QUIT_AFTER` 现对 SDL 驱动同样可用；`FXTK_STAT=1` 输出**分段耗时**（输入排队/整帧/像素层/提交/
   图片数/文本纹理数与淘汰）——只报 fps 判断不出"手感延迟"。
 
+### 新增（P3 GPU 抗锯齿, 第一层）
+- **控件层 SDF 抗锯齿**（`fx_set_widget_aa(level)` 0/1/2, **默认 1**）: 圆角矩形填充/描边不再逐行拼,
+  而是由驱动一次 draw 完成, 片元按到边界的**有符号距离**求覆盖度（`0.5 - d/fwidth(d)`）→ 边缘天然平滑。
+  驱动钩子 `fill_rect_round` / `stroke_rect_round`；SDL/ESP32 无此钩子时自动回退原逐行路径（API 不变）。
+  实测(图片页): 命令数 **1184 → 7**、顶点数 5162 → 212；压测页顶点 5996 → 3212, fps 不变。
+  档位含义: `0=关`, `1=SDF`(默认), `2=1+图元羽化`(线段/圆/弧, 待做)。
+  与画布 CPU AA（`fx_set_aa` 的 v2.2 语义, 默认仍关, 开销大）**解耦**：`fx_set_widget_aa()` 只动 GPU 层。
+- **掉帧自动降档** `fx_aa_autodegrade()`: 驱动检测连续掉帧后调用, 降一档并打印一次日志（路线图 §3.3）。
+- `FXTK_AA=0|1|2` 环境变量: 同页同帧 A/B 对比截图用（已用于目视核对圆角过渡像素 52→68）。
+
+### 修复（P3 期间挖出的三个真 bug）
+- **离屏 pass 的裁剪矩形被垂直镜像（严重, 影响所有紧裁剪绘制）**: sokol 的 render-target pass
+  裁剪原点是左下, 而框架给的矩形是左上原点。传 `origin_top_left=true` 会让裁剪框上下翻转 ——
+  表现一: 控件用自己的紧裁剪时被**整块裁掉**（SDF 圆角填充全部消失, 排查了半天）;
+  表现二: 画布裁剪"看起来正常"其实只是画布矩形接近满屏、镜像后仍大面积重合的巧合。
+  四种组合实测后定为 `sg_apply_scissor_rect(x, y, w, h, false)`（直接用屏幕坐标 y）。
+- **顶点属性与结构体字段顺序必须一致**: 给顶点加 SDF 参数槽时, 先漏声明第 4 个属性、
+  再是字段写在末尾（颜色读到偏移 32 处）—— 两次都表现为**整屏全黑**, 且没有任何报错。
+  现在 `vtx_t{pos,uv,color,sdf}` 与 `layout.attrs[0..3]` 严格同序, 注释写明"别再改顺序"。
+- **SDF 着色器不能复用带纹理绑定的 shader desc**: 复用会让 SDF 管线要求 view/sampler 绑定,
+  未绑定直接 `VALIDATE_ABND_EXPECTED_VIEW_BINDING` panic。改用独立 desc。
+
 ### 工程链
 - 构建清单同步新增 `fxtk_backends.c`（Makefile / build*.sh / CI / ESP32 CMakeLists）；Win32 侧补 `-lcomdlg32`。
 - `tools/spike/README.md` 记录 sokol 迁移的 7 个坑位（EGL 上下文类型、GLSL 310 es、uniform block 名、

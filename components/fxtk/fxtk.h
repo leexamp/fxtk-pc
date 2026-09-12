@@ -207,7 +207,18 @@ void fx_fill_arc(int cx, int cy, int r, int a1, int a2);
 void fx_draw_triangle(int x1, int y1, int x2, int y2, int x3, int y3);
 void fx_fill_triangle(int x1, int y1, int x2, int y2, int x3, int y3);
 void fx_draw_polygon(const int16_t *pts, int n);
-void fx_set_aa(int on);   /* 抗锯齿开关 (默认关): 开时 line/circle/rect 等矢量图元在离屏/帧缓冲路径上做边缘平滑 */
+void fx_set_aa(int level);
+/* ================= v2.4 抗锯齿分两层, 互不牵连 =================
+ *  ① 画布 CPU AA (s_aa): 开时 line/circle/rect 等矢量图元在【离屏画布】上做边缘混合。
+ *     代价大(强制离屏 + 逐像素混合, v2.2 实测 ~10ms/帧级), 因此默认仍关; fx_set_aa(level≥1) 打开。
+ *  ② 控件/图元 GPU AA (s_widget_aa): 圆角矩形/描边由驱动的 SDF 钩子一次画完, 片元按到边界距离
+ *     求覆盖度 → 边缘天然平滑, 且比逐行填充更快。默认档 1(有钩子时开)。
+ *  档位: 0=关, 1=SDF(默认), 2=1+图元羽化(线段/圆/弧)。掉帧时由驱动调 fx_aa_autodegrade() 降档。
+ *  fx_set_aa(level) 同时设置两层(保持 v2.2 兼容); 只想动 GPU 层用 fx_set_widget_aa()。 */
+void fx_set_widget_aa(int level);   /* 只设 GPU 控件层档位 0/1/2 */
+int  fx_widget_aa_level(void);
+int  fx_aa_autodegrade(void);       /* 供驱动在掉帧时调用: 降一档并返回新档位(已到 0 则返回 0) */
+int  fxtk_aa(void);                 /* 画布 CPU AA 当前开关 */
 int  fxtk_aa(void);
 void fx_fill_polygon(const int16_t *pts, int n);
 void fx_draw_text(int x, int y, const char *s);
@@ -269,6 +280,11 @@ typedef struct {
     int  (*read_pixels)(uint32_t *dst,int w,int h);   /* v2.4 可选: 回读当前帧 (截图/金图回归); dst 填 0xRRGGBB 或 0xAARRGGBB */
     void (*draw_image_quad)(const uint32_t *px,int w,int h,const float *xy8,int bilinear); /* v2.4 可选: GPU 真透视四边形 (无则走 CPU 逆单应) */
     void (*raymarch)(float time,int x1,int y1,int x2,int y2); /* v2.4 可选: GPU 实时光线步进到指定矩形 (sokol) */
+    /* v2.4 可选: GPU SDF 圆角矩形填充/描边 (片元按到边界距离羽化 → 边缘抗锯齿, 每控件一次 draw) */
+    void (*fill_rect_round)(int x1,int y1,int x2,int y2,int r,uint32_t c);
+    void (*stroke_rect_round)(int x1,int y1,int x2,int y2,int r,int bw,uint32_t c);
+    /* v2.4 可选: GPU 羽化线段 (宽度 w, 片元按到线心距离羽化; 无则回退双三角硬边) */
+    void (*draw_line_aa)(int x1,int y1,int x2,int y2,int w,uint32_t c);
 } fx_driver_t;
 
 void fx_init(const fx_driver_t *drv);
