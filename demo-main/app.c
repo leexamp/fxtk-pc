@@ -450,7 +450,12 @@ void app_init(void) {
     fx_set_bg(FX_WINDOW_BG);
     /* 键鼠页已有坐标监视; 不叠加高频 T: 调试文本, 避免滚动页污染画面/文字缓存 */
     fx_set_touch_debug(0);
-    fx_set_window_title("demo v2.2");
+    {   /* 标题统一取 FXTK_VERSION, 不再手写版本号 (此前写着 v2.2 已过时) */
+        static char _title[64];
+        snprintf(_title, sizeof(_title), "fxtk v%s · demo (%s)", FXTK_VERSION,
+                 fx_backend_name());
+        fx_set_window_title(_title);
+    }
     build_ui();
     fx_canvas_new(pixel("0,271", "0,271"), name("fixer"), anim(1),
                   color(FX_RGB(240,240,240)), call(on_fix));

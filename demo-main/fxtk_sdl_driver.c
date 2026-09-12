@@ -155,7 +155,9 @@ static int sdl_init(void)
     if (mw)cap_max=atoi(mw);
     if (SDL_Init(SDL_INIT_VIDEO)<0){printf("SDL Init failed: %s\n",SDL_GetError());return -1;}
     SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
-    window=SDL_CreateWindow("fxtk v2.0 · 立即模式GPU",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,INITIAL_WIDTH,INITIAL_HEIGHT,SDL_WINDOW_SHOWN|SDL_WINDOW_RESIZABLE);
+    {   static char wtitle[64];
+        snprintf(wtitle, sizeof(wtitle), "fxtk v%s · 立即模式GPU", FXTK_VERSION);
+        window=SDL_CreateWindow(wtitle,SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,INITIAL_WIDTH,INITIAL_HEIGHT,SDL_WINDOW_SHOWN|SDL_WINDOW_RESIZABLE); }
     if (window)SDL_SetWindowMinimumSize(window,240,136);
     if (window && cap_max>0) SDL_SetWindowMaximumSize(window,cap_max,cap_max);   /* FXTK_MAXW: 限窗口上限, 防大窗口撑爆窗口尺寸表面/GL 目标 */
     if(!window){printf("Window failed: %s\n",SDL_GetError());return -1;}

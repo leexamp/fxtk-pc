@@ -127,6 +127,8 @@ static void event_cb(const sapp_event *e)
 sapp_desc sokol_main(int argc, char *argv[])
 {
     (void)argc; (void)argv;
+    static char s_title[64];
+    snprintf(s_title, sizeof(s_title), "fxtk v%s · sokol", FXTK_VERSION);
     return (sapp_desc){
         .init_cb = init_cb,
         .frame_cb = frame_cb,
@@ -134,7 +136,7 @@ sapp_desc sokol_main(int argc, char *argv[])
         .event_cb = event_cb,
         .width = 1280,
         .height = 720,
-        .window_title = "fxtk v2.4 · sokol",
+        .window_title = s_title,
         .depth_format = SAPP_PIXELFORMAT_NONE,   /* 2D UI: 交换链与管线都不带深度, 避免格式校验冲突 */
         .logger.func = slog_func,
         .high_dpi = false,
