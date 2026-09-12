@@ -10,7 +10,7 @@ gcc -O2 -s -pthread \
     ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_extra.c \
     ../components/fxtk/fxtk_backends.c \
     fxtk_sdl_driver.c \
-    fxtk_image_sdl.c \
+   \
     raymarch.c \
     gpu_raymarch.c \
     main_linux.c \

@@ -27,6 +27,17 @@
   `components/fxtk/vendor/stb`（truetype/image/image_write/rect_pack）提交入库，CI 无需联网拉依赖。
   `tools/ppm2png.c` 提供 PPM→PNG 转换。
 
+- **sokol PC 后端（P2，开发中）**：`fxtk_sokol_driver.c` + `main_sokol.c` + `fxtk_font_stb.c`
+  （stb_truetype 文本层）+ `gpu_raymarch_stub.c`；`make fxtk_sim_sokol` 构建。
+  - sokol_app 回调 → **事件环形队列** → 框架既有的轮询契约（`fx_driver_t` 零改动，ESP32/无头测试不受影响）
+  - 绘制走**全批处理**：CPU 侧攒顶点+索引 → 每帧各上传一次 → 逐批 `sg_draw`（顶点带色，换色不打断批次）
+  - 软件像素层（文字/抗锯齿/离屏画布）每帧一次整屏上传；截图在 pass 内、交换前回读
+  - **持久离屏画布 + 整屏 blit**：与 SDL 驱动同构，保证脏矩形重绘框架的静态内容跨帧保留
+  - 文本不再依赖 SDL_ttf/SDL_Renderer（stb_truetype 光栅 + LRU 纹理缓存 + 离屏像素路径）
+  - 首个像素级对照：同一页(波形)SDL 215 色 vs sokol 209 色，各主色像素数差 < 1%
+- **`fx_image_load` 迁到 backends/stb**：删除 `fxtk_image_sdl.c`，图片解码不再依赖 SDL_image
+  （PNG/JPG/BMP/GIF/TGA 全支持，ESP32/无头环境同样可用）。
+
 ### 工程链
 - 构建清单同步新增 `fxtk_backends.c`（Makefile / build*.sh / CI / ESP32 CMakeLists）；Win32 侧补 `-lcomdlg32`。
 - `tools/spike/README.md` 记录 sokol 迁移的 7 个坑位（EGL 上下文类型、GLSL 310 es、uniform block 名、

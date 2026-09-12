@@ -14,7 +14,7 @@ gcc -O2 -I. -I../components/fxtk \
     ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_font.c \
     ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_extra.c \
     ../components/fxtk/fxtk_backends.c \
-    fxtk_sdl_driver.c fxtk_image_sdl.c main_linux.c \
+    fxtk_sdl_driver.c main_linux.c \
     $( if [ "$EX" = "app" ]; then echo "app.c app_desktop.c raymarch.c gpu_stub_win.c"; else echo "../examples/$EX.c"; fi ) \
     -o fxtk_win.exe \
     -lSDL2 -lSDL2_ttf -lSDL2_image -lm -lpthread

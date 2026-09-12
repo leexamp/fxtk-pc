@@ -9,7 +9,7 @@
 #
 # 注意: `test` 目标显式声明了 .PHONY 且有真实规则 ——
 #       避免再次踩 "同名 test/ 目录被 make 当作已是最新" 的假成功坑。
-.PHONY: all test clean fxtk_sim fxtk_sim_en bench
+.PHONY: all test clean fxtk_sim fxtk_sim_en bench sokol
 .DEFAULT_GOAL := fxtk_sim
 
 # v2.3: 体积优化默认档 (-O2 基线 154KB → 101KB, -35%)
@@ -38,7 +38,7 @@ CORE := ../components/fxtk/fxtk.c \
         ../components/fxtk/fxtk_extra.c \
         ../components/fxtk/fxtk_backends.c
 HDRS := ../components/fxtk/fxtk.h ../components/fxtk/fxtk_internal.h
-DRIVER := fxtk_sdl_driver.c fxtk_image_sdl.c main_linux.c
+DRIVER := fxtk_sdl_driver.c main_linux.c
 
 all: fxtk_sim
 
@@ -65,13 +65,28 @@ test/headless_test: test/headless_test.c $(TEST_CORE) $(HDRS)
 test/headless_test_stub: test/headless_test.c $(TEST_CORE) $(HDRS)
 	gcc -O2 -DFXTK_BACKEND_STUB $(INC) $(TEST_CORE) test/headless_test.c -o $@ -lm
 
+# ---- v2.4 sokol 后端 (无 SDL 依赖; 文本层走 stb_truetype) ----
+SOKOL_INC := -I../third_party/sokol
+SOKOL_LIBS := -lX11 -lXi -lXcursor -lGL -ldl -lpthread -lm
+SOKOL_CORE := ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
+              ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_effects.c \
+              ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c
+
+fxtk_sim_sokol: $(SOKOL_CORE) fxtk_sokol_driver.c fxtk_font_stb.c main_sokol.c \
+                app.c app_desktop.c raymarch.c gpu_raymarch_stub.c
+	gcc $(CFLAGS) $(INC) $(SOKOL_INC) $(SOKOL_CORE) \
+	    fxtk_sokol_driver.c fxtk_font_stb.c main_sokol.c app.c app_desktop.c raymarch.c \
+	    gpu_raymarch_stub.c -o $@ $(LDFLAGS) $(SOKOL_LIBS)
+
+sokol: fxtk_sim_sokol
+
 # ---- 渲染吞吐基准 (dummy 驱动, 无 vsync) ----
 #   SDL_VIDEODRIVER=dummy ./test/bench 1200 8 200
 bench: test/bench
 	SDL_VIDEODRIVER=dummy ./test/bench 1200 8 200
 
-test/bench: test/bench.c $(CORE) $(HDRS) fxtk_sdl_driver.c fxtk_image_sdl.c app.c app_desktop.c raymarch.c gpu_raymarch.c
-	gcc $(CFLAGS) $(INC) $(CORE) fxtk_sdl_driver.c fxtk_image_sdl.c \
+test/bench: test/bench.c $(CORE) $(HDRS) fxtk_sdl_driver.c app.c app_desktop.c raymarch.c gpu_raymarch.c
+	gcc $(CFLAGS) $(INC) $(CORE) fxtk_sdl_driver.c \
 	    app.c app_desktop.c raymarch.c gpu_raymarch.c \
 	    test/bench.c -o $@ $(LDFLAGS) $(LIBS)
 
@@ -83,5 +98,5 @@ canvas%: ../examples/canvas/canvas%.c $(CORE) $(HDRS) $(DRIVER)
 	gcc $(CFLAGS) $(INC) $(CORE) $(DRIVER) $< -o $@ $(LDFLAGS) $(LIBS_EX)
 
 clean:
-	rm -f fxtk_sim fxtk_sim_en test/headless_test test/headless_test_stub test/bench \
+	rm -f fxtk_sim fxtk_sim_en fxtk_sim_sokol test/headless_test test/headless_test_stub test/bench \
 	      ex[0-9][0-9]_* canvas_[0-9][0-9]_* dist/win/*.exe fxtk_win.exe

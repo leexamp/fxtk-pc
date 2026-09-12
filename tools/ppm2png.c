@@ -2,13 +2,16 @@
  *
  * 用途: fxtk 的无头渲染/截图默认输出 PPM(零依赖), 这个工具把它转成 PNG 以便查看、
  *       进文档/CI 金图对比、以及交给图像评审流程。
- * 依赖: third_party/stb/stb_image_write.h (已 vendored)
+ * 依赖: components/fxtk/vendor/stb/stb_image_write.h (已 vendored)
  *
- * 编译: gcc -O2 -Ithird_party/stb tools/ppm2png.c -o /tmp/ppm2png -lm
+ * 编译: gcc -O2 -Icomponents/fxtk/vendor/stb tools/ppm2png.c -o /tmp/ppm2png -lm
  * 用法: ppm2png in.ppm out.png    |    ppm2png *.ppm   (批量, 同名换扩展)
+ *       ppm2png in.png out.ppm    (反向: 任意格式 → PPM, 便于脚本做像素分析)
  */
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"          /* v2.4: 同时支持读 PNG/JPG/BMP/GIF/TGA → 转 PPM 便于数值分析 */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,8 +62,21 @@ int main(int argc, char **argv)
         }
         int w = 0, h = 0;
         unsigned char *px = read_ppm(in, &w, &h);
+        if (!px) {   /* 非 PPM: 用 stb_image 读任意格式 */
+            int ch = 0;
+            px = stbi_load(in, &w, &h, &ch, 3);
+            if (px) printf("(stb_image 解码 %s: %d 通道)\n", in, ch);
+        }
         if (!px) { fprintf(stderr, "✗ 无法读取 %s\n", in); continue; }
-        if (!stbi_write_png(out, w, h, 3, px, w * 3)) { fprintf(stderr, "✗ 写 PNG 失败 %s\n", out); free(px); continue; }
+        int ok;
+        if (strstr(out, ".ppm")) {           /* 写 PPM (便于脚本数值分析) */
+            FILE *f = fopen(out, "wb");
+            ok = f && fprintf(f, "P6\n%d %d\n255\n", w, h) > 0 && fwrite(px, 1, (size_t)w * h * 3, f) == (size_t)w * h * 3;
+            if (f) fclose(f);
+        } else {
+            ok = stbi_write_png(out, w, h, 3, px, w * 3) != 0;
+        }
+        if (!ok) { fprintf(stderr, "✗ 写失败 %s\n", out); free(px); continue; }
         printf("✓ %s (%dx%d) → %s\n", in, w, h, out);
         free(px);
     }

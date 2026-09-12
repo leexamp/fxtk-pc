@@ -904,6 +904,28 @@ void fx_draw_image(fx_image_t *img, int x, int y, int dw, int dh)
     fx_draw_image_ex(img, x, y, dw, dh, 0);
 }
 
+/* v2.4: 图片解码迁到 backends(stb) —— 不再依赖 SDL_image, 且 PNG/JPG/BMP/GIF/TGA 全支持,
+ * ESP32/无头环境同样可用(无 SDL 也能加载图片)。 */
+fx_image_t *fx_image_load(const char *path)
+{
+    if (!path) return NULL;
+    fx_img_t im;
+    if (!fx_img_load_file(path, &im)) return NULL;
+    fx_image_t *out = fx_image_create(im.w, im.h);
+    if (out) {
+        int n = im.w * im.h;
+        for (int i = 0; i < n; i++) {
+            const unsigned char *p = &im.pixels[(size_t)i * im.channels];
+            uint32_t c;
+            if (im.channels >= 3) c = ((uint32_t)p[0] << 16) | ((uint32_t)p[1] << 8) | (uint32_t)p[2];
+            else                  c = ((uint32_t)p[0] << 16) | ((uint32_t)p[0] << 8) | (uint32_t)p[0];
+            out->px[i] = c;
+        }
+    }
+    fx_img_free(&im);
+    return out;
+}
+
 /* ================= v2.4 四边形形变 (projective quad warp) =================
  * 把整张图映射到任意凸四边形 —— 真透视, 不是两个三角形的仿射近似(那种画法有对角缝)。
  * 数学: 解 8 元线性方程组得单应矩阵 H (源单位方 → 目标四角), 渲染时用 H⁻¹ 逐像素
