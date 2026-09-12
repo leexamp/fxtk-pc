@@ -186,6 +186,7 @@ sapp_desc sokol_main(int argc, char *argv[])
         .frame_cb = frame_cb,
         .cleanup_cb = cleanup_cb,
         .event_cb = event_cb,
+        .swap_interval = getenv("FXTK_NOVSYNC") ? 0 : 1,   /* 0 = 关垂直同步(测峰值帧率用) */
         .width = (int)(s_win_w ? s_win_w : 1280),
         .height = (int)(s_win_h ? s_win_h : 720),
         .window_title = s_title,

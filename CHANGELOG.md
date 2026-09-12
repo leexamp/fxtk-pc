@@ -92,7 +92,29 @@
 - **SDF 着色器不能复用带纹理绑定的 shader desc**: 复用会让 SDF 管线要求 view/sampler 绑定,
   未绑定直接 `VALIDATE_ABND_EXPECTED_VIEW_BINDING` panic。改用独立 desc。
 
-### 新增（动态库打包 —— 多示例共享同一份框架）
+### 优化（动态库再瘦身: libfxtk.so 147.8 → 119.8 KB）
+- ①`--exclude-libs,ALL` + gold 的 `--icf=all`（折叠等价函数）;
+  ②版本脚本 `fxtk.exports` 只隐藏内部符号（`stbi_*`/`_sg_*`/`_sapp_*` 等）。
+- **踩坑记录**: 版本脚本 `local: *` 不能配 `-fvisibility=hidden` —— sokol 实现段里的 `main` 会一起被隐藏,
+  而版本脚本只能"降级"符号、无法把它再提升回来, exe 链接直接报 `main` 未定义;
+  更坑的是给 **exe** 也加 `--version-script` 会把 `sokol_main` 降为局部符号 → 无人引用 →
+  `--gc-sections` 把整个 demo 删掉, 产物变成 6KB 空壳(实测踩到)。现在库与 exe 用两套链接参数。
+- 结果: exe 62.3 → **58.4 KB**, `libfxtk.so` **119.8 KB**(−19%), 截图与静态版**逐像素一致**(最大通道差 0)。
+
+### 实测（性能: 压测页解除帧率限制后的上限）
+无头 bench(SDL dummy 驱动, 无合成器/无 vsync), 压测页跑到控件饱和:
+
+| 分辨率 | 饱和控件数 | ms/帧 | fps |
+|---|---|---|---|
+| 480x272 | 202 | 0.67 | 1478 |
+| 1280x720 | 1235 | 4.34 | 230 |
+| **1920x1080** | **2819** | **9.0~9.3** | **107~111** |
+
+- 图形窗口下即使 `FXTK_NOVSYNC=1` 也仍是 60fps: **GNOME 合成器**把窗口统一限在 60Hz, 应用侧关 vsync 绕不过去
+  —— 所以上面的数字才是框架的真实上限(poll 3.1ms + present 6.0ms)。
+- 与路线图里记的 v2.3 基线(2816 控件 8.0ms/125fps)相比慢约 13%, **需进一步查**(present 占大头)。
+
+### 新增（动态库打包 —— 多示例共享同一份框架）### 新增（动态库打包 —— 多示例共享同一份框架）
 - `build_shared.sh` + `make shared`: 把框架拆成 **`libfxtk.so`**(核心 6 个 .c, 与后端无关) +
   **`libfxtk_sokol.so`**(sokol 平台层 + stb 文本; `SOKOL_*_IMPL` 只在这一个 TU 里) + app 层 exe。
   rpath 用 `$ORIGIN`, 整包拷到任何位置都能直接运行(实测拷到 /tmp/bundle 正常启动)。

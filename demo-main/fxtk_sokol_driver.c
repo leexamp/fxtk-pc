@@ -1218,10 +1218,10 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
             if (t - s_stat_t0 >= 1000000u) {           /* 每秒汇总一次 */
                 double sec = (t - s_stat_t0) / 1000000.0;
                 fprintf(stderr,
-                    "[stat] %dx%d fps=%d | 顶点=%d 命令=%d 纹理槽=%d 文本纹理=%d/淘汰%d | "
+                    "[stat] %dx%d fps=%d 控件=%d | 顶点=%d 命令=%d 纹理槽=%d 文本纹理=%d/淘汰%d | "
                     "排队 max=%.1fms avg=%.2fms(%d) 合并=%ld 深度max=%d | 整帧 max=%.1fms avg=%.2fms | "
                     "像素 max=%.1fms 面积=%.0fpx/帧 次数=%.1f/帧 | 提交 max=%.1fms avg=%.2fms | 图片/帧 max=%d 溢出=%d\n",
-                    s_w, s_h, s_fps, s_vb_n, s_cmd_n, s_tex_n,
+                    s_w, s_h, s_fps, fxtk_widget_count(), s_vb_n, s_cmd_n, s_tex_n,
                     fxtk_text_created, fxtk_text_evicted,
                     s_lat_us_max / 1000.0, s_lat_n ? s_lat_us_sum / 1000.0 / s_lat_n : 0.0, s_lat_n, s_merge_n, s_depth_max,
                     s_frame_us_max / 1000.0, s_frame_us_sum / 1000.0 / sec,

@@ -1,0 +1,10 @@
+{
+  global:
+    *;
+  local:
+    stbi_*;
+    stbi__*;
+    _sg_*;
+    _sapp_*;
+    _sgl_*;
+};
