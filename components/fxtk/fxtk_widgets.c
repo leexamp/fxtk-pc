@@ -229,15 +229,20 @@ void fxtk_draw_tab(fx_widget_t *w)
             if (side == FX_TAB_BOTTOM) { ty1 = w->y2 - FX_TAB_H + 1; ty2 = w->y2; }
             else                      { ty1 = w->y1; ty2 = w->y1 + FX_TAB_H - 1; }
         }
+        /* P5 审美迭代 4/9(标签页): 原先是"每格铺色 + 4 条立体线"的方格倒角, 与按钮/输入框/滑杆的
+         * 圆角语言不统一, 而且一格要 5 次绘制。改成: 选中 = 圆角胶囊高亮(内缩 2px 留出间隔),
+         * 未选中不铺色、不画线(直接露出标签条底色)。视觉更干净, 且每格少 4 次绘制调用。 */
         int sel = (i == w->value);
-        fx_color_t bg = sel ? btn_mix(w->bg, FX_WHITE, 24) : darken(w->bg);
-        fx_set_color(bg);
-        fx_fill_rect(tx1, ty1, tx2, ty2);
-        /* 立体感: 选中=凸起(上+左高光), 未选中=下凹 */
-        fx_set_color(sel ? btn_mix(bg, FX_WHITE, 90) : darken(bg));
-        fx_draw_vline(tx1, ty1, ty2);   fx_draw_hline(tx1, tx2, ty1);
-        fx_set_color(sel ? btn_mix(bg, FX_WHITE, 40) : darken(bg));
-        fx_draw_hline(tx1, tx2, ty2);   fx_draw_vline(tx2, ty1, ty2);
+        fx_color_t bg = w->bg;                  /* 文字底: 未选中与标签条同色 → 文字块自然融进去 */
+        if (sel) {
+            bg = btn_mix(w->bg, FX_WHITE, 55);
+            int padx = 2, pady = 2;
+            int rr = (ty2 - ty1 + 1 - pady * 2) / 2;
+            if (rr > FX_TOK_RADIUS_M) rr = FX_TOK_RADIUS_M;
+            if (rr < 2) rr = 2;
+            fx_set_color(bg);
+            fx_fill_rect_round(tx1 + padx, ty1 + pady, tx2 - padx, ty2 - pady, rr);
+        }
         const char *comma = strchr(p, ',');
         char seg[96];
         int len = comma ? (int)(comma - p) : (int)strlen(p);
@@ -246,8 +251,10 @@ void fxtk_draw_tab(fx_widget_t *w)
         memcpy(seg, p, (size_t)len);
         seg[len] = 0;
         int sw = fx_text_width(seg);
+        /* 文字配色: 未选中的格子现在直接露标签条底色(浅色), 原来的浅灰字会"糊"掉 ——
+         * 实测肉眼几乎读不出来, 所以未选中改深灰(TEXT_DIM), 选中用正文色深灰压在浅色胶囊上。 */
         fx_draw_text_c(tx1 + (tx2 - tx1 + 1 - sw) / 2, ty1 + (ty2 - ty1 - 16) / 2,
-                       seg, sel ? FX_TOK_SELECT_TEXT_BG : FX_TOK_MUTED, bg);
+                       seg, sel ? FX_TOK_TEXT : FX_TOK_TEXT_DIM, bg);
         p = comma ? comma + 1 : p + strlen(p);
     }
     /* 标签条与内容区之间: 深阴影 + 高光, 增强分层 (按方位) */
