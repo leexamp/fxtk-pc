@@ -513,6 +513,8 @@ redraw_widget_now(te); return; }
     }
 }
 
+static void redraw_region(int x1,int y1,int x2,int y2);   /* 定义在后面: 立即重绘复用它擦背景 */
+
 static void redraw_widget_now(fx_widget_t *w)
 {
     if (!w || !(w->flags & FX_F_VISIBLE)) return;
@@ -520,23 +522,12 @@ static void redraw_widget_now(fx_widget_t *w)
     switch (w->type) {
 #if FXTK_WIDGET_BUTTON || FXTK_WIDGET_SLIDER || FXTK_WIDGET_PROGRESS || FXTK_WIDGET_CHECKBOX
     case FX_W_BUTTON: case FX_W_SLIDER: case FX_W_PROGRESS: case FX_W_CHECKBOX:
-        fx_set_clip(w->x1,w->y1,w->x2,w->y2);
-        switch (w->type) {
-#if FXTK_WIDGET_BUTTON
-        case FX_W_BUTTON: fxtk_draw_button(w); break;
-#endif
-#if FXTK_WIDGET_SLIDER
-        case FX_W_SLIDER: fxtk_draw_slider(w); break;
-#endif
-#if FXTK_WIDGET_PROGRESS
-        case FX_W_PROGRESS: fxtk_draw_progress(w); break;
-#endif
-#if FXTK_WIDGET_CHECKBOX
-        case FX_W_CHECKBOX: fxtk_draw_checkbox(w); break;
-#endif
-        default: break;
-        }
-        fx_reset_clip(); return;
+        /* 【v2.4 修复】立即重绘过去是"只设裁剪、直接画", 完全不擦旧像素 —— 于是拖动滑杆
+         * 会沿路留下一串滑块残影(用户报的"脏区未清除"就是这个; 文本光标/进度条同理)。
+         * 现在与脏区路径 redraw_region 完全同语义: 先用窗口背景铺满该矩形, 再重画所有与之
+         * 相交的控件(容器自己会铺自己的底色), 所以放在彩色卡片上的控件也不会被凿出洞。 */
+        redraw_region(w->x1, w->y1, w->x2, w->y2);
+        return;
 #endif
 #if FXTK_WIDGET_CANVAS
     case FX_W_CANVAS:

@@ -27,6 +27,7 @@ static char s_shot_path[512];
 static char s_shot2_path[512];      /* 同一次运行内的第二次截图 (脏区残留检测) */
 static int  s_shot2_at = 0;
 static int  s_shot_at = 30;
+static int  s_win_w = 0, s_win_h = 0;   /* FXTK_WIN="WxH": 指定初始窗口尺寸(复现特定分辨率下的问题) */
 static int  s_quit_after = 0;
 static int  s_frames = 0;
 
@@ -42,6 +43,7 @@ static void init_cb(void)
     fx_set_bg(FX_WINDOW_BG);
     app_init();
 
+    { const char *wn = getenv("FXTK_WIN"); if (wn) sscanf(wn, "%dx%d", &s_win_w, &s_win_h); }
     const char *shot = getenv("FXTK_SHOT");
     if (shot && shot[0]) {
         snprintf(s_shot_path, sizeof(s_shot_path), "%s", shot);
@@ -184,8 +186,8 @@ sapp_desc sokol_main(int argc, char *argv[])
         .frame_cb = frame_cb,
         .cleanup_cb = cleanup_cb,
         .event_cb = event_cb,
-        .width = 1280,
-        .height = 720,
+        .width = (int)(s_win_w ? s_win_w : 1280),
+        .height = (int)(s_win_h ? s_win_h : 720),
         .window_title = s_title,
         .depth_format = SAPP_PIXELFORMAT_NONE,   /* 2D UI: 交换链与管线都不带深度, 避免格式校验冲突 */
         .logger.func = slog_func,
