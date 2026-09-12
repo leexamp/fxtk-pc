@@ -249,6 +249,7 @@ void fx_fill_quad(const float *xy8);
  * 有 GPU 且后端提供 raymarch 钩子时, 直接在指定矩形里由片元着色器算光线步进 ——
  * 不占 CPU 像素缓冲、不做回读。无该能力时返回 0, 调用方回退到 CPU 光追。 */
 int  fx_raymarch_available(void);
+int  fx_quad_warp_gpu(void);   /* v2.4: 四边形形变是否由驱动的 GPU 钩子接管 (HUD 显示用) */
 void fx_draw_raymarch(float time, int x, int y, int w, int h);
 
 /* 桌面扩展: 键盘事件 */

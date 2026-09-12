@@ -93,8 +93,8 @@ static void on_zoom(fx_widget_t *w, void *ud) {
 }
 static void on_spin(fx_widget_t *w, void *ud) { s_spin = fx_get_value(w); }
 static void on_mode(fx_widget_t *w, void *ud) {
-    s_gfx_mode = (s_gfx_mode + 1) % 3;
-    const char *m[3] = { "模式: 全部", "模式: 贴图", "模式: 矢量" };
+    s_gfx_mode = (s_gfx_mode + 1) % 4;
+    const char *m[4] = { "模式: 全部", "模式: 贴图", "模式: 矢量", "模式: 伪3D(四边形形变)" };
     fx_set_title(fx_find("gfx_info"), m[s_gfx_mode]);
 }
 
@@ -221,10 +221,146 @@ static const int16_t HEX_PTS[12] = {
      40,    0,   20,   29,  -20,   29,
     -40,    0,  -20,  -29,   20,  -29,
 };
+
+/* ================= v2.4 P4: 图形页伪 3D 场景 =================
+ * 全部由 fx_draw_image_quad(真透视四边形形变)拼出来, 没有 3D 管线:
+ *   地板/天花板 = 一格一个四边形(近大远小); 走廊 = 两侧墙面四边形序列;
+ *   立方体 = 6 个面各一次形变 + 画家算法(远面先画); 公告板 = 屏幕空间四边形, 永远面向相机。
+ * HUD 显示四边形数 / fps / 形变走的哪条路径(GPU 钩子或 CPU 逆单应)。 */
+static fx_image_t *s_p3_floor = NULL, *s_p3_wall = NULL, *s_p3_spr = NULL;
+static int   s_p3_n = 0;
+static float s_p3_a = 0.0f, s_p3_cube = 0.0f;
+
+static void p3_tiles(void)
+{
+    if (s_p3_floor) return;
+    s_p3_floor = fx_image_create(64, 64);
+    s_p3_wall  = fx_image_create(64, 64);
+    s_p3_spr   = fx_image_create(32, 32);
+    if (!s_p3_floor || !s_p3_wall || !s_p3_spr) return;
+    for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
+        int c = (((x >> 3) + (y >> 3)) & 1);
+        fx_image_set_px(s_p3_floor, x, y, c ? FX_RGB(206, 210, 218) : FX_RGB(116, 122, 132));
+        int b = (((x >> 4) & 1) ^ ((y >> 2) & 1));
+        fx_image_set_px(s_p3_wall, x, y, b ? FX_RGB(158, 96, 74) : FX_RGB(122, 68, 54));
+    }
+    for (int y = 0; y < 32; y++) for (int x = 0; x < 32; x++) {
+        int dx = x - 16, dy = y - 16;
+        fx_image_set_px(s_p3_spr, x, y, (dx*dx + dy*dy) < 210 ? FX_RGB(255, 214, 64) : FX_RGB(24, 40, 78));
+    }
+}
+
+/* 世界 → 画布局部屏幕坐标。相机在 (0,1.45,0) 朝 +z, 场景绕 Y 旋转 a。Z 太近就丢片。 */
+static int p3_proj(float wx, float wy, float wz, float a, int cw, int ch, float *sx, float *sy, float *z)
+{
+    float c = cosf(a), s = sinf(a);
+    float X = wx * c - wz * s, Z = wx * s + wz * c, Y = wy - 1.45f;
+    if (Z < 0.35f) return 0;
+    float f = (float)cw * 1.05f;
+    *sx = (float)cw * 0.5f + f * X / Z;
+    *sy = (float)ch * 0.60f - f * Y / Z;
+    *z  = Z;
+    return 1;
+}
+
+/* 世界坐标 4 角 → 四边形形变; 任一角投影失败(跑到相机后面)则整片跳过 */
+static void p3_face(fx_image_t *tx, float a, int cw, int ch,
+                    const float *wx, const float *wy, const float *wz)
+{
+    float q[8];
+    for (int i = 0; i < 4; i++) {
+        float sx, sy, z;
+        if (!p3_proj(wx[i], wy[i], wz[i], a, cw, ch, &sx, &sy, &z)) return;
+        q[i * 2] = sx; q[i * 2 + 1] = sy;
+    }
+    fx_draw_image_quad(tx, q);
+    s_p3_n++;
+}
+
+static void p3_scene(int cw, int ch)
+{
+    p3_tiles();
+    if (!s_p3_floor) return;
+    s_p3_n = 0;
+    float a = s_p3_a;
+    fx_set_color(FX_RGB(8, 10, 18)); fx_fill_rect(0, 0, cw - 1, ch - 1);
+
+    /* 地板 + 天花板: 每格一个四边形, 透视天然近大远小 */
+    for (int iz = 0; iz < 8; iz++) {
+        for (int ix = -2; ix <= 2; ix++) {
+            float x0 = ix * 1.2f, x1 = x0 + 1.2f, z0 = 1.6f + iz * 1.1f, z1 = z0 + 1.1f;
+            float wx[4] = { x0, x1, x1, x0 };
+            float wz[4] = { z0, z0, z1, z1 };
+            float wy[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+            p3_face(s_p3_floor, a, cw, ch, wx, wy, wz);
+            wy[0] = wy[1] = wy[2] = wy[3] = 2.9f;              /* 天花板 */
+            p3_face(s_p3_floor, a, cw, ch, wx, wy, wz);
+        }
+    }
+    /* 走廊两侧墙: 按 z 分段, 每段一个四边形 */
+    for (int iz = 0; iz < 8; iz++) {
+        float z0 = 1.6f + iz * 1.1f, z1 = z0 + 1.1f;
+        for (int side = 0; side < 2; side++) {
+            float x = side ? 2.6f : -2.6f;
+            float wx[4] = { x, x, x, x };
+            float wz[4] = { z0, z0, z1, z1 };
+            float wy[4] = { 0.0f, 2.9f, 2.9f, 0.0f };
+            p3_face(s_p3_wall, a, cw, ch, wx, wy, wz);
+        }
+    }
+    /* 旋转纹理立方体: 6 个面各一次形变 + 画家算法排序 */
+    {
+        static const int FI[6][4] = { {0,1,2,3}, {5,4,7,6}, {4,0,3,7}, {1,5,6,2}, {4,5,1,0}, {3,2,6,7} };
+        float V[8][3];
+        float ca = cosf(s_p3_cube), sa = sinf(s_p3_cube);
+        float cb = cosf(s_p3_cube * 0.7f), sb = sinf(s_p3_cube * 0.7f);
+        for (int i = 0; i < 8; i++) {
+            float x = (i & 1) ? 0.42f : -0.42f;
+            float y = (i & 2) ? 0.42f : -0.42f;
+            float z = (i & 4) ? 0.42f : -0.42f;
+            float x1 = x * ca - z * sa, z1 = x * sa + z * ca;
+            float y1 = y * cb - z1 * sb, z2 = y * sb + z1 * cb;
+            V[i][0] = x1; V[i][1] = y1 + 1.45f; V[i][2] = z2 + 4.2f;
+        }
+        float fz[6]; int order[6];
+        for (int i = 0; i < 6; i++) {
+            order[i] = i; fz[i] = 0.0f;
+            for (int k = 0; k < 4; k++) fz[i] += V[FI[i][k]][2];
+        }
+        for (int i = 0; i < 5; i++)
+            for (int j = i + 1; j < 6; j++)
+                if (fz[order[j]] > fz[order[i]]) { int t = order[i]; order[i] = order[j]; order[j] = t; }
+        for (int i = 0; i < 6; i++) {
+            int fi = order[i];
+            float wx[4], wy[4], wz[4];
+            for (int k = 0; k < 4; k++) { wx[k] = V[FI[fi][k]][0]; wy[k] = V[FI[fi][k]][1]; wz[k] = V[FI[fi][k]][2]; }
+            p3_face(s_p3_floor, a, cw, ch, wx, wy, wz);
+        }
+    }
+    /* 公告板精灵: 屏幕空间四边形, 永远正对相机(伪 3D 常用手法) */
+    for (int k = 0; k < 3; k++) {
+        float sx, sy, z;
+        if (!p3_proj(-1.8f + k * 1.8f, 1.5f, 2.6f + k * 1.6f, a, cw, ch, &sx, &sy, &z)) continue;
+        float s = 26.0f / z * ((float)cw / 440.0f) * 3.0f;
+        float q[8] = { sx - s, sy - s, sx + s, sy - s, sx + s, sy + s, sx - s, sy + s };
+        fx_draw_image_quad(s_p3_spr, q);
+        s_p3_n++;
+    }
+    {   /* HUD: 四边形数 / fps / 形变路径 */
+        char buf[96];
+        snprintf(buf, sizeof(buf), "四边形 %d · fps %d · %s", s_p3_n, fxtk_fps(),
+                 fx_quad_warp_gpu() ? "GPU 形变" : "CPU 形变");
+        fx_draw_text_c(6, ch - 16, buf, FX_WHITE, FX_RGB(8, 10, 18));
+    }
+    s_p3_a += 0.0015f;      /* 摆头要慢: 太快会转到正对墙面, 看着像"贴墙" */
+    s_p3_cube += 0.020f;
+}
+
 static void on_gfx(fx_widget_t *w, void *ud) {
     int x1, y1, x2, y2;
     fx_widget_rect(w, &x1, &y1, &x2, &y2);
     int cw = x2 - x1 + 1, ch = y2 - y1 + 1;
+    if (s_gfx_mode == 3) { p3_scene(cw, ch); return; }   /* v2.4: 伪 3D 场景(纯四边形形变) */
     float ks = cw / 440.0f;                 /* 【新增】图形随画布等比缩放 */
     if (ks < 0.5f) ks = 0.5f;
     int ang = s_gfx_t % 360;

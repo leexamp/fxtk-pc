@@ -155,7 +155,7 @@ static uint16_t cur_x0, cur_y0, cur_w; static uint32_t cur_idx = 0;
  * 而一帧里完全可能画多张图(图片页 3 张、画板页 canvas 重绘两次…) —— 共用一张就会 panic 直接 abort,
  * 表现就是"图片页/画板闪退"。改成每帧按需取一张, 每次 blit 用不同图片。
  * 暂存缓冲仍然共用一张: GL 后端的 sg_update_image 是【立即】glTexSubImage2D, 不会被后续 blit 覆盖。 */
-#define IMG_SLOTS 8
+#define IMG_SLOTS 16
 static sg_image s_img_tex[IMG_SLOTS]; static sg_view s_img_view[IMG_SLOTS];
 static int s_img_w[IMG_SLOTS], s_img_h[IMG_SLOTS];
 static int s_img_slot = 0;                 /* 帧内轮转游标, 每帧归零 */
@@ -811,9 +811,20 @@ static void drv_blit_tex(void *tex, int sx, int sy, int sw, int sh, int dx, int 
     emit_quad(1, slot, (float)dx, (float)dy, (float)(dx + sw), (float)(dy + sh), u0, v0, u1, v1, 0xFFFFFFFFu);
 }
 
+/* 一帧内的上传缓存: 同一张源图(指针相同)只上传一次, 之后复用同一纹理槽。
+ * 为什么必须有: 图片池每帧只允许每张图更新一次(sokol 校验), 而一个伪 3D 场景一帧要画上百个
+ * 四边形 —— 它们其实只有 3~4 张不同的瓦片图。没有这层去重, 池子第 8 张之后的上传全被丢掉,
+ * 表现就是"画面全空但 HUD 显示画了 94 个四边形"(实测踩到)。 */
+#define IMGC_MAX 32
+static struct { const uint32_t *px; int w, h, dark, slot; } s_imgc[IMGC_MAX];
+static int s_imgc_n = 0;
+
 /* 把一张图上传到图片池的下一张, 返回可用纹理槽(失败 -1)。只上传不绘制 —— blit 与四边形形变共用。 */
 static int img_upload(const uint32_t *px, int w, int h, int dark)
 {
+    for (int i = 0; i < s_imgc_n; i++)
+        if (s_imgc[i].px == px && s_imgc[i].w == w && s_imgc[i].h == h && s_imgc[i].dark == dark)
+            return s_imgc[i].slot;
     int k = s_img_slot++;
     if (k < IMG_SLOTS) {
         s_img_used = k + 1;
@@ -840,7 +851,12 @@ static int img_upload(const uint32_t *px, int w, int h, int dark)
         s_img_stage[i] = rgba_pack(c);
     }
     sg_update_image(s_img_tex[k], &(sg_image_data){ .mip_levels[0] = { s_img_stage, (size_t)w * h * 4 } });
-    return tex_alloc(s_img_tex[k], s_img_view[k], w, h);
+    int slot = tex_alloc(s_img_tex[k], s_img_view[k], w, h);
+    if (slot >= 0 && s_imgc_n < IMGC_MAX) {
+        s_imgc[s_imgc_n].px = px; s_imgc[s_imgc_n].w = w; s_imgc[s_imgc_n].h = h;
+        s_imgc[s_imgc_n].dark = dark; s_imgc[s_imgc_n].slot = slot; s_imgc_n++;
+    }
+    return slot;
 }
 
 /* 图片 blit: 取一张空闲图片上传后按贴图绘制 (见上面 img pool 注释) */
@@ -1206,7 +1222,7 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
     if (s_sdf_n > s_sdf_max) s_sdf_max = s_sdf_n;
 
     s_vb_n = 0; s_ib_n = 0; s_cmd_n = 0; s_tex_n = 0;
-    s_img_slot = 0; s_img_used = 0;
+    s_img_slot = 0; s_img_used = 0; s_imgc_n = 0;
     s_sdf_n = 0;
 }
 

@@ -976,6 +976,8 @@ fx_image_t *fx_image_load(const char *path)
 }
 
 /* ================= v2.4 GPU 光线步进入口 ================= */
+int fx_quad_warp_gpu(void) { return (s_drv && s_drv->draw_image_quad) ? 1 : 0; }
+
 int fx_raymarch_available(void) { return (s_drv && s_drv->raymarch) ? 1 : 0; }
 
 void fx_draw_raymarch(float time, int x, int y, int w, int h)
