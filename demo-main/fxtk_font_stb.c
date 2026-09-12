@@ -52,6 +52,8 @@ typedef struct {
 } tc_t;
 static tc_t   s_tc[TC_MAX];
 static uint32_t s_clock = 0;
+int fxtk_text_created = 0;      /* 诊断: 已创建纹理数(缓存未命中) */
+int fxtk_text_evicted = 0;
 
 /* ================= 字体加载 ================= */
 
@@ -196,6 +198,9 @@ static unsigned char *rasterize(font_t *f, const char *s, fx_color_t fg, fx_colo
     if (!px) return NULL;
     unsigned char br = (unsigned char)((bg >> 16) & 0xFF), bgc = (unsigned char)((bg >> 8) & 0xFF), bb = (unsigned char)(bg & 0xFF);
     unsigned char fr = (unsigned char)((fg >> 16) & 0xFF), fgc = (unsigned char)((fg >> 8) & 0xFF), fb = (unsigned char)(fg & 0xFF);
+    /* 字节序(2026-09 修正): sokol 的 SG_PIXELFORMAT_RGBA8 是标准 RGBA 布局 —— 内存第 0 字节 = R。
+     * 以前这里按 B,G,R 写(说是"实测"), 那是被回读路径的双重互换骗了: 结果彩色文字/彩色底反色
+     * (蓝字变橙字), 而且与顶点色互相矛盾。纹理与顶点现在统一成【byte0 = R】。 */
     for (int i = 0; i < w * h; i++) { px[i*4+0] = br; px[i*4+1] = bgc; px[i*4+2] = bb; px[i*4+3] = 255; }
 
     int baseline = (int)(f->ascent * f->scale + 0.5f) + 1;
@@ -216,9 +221,9 @@ static unsigned char *rasterize(font_t *f, const char *s, fx_color_t fg, fx_colo
                     unsigned int a = bmp[yy * gw + xx];
                     if (!a) continue;
                     unsigned char *d = &px[((size_t)py * w + pxx) * 4];
-                    d[0] = (unsigned char)((fr * a + d[0] * (255 - a)) / 255);
-                    d[1] = (unsigned char)((fgc * a + d[1] * (255 - a)) / 255);
-                    d[2] = (unsigned char)((fb * a + d[2] * (255 - a)) / 255);
+                    d[0] = (unsigned char)((fr  * a + d[0] * (255 - a)) / 255);   /* R */
+                    d[1] = (unsigned char)((fgc * a + d[1] * (255 - a)) / 255);   /* G */
+                    d[2] = (unsigned char)((fb  * a + d[2] * (255 - a)) / 255);   /* B */
                 }
             }
             stbtt_FreeBitmap(bmp, NULL);
@@ -250,6 +255,7 @@ static tc_t *tc_alloc(void)
     for (int i = 0; i < TC_MAX; i++) if (!s_tc[i].key) return &s_tc[i];
     int oldest = 0;
     for (int i = 1; i < TC_MAX; i++) if (s_tc[i].age < s_tc[oldest].age) oldest = i;
+    fxtk_text_evicted++;
     tc_free(&s_tc[oldest]);
     return &s_tc[oldest];
 }
@@ -281,6 +287,7 @@ void fx_draw_text_c(int x, int y, const char *s, fx_color_t fg, fx_color_t bg)
         snprintf(key, sizeof(key), "%d|%06x|%06x|%s", f->size, (unsigned)fg, (unsigned)bg, s);
         e->key = strdup(key);
         e->f = f; e->w = w; e->h = h; e->px = px; e->age = ++s_clock;
+        fxtk_text_created++;
         e->tex.img = sg_make_image(&(sg_image_desc){
             .width = w, .height = h, .pixel_format = SG_PIXELFORMAT_RGBA8,
             .usage.dynamic_update = true, .label = "fxtk-text" });

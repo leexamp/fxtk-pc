@@ -234,6 +234,12 @@ void fx_canvas_transform_point(float x, float y, float *ox, float *oy);
 /* 实心四边形填充 (四角顺时针 xy8), 与 fx_draw_image_quad 同一套单应机制 */
 void fx_fill_quad(const float *xy8);
 
+/* ================= v2.4 GPU 实时光线步进 =================
+ * 有 GPU 且后端提供 raymarch 钩子时, 直接在指定矩形里由片元着色器算光线步进 ——
+ * 不占 CPU 像素缓冲、不做回读。无该能力时返回 0, 调用方回退到 CPU 光追。 */
+int  fx_raymarch_available(void);
+void fx_draw_raymarch(float time, int x, int y, int w, int h);
+
 /* 桌面扩展: 键盘事件 */
 typedef struct { char utf8[64]; int key; int down; int mod; } fx_keyev_t;
 enum { FX_KEY_BACKSPACE = 8, FX_KEY_RETURN = 13, FX_KEY_ESCAPE = 27,
@@ -262,6 +268,7 @@ typedef struct {
     void (*blit_img_rot)(const uint32_t *px,int w,int h,int cx,int cy,int dw,int dh,double ang); /* GPU旋转blit */
     int  (*read_pixels)(uint32_t *dst,int w,int h);   /* v2.4 可选: 回读当前帧 (截图/金图回归); dst 填 0xRRGGBB 或 0xAARRGGBB */
     void (*draw_image_quad)(const uint32_t *px,int w,int h,const float *xy8,int bilinear); /* v2.4 可选: GPU 真透视四边形 (无则走 CPU 逆单应) */
+    void (*raymarch)(float time,int x1,int y1,int x2,int y2); /* v2.4 可选: GPU 实时光线步进到指定矩形 (sokol) */
 } fx_driver_t;
 
 void fx_init(const fx_driver_t *drv);

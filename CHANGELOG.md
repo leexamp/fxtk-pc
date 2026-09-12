@@ -38,6 +38,31 @@
 - **`fx_image_load` 迁到 backends/stb**：删除 `fxtk_image_sdl.c`，图片解码不再依赖 SDL_image
   （PNG/JPG/BMP/GIF/TGA 全支持，ESP32/无头环境同样可用）。
 
+### 修复（sokol 后端，实测驱动）
+- **颜色整体 R/B 互换（严重）**：`SG_VERTEXFORMAT_UBYTE4N` 是把**内存第 0 字节**喂给 vec4.x，
+  小端下直接写 `0xAARRGGBB` 得到的是 `vec4(B,G,R,A)` → 片元 `frag_color = vcol` 让整屏红蓝互换
+  （红按钮显示成蓝色）。顶点色现在与纹理路径统一走 `rgba_pack`（内存 R,G,B,A）。
+  字体纹理层此前按 B,G,R 写（同一个错误结论的产物）也一并纠正。
+- **"颜色已修好"的误判根因**：`fx_screenshot` 约定驱动 `read_pixels` 交出 `0xAARRGGBB`，
+  而 sokol 驱动直接回传 `glReadPixels(GL_RGBA)` 的原始字——回读的 R/B 错误与渲染的 R/B 错误
+  **互相抵消**，截出来的 PNG 看着正确、屏幕上却是错的，于是把"顶点直接写 0xAARRGGBB"当成了实测结论。
+  现在回读显式搬一次字节，**截图与屏幕逐像素一致**（已用 X11 抓屏对照验证）。
+- **图片页/画板页闪退**：所有图片共用一张 `s_img_tex`，而 sokol 校验"同一帧同一图片只能
+  `sg_update_image` 一次"，一帧画第二张图就 `VALIDATE_UPDIMG_ONCE` → panic → abort。
+  改为**图片池**（8 张轮转，暂存缓冲共用：GL 的 image update 是立即上传，安全）。
+- **拖动/操作延迟高**：sokol_app 按系统速率逐个投递鼠标移动事件，而框架 `fx_poll` **每帧只消费一个**
+  touch 事件（与 SDL 驱动同款语义），逐个入队会让界面用的坐标落后指针 100~200ms（实测排队
+  max=216ms/avg=101ms、队列深度 15+）。改为**移动事件合并**（同状态时覆盖队尾，按下/抬起边沿原样入队），
+  与 SDL 驱动"只保存最新鼠标坐标"等价 → 实测排队 max=0.0ms、队列深度 1、每帧 3 个事件也不积压。
+- **3D 页用不了 GPU**：生成的 GLSL 把 `u_rect/u_time` 放在 `uniform` 块里，而本版 sokol 的 GL 后端
+  用 `glGetUniformLocation` **逐个名字**定位成员——块成员拿不到 location → `sg_apply_uniforms` 直接
+  `continue` 跳过，参数永远传不进去。改用松散 uniform，并把 3D 页接到 `fx_raymarch_available()` /
+  `fx_draw_raymarch()`（满分辨率、不占 CPU 像素、不回读）。GPU 成为默认，"GPU: 开/关"按钮可切回 CPU 路径对比。
+- **验证工具补齐**（两个后端对齐，便于 CI 与金图）：`FXTK_CLICK` / `FXTK_CLICKS`（多段点击，测跨页残留）、
+  `FXTK_DRAG[,帧号]` / `FXTK_DRAG_LOOP`（持续拖动，模拟 125~1000Hz 鼠标）、`FXTK_SHOT[_AT]`、
+  `FXTK_QUIT_AFTER` 现对 SDL 驱动同样可用；`FXTK_STAT=1` 输出**分段耗时**（输入排队/整帧/像素层/提交/
+  图片数/文本纹理数与淘汰）——只报 fps 判断不出"手感延迟"。
+
 ### 工程链
 - 构建清单同步新增 `fxtk_backends.c`（Makefile / build*.sh / CI / ESP32 CMakeLists）；Win32 侧补 `-lcomdlg32`。
 - `tools/spike/README.md` 记录 sokol 迁移的 7 个坑位（EGL 上下文类型、GLSL 310 es、uniform block 名、

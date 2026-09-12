@@ -50,7 +50,7 @@ static int s_tx[TRAIL_N], s_ty[TRAIL_N], s_ti = 0;
 /* 3D 页状态 */
 static fx_image_t *s_rt = NULL;
 static int s_oc = 0;
-static int s_gpu = 0;                 /* 超频: 原生分辨率光追 */
+static int s_gpu = 1;                 /* v2.4: 默认用 GPU 光追(无 GPU 后端时自动回退 CPU) */
 static float s_rt_time = 0;
 static int s_rspeed = 30, s_rqual = 50;
 static int s_frames = 0;
@@ -273,6 +273,7 @@ static void on_oc(fx_widget_t *w, void *ud) {
 static void on_gpu(fx_widget_t *w, void *ud) {
     s_gpu = !s_gpu;
     fx_set_title(w, s_gpu ? "GPU: 开" : "GPU: 关");
+    fx_repaint();
 }
 static void on_3d(fx_widget_t *w, void *ud) {
     int x1, y1, x2, y2;
@@ -287,13 +288,21 @@ static void on_3d(fx_widget_t *w, void *ud) {
         s_rt = fx_image_create(rw, rh);
         if (!s_rt) return;
     }
-    if (s_gpu && gpu_raymarch_ok()) {
-        gpu_raymarch_render(s_rt->px, rw, rh, s_rt_time);
+    /* v2.4: 三条路径, 优先级从快到慢 ——
+     *   ① fx_raymarch_available(): 后端提供片元着色器级 raymarch(sokol), 直接在当前矩形里算,
+     *      不占 CPU 像素、不做回读、分辨率跟窗口走(真·GPU);
+     *   ② gpu_raymarch_ok(): 旧的独立 GL 上下文通道(默认关, 部分 NVIDIA 驱动不稳);
+     *   ③ CPU 软件光线步进: 无 GPU 平台(ESP32/测试)的兜底, 有分辨率上限。 */
+    int gpu_direct = (s_gpu && fx_raymarch_available());
+    if (gpu_direct) {
+        fx_set_color(FX_BLACK); fx_fill_rect(0, 0, cw - 1, ch - 1);
+        fx_draw_raymarch(s_rt_time, 0, 0, cw, ch);      /* 由驱动把视口限定到该矩形 */
     } else {
-        raymarch_render(s_rt->px, rw, rh, s_rt_time, 24 + s_rqual);
+        if (s_gpu && gpu_raymarch_ok()) gpu_raymarch_render(s_rt->px, rw, rh, s_rt_time);
+        else                            raymarch_render(s_rt->px, rw, rh, s_rt_time, 24 + s_rqual);
+        fx_set_color(FX_BLACK); fx_fill_rect(0, 0, cw - 1, ch - 1);
+        fx_draw_image(s_rt, 0, 0, cw, ch);
     }
-    fx_set_color(FX_BLACK); fx_fill_rect(0, 0, cw - 1, ch - 1);
-    fx_draw_image(s_rt, 0, 0, cw, ch);
     s_rt_time += 0.016f * (0.3f + s_rspeed * 0.06f);
 
     /* FPS 统计 (每 500ms 刷新) */
@@ -303,8 +312,8 @@ static void on_3d(fx_widget_t *w, void *ud) {
     if (now - s_fps_t0 >= 500) {
         char buf[48];
         snprintf(buf, sizeof(buf), "FPS: %d (%dx%d) [%s]",
-                 (int)(s_frames * 1000L / (now - s_fps_t0)), rw, rh,
-                 (s_gpu && gpu_raymarch_ok()) ? gpu_raymarch_renderer() : "CPU");
+                 (int)(s_frames * 1000L / (now - s_fps_t0)), gpu_direct ? cw : rw, gpu_direct ? ch : rh,
+                 gpu_direct ? "GPU 着色器" : ((s_gpu && gpu_raymarch_ok()) ? gpu_raymarch_renderer() : "CPU"));
         fx_set_title(fx_find("fps_lbl"), buf);
         s_frames = 0; s_fps_t0 = now;
     }
@@ -380,7 +389,7 @@ fx_label_new(pixel("262,224","470,236"), name("info"), page(2), title("点击数
     fx_slider_new(pixel("6,204", "300,220"), page(11), call(on_pt_slider));
     fx_label_new(pixel("306,204", "444,220"), page(11), title("拖动调粒子数(×200)"), fgcolor(FX_RGB(51, 51, 51)));
     fx_button_new(pixel("6,202", "76,236"), page(4), title("超频: 关"), color(FX_RGB(244, 67, 54)), call(on_oc));
-    fx_button_new(pixel("82,202", "152,236"), page(4), title("GPU: 关"), color(FX_RGB(76, 175, 80)), call(on_gpu));
+    fx_button_new(pixel("82,202", "152,236"), page(4), title("GPU: 开"), color(FX_RGB(76, 175, 80)), call(on_gpu));
     fx_slider_new(pixel("160,204", "250,218"), name("rspeed"), page(4), value(s_rspeed), color(FX_RGB(33, 150, 243)), call(on_rspeed));
     fx_slider_new(pixel("160,220", "250,234"), name("rqual"), page(4), value(s_rqual), color(FX_RGB(76, 175, 80)), call(on_rqual));
     fx_label_new(pixel("258,202", "444,236"), name("fps_lbl"), page(4), title("FPS: --"), fgcolor(FX_RGB(51, 51, 51)));

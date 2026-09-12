@@ -21,6 +21,7 @@ typedef unsigned long XID;
 #include "fxtk.h"
 #include <SDL2/SDL.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 
 extern fx_driver_t fx_sdl_driver;
@@ -53,10 +54,25 @@ int main(int argc, char *argv[]) {
     
     printf("[I] SYS: UI Ready. Entering main loop (window is resizable)...\n");
     
+    /* 无人值守测试钩子 (与 main_sokol.c 对齐, 便于两个后端做同样的截图/输入验证):
+     *   FXTK_CLICK="x,y"      第 20 帧注入一次点击
+     *   FXTK_SHOT=<path.png>  第 FXTK_SHOT_AT(默认 30) 帧截图
+     *   FXTK_QUIT_AFTER=<n>   第 n 帧退出 */
+    const char *clk = getenv("FXTK_CLICK");
+    const char *shot_path = getenv("FXTK_SHOT");
+    int shot_at = 30, quit_after = 0, frames = 0;
+    { const char *a = getenv("FXTK_SHOT_AT"); if (a) shot_at = atoi(a); }
+    { const char *q = getenv("FXTK_QUIT_AFTER"); if (q) quit_after = atoi(q); }
+    if (shot_path && !quit_after) quit_after = shot_at + 1;
+
     while (1) {
         sdl_handle_events();  // 会处理 resize 事件
+        frames++;
+        if (clk && frames == 20) { int cx = 0, cy = 0; if (sscanf(clk, "%d,%d", &cx, &cy) == 2) { fx_touch_press(cx, cy); fx_touch_release(cx, cy); } }
         fx_poll();
+        if (shot_path && frames == shot_at) printf("[shot] %s (%d)\n", fx_screenshot(shot_path) ? "ok" : "fail", fx_screenshot(shot_path) ? 1 : 0);
         sdl_update_screen();
+        if (quit_after > 0 && frames >= quit_after) break;
         /* 帧同步: vsync 下 present 已限 60fps, 不额外 sleep 避免双重节拍抖动;
            FXTK_BENCH(无vsync) 时自旋限帧 */
         if (getenv("FXTK_BENCH")) SDL_Delay(16);

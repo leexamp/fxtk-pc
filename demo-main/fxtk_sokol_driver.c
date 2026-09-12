@@ -28,6 +28,7 @@
 #include "sokol_app.h"
 #include "sokol_glue.h"
 #include "sokol_log.h"
+#include "raymarch_fs330.h"   /* 由 tools/gen_raymarch_glsl330.py 生成 */
 #include "fxtk_backends.h"   /* fx_time_ms: 统一计时, 免依赖 sokol_time */
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,7 +77,8 @@ static int s_tex_n = 0;
 /* ================= 驱动状态 ================= */
 
 static int s_w = 480, s_h = 272;
-static sg_pipeline s_pip_solid, s_pip_tex;
+static sg_pipeline s_pip_solid, s_pip_tex, s_pip_raymarch;
+static sg_shader s_sh_raymarch;
 static sg_buffer   s_vbuf;
 static sg_sampler  s_smp_nearest, s_smp_linear;
 
@@ -104,33 +106,105 @@ static int s_need_clear = 1;
 /* FPS 统计 (fxtk_sokol_frame 用; 声明须早于使用) */
 static int s_fps = 0, s_fps_n = 0;
 
+/* ---------- v2.4 性能诊断 (FXTK_STAT=1) ----------
+ * 只报 fps 会骗人: fps 60 也可能"手感延迟"。这里把一帧拆成四段分别计时 ——
+ *   ①输入排队(事件入队→框架取走) ②框架逐帧(fx_poll) ③像素层上传(px_flush) ④GPU 提交(含 vsync 等待)
+ * 单位为微秒, 每秒打印一次 max/avg, 用来定位"卡"到底卡在哪一段。 */
+extern int fxtk_text_created, fxtk_text_evicted;   /* 由 fxtk_font_stb.c 提供 */
+#if !defined(_WIN32)
+#include <time.h>
+#endif
+static uint32_t now_us(void)
+{
+#if defined(_WIN32)
+    return (uint32_t)fx_time_ms() * 1000u;      /* Windows 取毫秒精度, 足以定位 >1ms 的问题 */
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint32_t)ts.tv_sec * 1000000u + (uint32_t)(ts.tv_nsec / 1000);
+#endif
+}
+uint32_t fxtk_sokol_now_us(void) { return now_us(); }
+
+static uint32_t s_lat_us_max = 0, s_lat_us_sum = 0; static int s_lat_n = 0;
+static long s_merge_n = 0; static int s_depth_max = 0;      /* ①输入排队 */
+static uint32_t s_frame_us_max = 0, s_frame_us_sum = 0;                          /* ②③④整帧 */
+static uint32_t s_px_us_max = 0; static long s_px_area = 0; static int s_px_calls = 0;  /* ③像素上传 */
+static uint32_t s_sub_us_max = 0, s_sub_us_sum = 0;
+
+static uint32_t s_stat_t0 = 0;               /* FXTK_STAT 的每秒汇总基准 */
+void fxtk_sokol_note_frame(uint32_t us)      /* main 在 fx_poll + fxtk_sokol_frame 外包一层计时 */
+{
+    if (us > s_frame_us_max) s_frame_us_max = us;
+    s_frame_us_sum += us;
+}
+
 /* 当前 set_window 状态 (软件像素按行推送) */
 static uint16_t cur_x0, cur_y0, cur_w; static uint32_t cur_idx = 0;
 
 /* 图片上传用纹理 (blit_img) */
-static sg_image s_img_tex; static sg_view s_img_view; static int s_img_w = 0, s_img_h = 0;
+/* 图片上传用纹理【池】。
+ * 为什么是池而不是一张: sokol 校验 "同一帧同一图片只能 sg_update_image 一次"(VALIDATE_UPDIMG_ONCE),
+ * 而一帧里完全可能画多张图(图片页 3 张、画板页 canvas 重绘两次…) —— 共用一张就会 panic 直接 abort,
+ * 表现就是"图片页/画板闪退"。改成每帧按需取一张, 每次 blit 用不同图片。
+ * 暂存缓冲仍然共用一张: GL 后端的 sg_update_image 是【立即】glTexSubImage2D, 不会被后续 blit 覆盖。 */
+#define IMG_SLOTS 8
+static sg_image s_img_tex[IMG_SLOTS]; static sg_view s_img_view[IMG_SLOTS];
+static int s_img_w[IMG_SLOTS], s_img_h[IMG_SLOTS];
+static int s_img_slot = 0;                 /* 帧内轮转游标, 每帧归零 */
+static int s_img_over = 0, s_img_used_max = 0, s_img_used = 0;   /* 诊断: 本帧用了几个 */
 static uint32_t *s_img_stage = NULL; static int s_img_cap = 0;
 
 /* ================= 输入事件队列 (按类型分队列) =================
  * 注意: 框架按类型分别轮询(touch/key/wheel), 早期实现用单队列+延迟数组,
  * 会在某类型轮询时把其它类型的事件吞掉 → 输入完全失效。这里分成三个环形队列。 */
 #define EVQ_MAX 256
-typedef struct { int x, y, p; } ev_touch_t;
+typedef struct { int x, y, p, edge; uint32_t t; } ev_touch_t;  /* t=入队时刻(us); edge=按下/抬起边沿(不可合并) */
 typedef struct { int x, y, dy; } ev_wheel_t;
 
 static ev_touch_t s_q_touch[EVQ_MAX]; static int s_qt_h = 0, s_qt_t = 0;
 static ev_wheel_t s_q_wheel[EVQ_MAX]; static int s_qw_h = 0, s_qw_t = 0;
 static fx_keyev_t s_q_key[EVQ_MAX];   static int s_qk_h = 0, s_qk_t = 0;
 
+/* 入队 touch/鼠标事件。
+ * 【关键】框架每帧只消费 1 个 touch 事件(fx_poll 里是 if 而不是 while, 与 SDL 驱动同款语义),
+ * 而 sokol_app 会把鼠标移动按系统速率逐个投递 —— 若逐个入队, 快速拖动一帧能积压十几个事件,
+ * 界面用的坐标就落后指针 100~200ms(实测排队 max=216ms/avg=101ms), 手感就是"卡"。
+ * SDL 驱动不排队, 它只保存【最新】鼠标坐标; 这里用等价做法: 未按键的移动事件直接覆盖队尾,
+ * 保证每帧最多推进一个"最新位置"; 按下/抬起是边沿, 必须原样入队(否则点击落点会被拖走)。 */
 static void q_push_touch(int x, int y, int p)
 {
-    int n = (s_qt_t + 1) % EVQ_MAX;
-    if (n == s_qt_h) { s_qt_h = (s_qt_h + 1) % EVQ_MAX; }   /* 满: 丢最旧, 不阻塞 */
+    if (s_qt_h != s_qt_t) {                     /* 队列非空: 看队尾能否合并 */
+        int tl = (s_qt_t + EVQ_MAX - 1) % EVQ_MAX;
+        if (!s_q_touch[tl].edge && s_q_touch[tl].p == p) {
+            s_q_touch[tl].x = x; s_q_touch[tl].y = y; s_q_touch[tl].t = now_us();
+            s_merge_n++;
+            return;                             /* 合并: 只保留最新坐标 */
+        }
+    }
+    {   int n = (s_qt_t + 1) % EVQ_MAX;
+        if (n == s_qt_h) { s_qt_h = (s_qt_h + 1) % EVQ_MAX; }   /* 满: 丢最旧, 不阻塞 */
+    }
     s_q_touch[s_qt_t].x = x; s_q_touch[s_qt_t].y = y; s_q_touch[s_qt_t].p = p;
+    s_q_touch[s_qt_t].edge = 0; s_q_touch[s_qt_t].t = now_us();
+    s_qt_t = (s_qt_t + 1) % EVQ_MAX;
+}
+
+/* 同上: 边沿事件(按下/抬起)入队, 不参与合并 */
+static void q_push_touch_edge(int x, int y, int p)
+{
+    int n = (s_qt_t + 1) % EVQ_MAX;
+    if (n == s_qt_h) { s_qt_h = (s_qt_h + 1) % EVQ_MAX; }
+    s_q_touch[s_qt_t].x = x; s_q_touch[s_qt_t].y = y; s_q_touch[s_qt_t].p = p;
+    s_q_touch[s_qt_t].edge = 1; s_q_touch[s_qt_t].t = now_us();
     s_qt_t = n;
 }
 static void q_push_wheel(int x, int y, int dy)
 {
+    if (s_qw_h != s_qw_t) {                    /* 同一格内的连续滚动累加(框架每帧也只看一个滚轮事件) */
+        int tl = (s_qw_t + EVQ_MAX - 1) % EVQ_MAX;
+        if (s_q_wheel[tl].x == x && s_q_wheel[tl].y == y) { s_q_wheel[tl].dy += dy; return; }
+    }
     int n = (s_qw_t + 1) % EVQ_MAX;
     if (n == s_qw_h) { s_qw_h = (s_qw_h + 1) % EVQ_MAX; }
     s_q_wheel[s_qw_t].x = x; s_q_wheel[s_qw_t].y = y; s_q_wheel[s_qw_t].dy = dy;
@@ -162,6 +236,10 @@ static int cmd_new(int pip, int tex)
 /* 颜色打包: 顶点属性 UBYTE4N 按内存字节序读作 R,G,B,A。
  * 我们的像素/颜色常量是 0xAARRGGBB(小端内存 = B,G,R,A) → 直接写入会让 R/B 互换
  * (实测: 黄色波形线被画成蓝色)。这里显式交换, 得到 0xAABBGGRR。 */
+/* 注意: 本版 sokol 里两条绘制路径的字节序要求【不同】——
+ *   顶点属性 UBYTE4N: 直接写 0xAARRGGBB 即正确(实测);
+ *   RGBA8 纹理上传(像素层/图片): 必须交换 R/B, 否则同色区域会出现反色子矩形(实测)。
+ * 这是"颜色有问题"的根因, 别再当成冗余代码删掉。 */
 static inline uint32_t rgba_pack(uint32_t rgb)
 {
     return 0xFF000000u | ((rgb & 0xFFu) << 16) | (rgb & 0xFF00u) | ((rgb >> 16) & 0xFFu);
@@ -177,8 +255,13 @@ static void vtx_push(float x, float y, float u, float v, uint32_t c)
      * 屏幕 y=0 必须映射到 NDC -1。实测踩坑: 原写法让整幅画面上下颠倒。 */
     s_vb[s_vb_n].y = y / rh * 2.0f - 1.0f;
     s_vb[s_vb_n].u = u; s_vb[s_vb_n].v = v;
-    /* 顶点色: 本版 sokol 的 UBYTE4N 直接按 0xAARRGGBB 写入即正确(实测), 不要再交换 */
-    s_vb[s_vb_n].rgba = c;
+    /* 顶点色字节序(2026-09 修正, 这条以前写错了):
+     * sokol 的 SG_VERTEXFORMAT_UBYTE4N 把【内存里第 0 个字节】喂给 vec4 的 x 分量。
+     * 小端下直接写 0xAARRGGBB 的内存布局是 B,G,R,A → 着色器拿到 vec4(B,G,R,A),
+     * 片元直接 frag_color = vcol 就会让整屏 R/B 互换(红按钮显示成蓝按钮)。
+     * 与纹理路径同理, 这里也必须搬一次字节: 存成 0xAABBGGRR 后内存才是 R,G,B,A。
+     * 老注释"直接写即正确"是被【同样互换了两次的截图回读】骗出来的结论, 勿再改回。 */
+    s_vb[s_vb_n].rgba = rgba_pack(c);
     s_vb_n++;
 }
 
@@ -247,6 +330,7 @@ static void px_ensure_img(void)
 
 static void px_flush(void)
 {
+    uint32_t t_px0 = now_us();
     if (!s_dirty || !s_fb) { s_dirty = 0; cur_idx = 0; return; }
     int x0 = s_dx0, y0 = s_dy0, x1 = s_dx1, y1 = s_dy1;
     if (x0 < 0) x0 = 0;
@@ -255,6 +339,7 @@ static void px_flush(void)
     if (y1 >= s_fb_h) y1 = s_fb_h - 1;
     int w = x1 - x0 + 1, h = y1 - y0 + 1;
     s_dirty = 0; cur_idx = 0;
+    s_px_area += (long)w * h; s_px_calls++;
     if (w < 1 || h < 1) return;
     px_ensure_img();
     if (s_px_stage_cap < w * h) {
@@ -288,6 +373,7 @@ static void px_flush(void)
                   (float)x0 / (float)s_w, (float)y0 / (float)s_h,
                   (float)(x1 + 1) / (float)s_w, (float)(y1 + 1) / (float)s_h, 0xFFFFFFFFu);
     for (int y = y0; y <= y1; y++) memset(&s_fb[(size_t)y * s_fb_w + x0], 0, (size_t)w * 4);
+    { uint32_t d = now_us() - t_px0; if (d > s_px_us_max) s_px_us_max = d; }   /* ③像素层 */
 }
 
 /* ================= fx_driver_t 钩子 ================= */
@@ -395,6 +481,32 @@ static int drv_init(void)
     pd.shader = sh_tex; pd.label = "fxtk-tex";
     s_pip_tex = sg_make_pipeline(&pd);
 
+    /* ---- 光追管线: 同一个全屏四边形, 片元着色器做光线步进 ---- */
+    {
+        static const char *vs_rm =
+            "#version 330\n"
+            "layout(location=0) in vec2 position;\n"    /* 已是 NDC */
+            "void main() { gl_Position = vec4(position, 0.0, 1.0); }\n";
+        sg_shader_desc rs;
+        memset(&rs, 0, sizeof(rs));
+        rs.vertex_func.source = vs_rm;
+        rs.vertex_func.entry = "main";
+        rs.fragment_func.source = RAYMARCH_FS330;
+        rs.fragment_func.entry = "main";
+        rs.attrs[0].glsl_name = "position";
+        rs.uniform_blocks[0].stage = SG_SHADERSTAGE_FRAGMENT;
+        rs.uniform_blocks[0].size = 20;              /* vec4 u_rect(16) + float u_time(4) —— 必须与成员布局一致 */
+        rs.uniform_blocks[0].glsl_uniforms[0].glsl_name = "u_rect";
+        rs.uniform_blocks[0].glsl_uniforms[0].type = SG_UNIFORMTYPE_FLOAT4;
+        rs.uniform_blocks[0].glsl_uniforms[0].array_count = 1;
+        rs.uniform_blocks[0].glsl_uniforms[1].glsl_name = "u_time";
+        rs.uniform_blocks[0].glsl_uniforms[1].type = SG_UNIFORMTYPE_FLOAT;
+        rs.uniform_blocks[0].glsl_uniforms[1].array_count = 1;
+        s_sh_raymarch = sg_make_shader(&rs);
+        pd.shader = s_sh_raymarch; pd.label = "fxtk-raymarch";
+        s_pip_raymarch = sg_make_pipeline(&pd);
+    }
+
     /* 全屏 blit 用的静态四边形 (NDC + UV) */
     {
         static const vtx_t q[4] = {
@@ -497,18 +609,28 @@ static void drv_blit_tex(void *tex, int sx, int sy, int sw, int sh, int dx, int 
     emit_quad(1, slot, (float)dx, (float)dy, (float)(dx + sw), (float)(dy + sh), u0, v0, u1, v1, 0xFFFFFFFFu);
 }
 
-/* 图片 blit: 上传到共享纹理后按贴图绘制 */
+/* 图片 blit: 取一张空闲图片上传后按贴图绘制 (见上面 img pool 注释) */
 static void drv_blit_img(const uint32_t *px, int w, int h, int dx, int dy, int dw, int dh, int dark)
 {
     if (!px || w <= 0 || h <= 0 || dw <= 0 || dh <= 0) return;
     px_flush();
-    if (s_img_w != w || s_img_h != h || s_img_tex.id == SG_INVALID_ID) {
-        if (s_img_tex.id != SG_INVALID_ID) { sg_destroy_view(s_img_view); sg_destroy_image(s_img_tex); }
-        s_img_tex = sg_make_image(&(sg_image_desc){
+    int k = s_img_slot++;
+    if (k < IMG_SLOTS) {
+        s_img_used = k + 1;
+        if (s_img_used > s_img_used_max) s_img_used_max = s_img_used;
+    }
+    if (k >= IMG_SLOTS) {
+        /* 池用尽: 宁可跳过这一张, 也不能对同一张图更新两次(会 abort 整个进程) */
+        if (s_img_over++ == 0) fx_log(FX_LOG_WARN, "[sokol] 单帧图片数超过 %d, 已跳过多余的图片", IMG_SLOTS);
+        return;
+    }
+    if (s_img_w[k] != w || s_img_h[k] != h || s_img_tex[k].id == SG_INVALID_ID) {
+        if (s_img_tex[k].id != SG_INVALID_ID) { sg_destroy_view(s_img_view[k]); sg_destroy_image(s_img_tex[k]); }
+        s_img_tex[k] = sg_make_image(&(sg_image_desc){
             .width = w, .height = h, .pixel_format = SG_PIXELFORMAT_RGBA8,
             .usage.dynamic_update = true, .label = "fxtk-image" });
-        s_img_view = sg_make_view(&(sg_view_desc){ .texture = { .image = s_img_tex }, .label = "fxtk-image-view" });
-        s_img_w = w; s_img_h = h;
+        s_img_view[k] = sg_make_view(&(sg_view_desc){ .texture = { .image = s_img_tex[k] }, .label = "fxtk-image-view" });
+        s_img_w[k] = w; s_img_h[k] = h;
         if (s_img_cap < w * h) { free(s_img_stage); s_img_stage = (uint32_t *)malloc((size_t)w * h * 4); s_img_cap = w * h; }
     }
     if (!s_img_stage) return;
@@ -517,8 +639,8 @@ static void drv_blit_img(const uint32_t *px, int w, int h, int dx, int dy, int d
         if (dark) c = ((c >> 1) & 0x7F7F7Fu);
         s_img_stage[i] = rgba_pack(c);
     }
-    sg_update_image(s_img_tex, &(sg_image_data){ .mip_levels[0] = { s_img_stage, (size_t)w * h * 4 } });
-    int slot = tex_alloc(s_img_tex, s_img_view, w, h);
+    sg_update_image(s_img_tex[k], &(sg_image_data){ .mip_levels[0] = { s_img_stage, (size_t)w * h * 4 } });
+    int slot = tex_alloc(s_img_tex[k], s_img_view[k], w, h);
     if (slot < 0) return;
     emit_quad(1, slot, (float)dx, (float)dy, (float)(dx + dw), (float)(dy + dh), 0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
 }
@@ -527,6 +649,12 @@ static int drv_touch_read(int *x, int *y, int *pressed)
 {
     if (s_qt_h == s_qt_t) return 0;
     *x = s_q_touch[s_qt_h].x; *y = s_q_touch[s_qt_h].y; *pressed = s_q_touch[s_qt_h].p;
+    {   /* ①输入排队延迟: 入队到框架取走 */
+        uint32_t lat = now_us() - s_q_touch[s_qt_h].t;
+        { int d = (s_qt_t - s_qt_h + EVQ_MAX) % EVQ_MAX; if (d > s_depth_max) s_depth_max = d; }
+        if (lat > s_lat_us_max) s_lat_us_max = lat;
+        s_lat_us_sum += lat; s_lat_n++;
+    }
     s_qt_h = (s_qt_h + 1) % EVQ_MAX;
     return 1;
 }
@@ -568,6 +696,19 @@ static void drv_blit_img_rot(const uint32_t *px, int w, int h, int cx, int cy, i
 static uint32_t *s_shot_buf = NULL;
 static int s_shot_w = 0, s_shot_h = 0, s_shot_cap = 0, s_shot_req = 0, s_shot_ready = 0;
 
+/* v2.4: GPU 光追 —— 作为一条绘制命令插入命令流(不占 CPU 像素缓冲, 不做回读):
+ * 视口限定到目标矩形, 全屏四边形(fs 用 gl_FragCoord 反推局部像素坐标) */
+void fxtk_sokol_raymarch(float time, int x1, int y1, int x2, int y2)
+{
+    if (x2 < x1 || y2 < y1) return;
+    px_flush();                                   /* 保持 z 序 */
+    if (cmd_new(2, -1) < 0) return;
+    cmd_t *cm = &s_cmd[s_cmd_n - 1];
+    cm->count = 6;                                /* 复用整屏 blit 四边形 */
+    cm->time = time;
+    cm->cx1 = x1; cm->cy1 = y1; cm->cx2 = x2; cm->cy2 = y2;   /* 顺带用裁剪矩形记录目标区 */
+}
+
 /* 测试用: 直接往触摸队列注入一次按下+抬起 (验证输入链路, 不依赖真实鼠标) */
 void fxtk_sokol_inject_click(int x, int y)
 {
@@ -578,10 +719,32 @@ void fxtk_sokol_inject_click(int x, int y)
 /* 测试用: 注入一次拖拽 (按下 → 中间移动若干步 → 抬起), 用于自动化验证拖动/残留 */
 void fxtk_sokol_inject_drag(int x0, int y0, int x1, int y1, int steps)
 {
-    q_push_touch(x0, y0, 1);
+    q_push_touch_edge(x0, y0, 1);                  /* 按下是边沿, 不能被后续移动合并掉 */
     for (int i = 1; i <= steps; i++)
         q_push_touch(x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps, 1);
-    q_push_touch(x1, y1, 0);
+    q_push_touch_edge(x1, y1, 0);
+}
+
+/* --- 持续拖动发生器 (FXTK_DRAG_LOOP="x0,y0,x1,y1[,steps[,每帧事件数]]") ---
+ * 为什么需要它: 一次性灌 24 个事件测不出"跟手不跟手"。真实鼠标按系统速率(常见 125~1000Hz)
+ * 投递移动事件, 所以要让"每帧到达 N 个移动事件"持续发生, 再看框架消费到的是不是最新位置。 */
+static int s_dl_on = 0, s_dl_x0, s_dl_y0, s_dl_x1, s_dl_y1, s_dl_steps = 24, s_dl_i = 0, s_dl_per = 3;
+void fxtk_sokol_drag_loop_start(int x0, int y0, int x1, int y1, int steps, int per_frame)
+{
+    s_dl_on = 1; s_dl_x0 = x0; s_dl_y0 = y0; s_dl_x1 = x1; s_dl_y1 = y1;
+    s_dl_steps = steps > 1 ? steps : 2; s_dl_per = per_frame > 0 ? per_frame : 1; s_dl_i = 0;
+    q_push_touch_edge(x0, y0, 1);
+}
+void fxtk_sokol_drag_loop_tick(void)
+{
+    if (!s_dl_on) return;
+    for (int k = 0; k < s_dl_per; k++) {
+        int ph = s_dl_i % (s_dl_steps * 2);                 /* 往返三角波, 拖到终点再拖回来 */
+        int t  = ph < s_dl_steps ? ph : (s_dl_steps * 2 - ph);
+        q_push_touch(s_dl_x0 + (s_dl_x1 - s_dl_x0) * t / s_dl_steps,
+                     s_dl_y0 + (s_dl_y1 - s_dl_y0) * t / s_dl_steps, 1);
+        s_dl_i++;
+    }
 }
 
 void fxtk_sokol_request_shot(void) { s_shot_req = 1; s_shot_ready = 0; }
@@ -597,6 +760,11 @@ static void shot_capture(void)
 #if !defined(_WIN32)
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, s_shot_buf);
+    /* 框架的 fx_screenshot 约定 read_pixels 交出的是 0xAARRGGBB(与 SDL 驱动一致)。
+     * glReadPixels(GL_RGBA) 在小端下得到的是 A,B,G,R 布局的字, 必须搬一次字节 ——
+     * 少了这一步, 回读会【和渲染的 R/B 错误互相抵消】, 截出来的图看着是对的, 屏幕却是错的:
+     * 正是这个坑让我上一轮误判"颜色已修好"。 */
+    for (int i = 0; i < w * h; i++) s_shot_buf[i] = rgba_pack(s_shot_buf[i] & 0xFFFFFFu);
     for (int y = 0; y < h / 2; y++)          /* GL 原点在左下 → 翻成左上 */
         for (int x = 0; x < w; x++) {
             uint32_t t = s_shot_buf[(size_t)y * w + x];
@@ -636,6 +804,7 @@ fx_driver_t fx_sokol_driver = {
     .fill_tri = drv_fill_tri,
     .draw_line = drv_draw_line,
     .read_pixels = drv_read_pixels,
+    .raymarch = fxtk_sokol_raymarch,   /* v2.4: GPU 实时光线步进 */
 };
 
 /* ================= 帧的呈现 (由 sokol_app 回调触发) ================= */
@@ -657,6 +826,7 @@ static void canvas_ensure(void)
 
 void fxtk_sokol_frame(int fb_w, int fb_h)
 {
+    uint32_t t_sub0 = now_us();
     /* 窗口尺寸变化统一走 apply_size(它会重建缓冲并让框架重排/重绘)。
      * 早期实现在这里直接赋值 s_w/s_h, 会与按旧尺寸分配的 fb 脱节 → 堆越界崩溃。 */
     if (fb_w != s_w || fb_h != s_h) fxtk_sokol_apply_size(fb_w, fb_h);
@@ -696,6 +866,25 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
             if (cx2 < cx1 || cy2 < cy1) continue;
             sg_apply_scissor_rect(cx1, cy1, cx2 - cx1 + 1, cy2 - cy1 + 1, true);
         }
+        if (c->pip == 2) {
+            /* 光追: 视口=目标矩形, 用整屏 blit 四边形(NDC), fs 依据 u_rect 反推局部像素 */
+            int w = c->cx2 - c->cx1 + 1, h = c->cy2 - c->cy1 + 1;
+            float u[5];
+            u[0] = (float)c->cx1;
+            u[1] = (float)(s_h - (c->cy1 + h));    /* 转成帧缓冲左下原点 */
+            u[2] = (float)w; u[3] = (float)h;
+            u[4] = c->time;
+            sg_apply_pipeline(s_pip_raymarch);
+            sg_apply_uniforms(0, &(sg_range){ u, sizeof(u) });
+            sg_apply_viewport(c->cx1, c->cy1, w, h, true);
+            sg_bindings rb = {0};
+            rb.vertex_buffers[0] = s_blit_vb;
+            rb.index_buffer = s_blit_ib;
+            sg_apply_bindings(&rb);
+            sg_draw(0, 6, 1);
+            sg_apply_viewport(0, 0, s_w, s_h, true);   /* 复原, 免得影响后续命令 */
+            continue;
+        }
         sg_apply_pipeline(c->pip == 0 ? s_pip_solid : s_pip_tex);
         sg_bindings b = {0};
         b.vertex_buffers[0] = s_vbuf;
@@ -727,13 +916,34 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
     shot_capture();      /* 交换前回读 (交换后默认帧缓冲内容不可依赖) */
     sg_commit();
 
+    { uint32_t d = now_us() - t_sub0; if (d > s_sub_us_max) s_sub_us_max = d; s_sub_us_sum += d; }
     if (getenv("FXTK_STAT")) {
         static int n = 0;
-        if ((n++ % 30) == 0)
-            fprintf(stderr, "[stat] 顶点=%d 索引=%d 命令=%d 纹理=%d 分辨率=%dx%d fps=%d\n",
-                    s_vb_n, s_ib_n, s_cmd_n, s_tex_n, s_w, s_h, s_fps);
+        if ((n++ % 30) == 0) {
+            uint32_t t = now_us();
+            if (s_stat_t0 == 0) s_stat_t0 = t;
+            if (t - s_stat_t0 >= 1000000u) {           /* 每秒汇总一次 */
+                double sec = (t - s_stat_t0) / 1000000.0;
+                fprintf(stderr,
+                    "[stat] %dx%d fps=%d | 顶点=%d 命令=%d 纹理槽=%d 文本纹理=%d/淘汰%d | "
+                    "排队 max=%.1fms avg=%.2fms(%d) 合并=%ld 深度max=%d | 整帧 max=%.1fms avg=%.2fms | "
+                    "像素 max=%.1fms 面积=%.0fpx/帧 次数=%.1f/帧 | 提交 max=%.1fms avg=%.2fms | 图片/帧 max=%d 溢出=%d\n",
+                    s_w, s_h, s_fps, s_vb_n, s_cmd_n, s_tex_n,
+                    fxtk_text_created, fxtk_text_evicted,
+                    s_lat_us_max / 1000.0, s_lat_n ? s_lat_us_sum / 1000.0 / s_lat_n : 0.0, s_lat_n, s_merge_n, s_depth_max,
+                    s_frame_us_max / 1000.0, s_frame_us_sum / 1000.0 / sec,
+                    s_px_us_max / 1000.0, s_px_area / sec, s_px_calls / sec,
+                    s_sub_us_max / 1000.0, s_sub_us_sum / 1000.0 / sec, s_img_used_max, s_img_over);
+                s_stat_t0 = t;
+                s_lat_us_max = s_lat_us_sum = 0; s_lat_n = 0; s_merge_n = 0; s_depth_max = 0;
+                s_frame_us_max = 0; s_frame_us_sum = 0;
+                s_px_us_max = 0; s_px_area = 0; s_px_calls = 0;
+                s_sub_us_max = 0; s_sub_us_sum = 0; s_img_used_max = 0;
+            }
+        }
     }
     s_vb_n = 0; s_ib_n = 0; s_cmd_n = 0; s_tex_n = 0;
+    s_img_slot = 0; s_img_used = 0;
 }
 
 /* ================= SDL 驱动同款辅助 API (框架/演示依赖) ================= */
@@ -789,9 +999,9 @@ void fxtk_sokol_handle_event(const sapp_event *e)
     switch (e->type) {
     case SAPP_EVENTTYPE_MOUSE_DOWN:
         if (e->mouse_button == SAPP_MOUSEBUTTON_RIGHT) { s_rc = 1; s_rc_x = (int)e->mouse_x; s_rc_y = (int)e->mouse_y; break; }
-        s_mouse_down = 1; q_push_touch((int)e->mouse_x, (int)e->mouse_y, 1); break;
+        s_mouse_down = 1; q_push_touch_edge((int)e->mouse_x, (int)e->mouse_y, 1); break;
     case SAPP_EVENTTYPE_MOUSE_UP:
-        s_mouse_down = 0; q_push_touch((int)e->mouse_x, (int)e->mouse_y, 0); break;
+        s_mouse_down = 0; q_push_touch_edge((int)e->mouse_x, (int)e->mouse_y, 0); break;
     case SAPP_EVENTTYPE_MOUSE_MOVE:
         q_push_touch((int)e->mouse_x, (int)e->mouse_y, s_mouse_down); break;
     case SAPP_EVENTTYPE_MOUSE_SCROLL:
@@ -799,11 +1009,13 @@ void fxtk_sokol_handle_event(const sapp_event *e)
     case SAPP_EVENTTYPE_TOUCHES_BEGAN:
     case SAPP_EVENTTYPE_TOUCHES_MOVED:
     case SAPP_EVENTTYPE_TOUCHES_ENDED:
-        if (e->num_touches > 0)
-            q_push_touch((int)e->touches[0].pos_x, (int)e->touches[0].pos_y,
-                         e->type != SAPP_EVENTTYPE_TOUCHES_ENDED);
-        else if (e->type == SAPP_EVENTTYPE_TOUCHES_ENDED)
-            q_push_touch(0, 0, 0);
+        if (e->num_touches > 0) {
+            int moved = (e->type == SAPP_EVENTTYPE_TOUCHES_MOVED);
+            if (moved) q_push_touch((int)e->touches[0].pos_x, (int)e->touches[0].pos_y, 1);
+            else q_push_touch_edge((int)e->touches[0].pos_x, (int)e->touches[0].pos_y,
+                                   e->type != SAPP_EVENTTYPE_TOUCHES_ENDED);
+        } else if (e->type == SAPP_EVENTTYPE_TOUCHES_ENDED)
+            q_push_touch_edge(0, 0, 0);
         break;
     case SAPP_EVENTTYPE_CHAR: {
         uint32_t cp = e->char_code;

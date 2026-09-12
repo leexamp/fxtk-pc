@@ -67,13 +67,52 @@ static void frame_cb(void)
 {
     {   /* 测试钩子: FXTK_DRAG="x0,y0,x1,y1[,steps]" 在第 30 帧注入一次拖拽 */
         const char *dg = getenv("FXTK_DRAG");
-        if (dg && s_frames + 1 == 30) {
+        static int drag_frame = -1;
+        if (drag_frame < 0) {
+            drag_frame = 30;
+            if (dg) { int a,b,c,d,e,f; if (sscanf(dg, "%d,%d,%d,%d,%d,%d", &a,&b,&c,&d,&e,&f) == 6) drag_frame = f; }
+        }
+        if (dg && s_frames + 1 == drag_frame) {
             int x0 = 0, y0 = 0, x1 = 0, y1 = 0, st = 12;
             int n = sscanf(dg, "%d,%d,%d,%d,%d", &x0, &y0, &x1, &y1, &st);
             if (n >= 4) {
                 extern void fxtk_sokol_inject_drag(int, int, int, int, int);
                 fxtk_sokol_inject_drag(x0, y0, x1, y1, st > 0 ? st : 12);
                 fx_log(FX_LOG_INFO, "[test] 注入拖拽 (%d,%d)->(%d,%d)", x0, y0, x1, y1);
+            }
+        }
+    }
+    {   /* 测试钩子: FXTK_DRAG_LOOP="x0,y0,x1,y1[,steps[,每帧事件数]]" 持续拖动, 测"跟手"延迟 */
+        const char *dl = getenv("FXTK_DRAG_LOOP");
+        if (dl) {
+            extern void fxtk_sokol_drag_loop_start(int, int, int, int, int, int);
+            extern void fxtk_sokol_drag_loop_tick(void);
+            static int started = 0;
+            if (!started && s_frames >= 20) {
+                int x0 = 0, y0 = 0, x1 = 0, y1 = 0, st = 24, pf = 3;
+                if (sscanf(dl, "%d,%d,%d,%d,%d,%d", &x0, &y0, &x1, &y1, &st, &pf) >= 4) {
+                    fxtk_sokol_drag_loop_start(x0, y0, x1, y1, st, pf);
+                    started = 1;
+                    fx_log(FX_LOG_INFO, "[test] 持续拖动 (%d,%d)->(%d,%d) %d步 每帧%d事件", x0, y0, x1, y1, st, pf);
+                }
+            } else if (started) {
+                fxtk_sokol_drag_loop_tick();
+            }
+        }
+    }
+    {   /* 测试钩子: FXTK_CLICKS="x,y,帧;x,y,帧;..." 多段点击(测跨页切换残留/IPC) */
+        const char *cs = getenv("FXTK_CLICKS");
+        if (cs) {
+            const char *q = cs;
+            while (*q) {
+                int cx = 0, cy = 0, cf = 0;
+                if (sscanf(q, "%d,%d,%d", &cx, &cy, &cf) == 3 && s_frames + 1 == cf) {
+                    fxtk_sokol_inject_click(cx, cy);
+                    fx_log(FX_LOG_INFO, "[test] 点击 (%d,%d) @帧%d", cx, cy, cf);
+                }
+                const char *sc = strchr(q, ';');
+                if (!sc) break;
+                q = sc + 1;
             }
         }
     }
@@ -98,8 +137,14 @@ static void frame_cb(void)
     int want_shot  = (s_shot_path[0]  && s_frames + 1 == s_shot_at);
     int want_shot2 = (s_shot2_path[0] && s_frames + 1 == s_shot2_at);
     if (want_shot || want_shot2) fxtk_sokol_request_shot();   /* 驱动在本帧 pass 内抓取 */
-    fx_poll();
-    fxtk_sokol_frame(sapp_width(), sapp_height());
+    {   /* 整帧计时(框架逐帧 + 像素层 + 提交), FXTK_STAT 汇总打印: 光看 fps 判断不出"手感延迟" */
+        extern uint32_t fxtk_sokol_now_us(void);
+        extern void fxtk_sokol_note_frame(uint32_t us);
+        uint32_t t0 = fxtk_sokol_now_us();
+        fx_poll();
+        fxtk_sokol_frame(sapp_width(), sapp_height());
+        fxtk_sokol_note_frame(fxtk_sokol_now_us() - t0);
+    }
     s_frames++;
 
     if (want_shot) {

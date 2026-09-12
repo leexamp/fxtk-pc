@@ -926,6 +926,18 @@ fx_image_t *fx_image_load(const char *path)
     return out;
 }
 
+/* ================= v2.4 GPU 光线步进入口 ================= */
+int fx_raymarch_available(void) { return (s_drv && s_drv->raymarch) ? 1 : 0; }
+
+void fx_draw_raymarch(float time, int x, int y, int w, int h)
+{
+    if (!s_drv || !s_drv->raymarch || w <= 0 || h <= 0) return;
+    int x1 = x, y1 = y, x2 = x + w - 1, y2 = y + h - 1;
+    if (x2 < s_clip_x1 || x1 > s_clip_x2 || y2 < s_clip_y1 || y1 > s_clip_y2) return;   /* 完全在裁剪外 */
+    flush_line();
+    s_drv->raymarch(time, x1 + s_ox, y1 + s_oy, x2 + s_ox, y2 + s_oy);
+}
+
 /* ================= v2.4 四边形形变 (projective quad warp) =================
  * 把整张图映射到任意凸四边形 —— 真透视, 不是两个三角形的仿射近似(那种画法有对角缝)。
  * 数学: 解 8 元线性方程组得单应矩阵 H (源单位方 → 目标四角), 渲染时用 H⁻¹ 逐像素
