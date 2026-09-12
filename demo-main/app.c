@@ -229,7 +229,7 @@ static const int16_t HEX_PTS[12] = {
  * HUD 显示四边形数 / fps / 形变走的哪条路径(GPU 钩子或 CPU 逆单应)。 */
 static fx_image_t *s_p3_floor = NULL, *s_p3_wall = NULL, *s_p3_spr = NULL;
 static int   s_p3_n = 0;
-static float s_p3_a = 0.0f, s_p3_cube = 0.0f;
+static float s_p3_t = 0.0f, s_p3_cube = 0.0f;   /* t: 摆动相位 */
 
 static void p3_tiles(void)
 {
@@ -282,7 +282,10 @@ static void p3_scene(int cw, int ch)
     p3_tiles();
     if (!s_p3_floor) return;
     s_p3_n = 0;
-    float a = s_p3_a;
+    /* 相机左右摆动而不是让世界连续旋转: 连续旋转转到背面时整条走廊都在相机后面、
+     * 所有四边形被投影丢弃 → 画面整个变空(HUD 里四边形数从 105 掉到 7, 用户报的"伪3D到后面没了")。
+     * 用有界摆动(±22°, 周期约 14s)保证走廊永远在相机前方。 */
+    float a = 0.38f * sinf(s_p3_t * 0.45f);
     fx_set_color(FX_RGB(8, 10, 18)); fx_fill_rect(0, 0, cw - 1, ch - 1);
 
     /* 地板 + 天花板: 每格一个四边形, 透视天然近大远小 */
@@ -352,7 +355,7 @@ static void p3_scene(int cw, int ch)
                  fx_quad_warp_gpu() ? "GPU 形变" : "CPU 形变");
         fx_draw_text_c(6, ch - 16, buf, FX_WHITE, FX_RGB(8, 10, 18));
     }
-    s_p3_a += 0.0015f;      /* 摆头要慢: 太快会转到正对墙面, 看着像"贴墙" */
+    s_p3_t += 1.0f;
     s_p3_cube += 0.020f;
 }
 

@@ -12,11 +12,12 @@
  *     streaming 纹理(只上传脏区大小) → 作为一条贴图命令插入命令流, z 序天然正确。
  *  4. read_pixels 用 GL 后端直接 glReadPixels (截图/金图)。D3D11 后端暂不支持(返回 0)。
  */
-#if defined(_WIN32)
-  #define SOKOL_D3D11
-#else
-  #define SOKOL_GLCORE
-#endif
+/* v2.4: 统一走 OpenGL(GLCORE), Windows 也是 —— 两条理由:
+ *  ① sokol 的 D3D11 后端要求另写 HLSL 着色器, 而本驱动全部着色器都是 GLSL 330;
+ *     用 GLCORE 在 Windows 上(WGL)可以直接复用同一份源码, 不必维护两套着色器。
+ *  ② read_pixels 走 glReadPixels, D3D11 后端下截图是失效的(金图回归会没有依据)。
+ * 代价: Windows 侧需要系统自带 opengl32.dll(所有 Windows 都有) —— 正好满足"单 exe 无第三方 DLL"。 */
+#define SOKOL_GLCORE
 
 #define SOKOL_APP_IMPL
 #define SOKOL_GFX_IMPL

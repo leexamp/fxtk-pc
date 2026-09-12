@@ -92,6 +92,23 @@
 - **SDF 着色器不能复用带纹理绑定的 shader desc**: 复用会让 SDF 管线要求 view/sampler 绑定,
   未绑定直接 `VALIDATE_ABND_EXPECTED_VIEW_BINDING` panic。改用独立 desc。
 
+### 修复（伪 3D"到后面就没了"）
+- **场景周期性变空**: 伪 3D 原本让整个世界绕相机**连续旋转**, 转到背面时整条走廊都落在相机后面,
+  所有四边形被投影丢弃 → 画面整个空掉(HUD 里四边形数从 105 掉到 7)。
+  用户反馈"伪3D怎么到后面没了"就是这个。改为**有界摆动**(±22°, 周期约 14s), 走廊永远在相机前方。
+- 实测: 帧 200 / 700 / 1500 / 2400 都有稳定几何(砖墙 9.2万~18.7万像素, 地板 9.2万~14.2万),
+  修复前帧 1500 两类都是 0。
+
+### 新增（P6：Windows 单 exe 无第三方 DLL）
+- **驱动在 Windows 上也改用 OpenGL(GLCORE)**, 不再用 D3D11: ①D3D11 要另写 HLSL, 而全部着色器都是
+  GLSL 330; ②D3D11 后端下 `glReadPixels` 截图失效(金图回归没依据)。Windows 自带 opengl32.dll, 正好。
+- 新增 `demo-main/build_win_sokol.sh`: 不链 SDL, 只链系统库 + `-static -static-libgcc`
+  (否则 raymarch 的线程会引出 `libwinpthread-1.dll`, 又变成要带 DLL)。
+- **实测达标**: `dist/win_sokol/fxtk_sokol.exe` 的 `objdump -p` 只剩 Windows 系统 DLL
+  (comdlg32/GDI32/KERNEL32/msvcrt/ole32/SHELL32/USER32), **无 SDL2.dll / SDL2_ttf.dll / libwinpthread**。
+- 体积 431KB: 超过路线图 ≤250KB 的口径(那是 SDL 时代的 demo 目标; sokol 后端自带 sokol_app+gfx+glue
+  与 stb_truetype)。**关键项"单 exe 无 DLL"已达标**, 体积项待定口径或后续再瘦。
+
 ### 新增（P4 第二部分：图形页伪 3D demo）
 - 图形页新增第 4 个模式「伪3D(四边形形变)」: 场景**全部由 `fx_draw_image_quad` 拼出, 没有 3D 管线** ——
   地板/天花板(每格一个四边形, 近大远小)、走廊两侧砖墙(按 z 分段的四边形序列)、

@@ -190,7 +190,9 @@ void fx_image_quad_set_corners(fx_widget_t *w, const float *xy8);   /* 编辑器
   零 `ERROR:` / 零 `runtime error`(第 17 轮实测; 命令见下)
 - ✅ bench 无回归(bench 页 0.36ms/帧); ✅ Linux 体积 144KB(≤150KB); ✅ 12 页 sweep panic=0
 - ✅ **Windows 交叉构建通过**(第 18 轮实测): `demo-main/build_win_cross.sh` → `dist/win/fxtk_win.exe`
-- ✗ **"单个 exe 无 DLL 依赖"未达标(SDL 路径)**: `objdump -p` 显示该 exe 仍依赖 `SDL2.dll` + `SDL2_ttf.dll`
+- ✅ **"单个 exe 无 DLL 依赖"已达标(sokol 路径, 第 20 轮)**: `build_win_sokol.sh` → 431KB,
+  `objdump` 只剩 Windows 系统 DLL; 体积 431KB 超 ≤250KB 口径(待定口径/再瘦)
+- ✗ (已由 sokol 路径解决) 旧的 SDL 路径仍然带 DLL:: `objdump -p` 显示该 exe 仍依赖 `SDL2.dll` + `SDL2_ttf.dll`
   (其余 comdlg32/KERNEL32/msvcrt/ole32/SHELL32/USER32 都是 Windows 系统 DLL, 可接受)。
   要达标必须走 **sokol 路径**(vendored、只链系统 opengl32), 即给交叉脚本加 `fxtk_sim_sokol` 的 Win 目标,
   并顺带量体积(目标 ≤250KB)。这是 P6 交叉编译项的下一步。
