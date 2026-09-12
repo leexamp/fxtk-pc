@@ -99,7 +99,19 @@
 - 效果刻意克制: 只有色块标签的四个角变化(同源 bench 差异 28 像素); 普通纯文字标签本就没有可圆的形状。
 - `make test` PASS; 已 `make golden-update`。
 
-### P5 收官小结(9/9)
+### 新增（P6: ESP32 编译冒烟）
+- `tools/esp32_smoke.sh` + `make esp32-smoke`: **不需要 ESP-IDF 工具链**的接口级冒烟 ——
+  用最小假 IDF 头(框架在 ESP32 下只用到 `esp_log_write`/`esp_timer_get_time` + FreeRTOS 的
+  `vTaskDelay`/`pdMS_TO_TICKS`)+ `-DESP_PLATFORM` 对 6 个核心文件做 `-fsyntax-only` 检查; 已接进 CI。
+- **抓到一个真 bug**: `fxtk_backends.c` 在 ESP32 路径里调用 `vTaskDelay(pdMS_TO_TICKS(...))`
+  却**没有包含 FreeRTOS 头**, 靠别处传递包含侥幸编过 —— 已补 `freertos/FreeRTOS.h` + `task.h`。
+- **把测试本身也验证了一遍(负向验证)**: 第一版冒烟"通过"其实不可信 —— C99 下**隐式函数声明只是警告**,
+  故意调用一个不存在的 `esp_*` 函数居然编过了。加 `-Werror=implicit-function-declaration`
+  等四条升级为错误后, 负向用例被正确抓住, 真正的缺失包含也随即暴露。
+  教训: 一个"通过得太容易"的检查等于没有检查, 必须先用负向用例证明它能抓到错。
+- 不覆盖: `fxtk_font.c`(SDL_ttf 文本层, ESP32 用另一套文本层)、链接与真机运行(需 IDF 与硬件)。
+
+### P5 收官小结(9/9)### P5 收官小结(9/9)
 按钮 / 输入框 / 滑杆 / 标签页 / 列表 / 进度条 / 复选框 / 卡片 / 标签 全部过了一遍。回头看,
 **9 项里有 7 项的"改前问题"都是同一类: 圆角与留白不一致**(硬编码 4、硬直角、选中行顶格、
 圆角填充配直角描边、圆角+直角描边矛盾、屏幕底板与卡片不分)。这正是设计令牌要解决的问题 ——

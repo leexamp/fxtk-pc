@@ -25,6 +25,10 @@
   #include <unistd.h>
   #include "esp_log.h"
   #include "esp_timer.h"
+  /* 本文件 170 行附近用 vTaskDelay(pdMS_TO_TICKS(...)) 做延时 —— 以前没包含 FreeRTOS 头,
+   * 靠别处传递包含侥幸编过(ESP32 冒烟用 -Werror=implicit-function-declaration 抓出来的)。 */
+  #include "freertos/FreeRTOS.h"
+  #include "freertos/task.h"
 #else
   #include <unistd.h>
   #include <dirent.h>

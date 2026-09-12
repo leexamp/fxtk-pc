@@ -82,3 +82,11 @@ jobs:
 
       - name: Cross-build an example
         run: cd demo-main && bash ./build_win_cross.sh ex05_scroll
+
+  # v2.4: ESP32 侧接口级编译冒烟 (不需要 ESP-IDF 工具链; 抓隐式声明等"侥幸编过"的问题)
+  esp32-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ESP32 接口级冒烟
+        run: ./tools/esp32_smoke.sh

@@ -132,3 +132,8 @@ golden-update:
 shared:
 	./build_shared.sh
 .PHONY: shared
+
+# ---- ESP32 侧接口级编译冒烟 ----
+esp32-smoke:
+	../tools/esp32_smoke.sh
+.PHONY: esp32-smoke
