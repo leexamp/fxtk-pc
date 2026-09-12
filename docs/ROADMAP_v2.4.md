@@ -185,8 +185,12 @@ void fx_image_quad_set_corners(fx_widget_t *w, const float *xy8);   /* 编辑器
 单 exe(必须, 因为另一条验收项要求"单个 exe 无 DLL 依赖")实测 **431KB**, 构成:
 `.text` 298KB + `.rdata` 111KB(含 vendored sokol_app/gfx/glue + stb_truetype + 框架 + demo)。
 三条路与代价:
-1. **改走 exe + DLL**: 但 sokol_app 的实现段(含入口)必须在 exe 里, 核心库拆出去只能省约 100KB
-   → 估计仍在 **310KB 左右, 达不到 250KB**; 且与"单 exe 无 DLL"矛盾。
+1. **改走 exe + DLL —— 实测不可行(第 34 轮验证)**: 这不是"省 100KB"的问题, 而是**依赖方向不允许**:
+   框架核心的文本 API(`fx_draw_text*`)由 `fxtk_font_stb.c` 提供, 而该层调用 sokol 的 `sg_make_image`,
+   所以文本层与 sokol 实现段必须待在同一个模块里; 而 sokol_app 的实现段包含程序入口, 又必须在 exe 里。
+   结果: 想把核心拆成 DLL, 就得给 DLL 提供"由 exe 导出"的导入库(循环依赖), 或把 sokol 也塞进 DLL(入口又出不去)。
+   实测: 强行只链核心导入库时构建直接失败; 去掉核心硬链出来的 exe 是 365KB 但**符号缺失、不可运行**,
+   不能当作有效方案。→ 结论: Windows 侧要么保持单 exe, 要么砍功能, 没有干净的 DLL 拆分路径。
 2. **砍功能**: 去掉图片解码(stb_image)或 PNG 编码(stb_image_write)约省 60~90KB —— 会损失"导入图片/截图"能力。
 3. **调整口径**: 单 exe sokol 版按 ~450KB 计(仍无任何第三方 DLL 依赖)。
 建议选 3(能力完整、零第三方 DLL), 若要 ≤250KB 则必须接受 2 的功能缩水。
