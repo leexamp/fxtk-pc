@@ -297,13 +297,21 @@ void fxtk_draw_textedit(fx_widget_t *w)
     fx_color_t fg = (w->fg == FX_WHITE) ? FX_BLACK : w->fg;
     const char *txt = w->text_buf ? w->text_buf : w->title;
     int len = (int)strlen(txt);
+    /* P5 审美迭代 2/9(输入框): 原先输入框是硬直角, 而按钮/滑杆都是圆角 —— 同屏看就是"两套设计"。
+     * 改成圆角填充 + 圆角描边: 与按钮同为 1 次填充 + 1 次描边, **零额外绘制调用**;
+     * 圆角取 FX_TOK_RADIUS_S(输入框比按钮更"方"一点, 保持输入区的稳重感)。 */
+    int er = FX_TOK_RADIUS_S;
+    { int ech = w->y2 - w->y1 + 1, ecw = w->x2 - w->x1 + 1;
+      if (er > ech / 2) er = ech / 2;
+      if (er > ecw / 2) er = ecw / 2; }
     fx_set_color(bg);
-    fx_fill_rect(w->x1, w->y1, w->x2, w->y2);
+    fx_fill_rect_round(w->x1, w->y1, w->x2, w->y2, er);
     fx_set_color(focused ? FX_TOK_PRIMARY : FX_GRAY);
-    fx_draw_rect(w->x1, w->y1, w->x2, w->y2);
+    if (er > 0) fx_draw_rect_round(w->x1, w->y1, w->x2, w->y2, er);
+    else        fx_draw_rect(w->x1, w->y1, w->x2, w->y2);
 
-    int tx = w->x1 + 6;
-    int aw = (w->x2 - w->x1 + 1) - 12;
+    int tx = w->x1 + FX_TOK_TEXT_PAD_X;
+    int aw = (w->x2 - w->x1 + 1) - FX_TOK_TEXT_PAD_X * 2;
     int lh = 22;
 
     /* 自动换行: 计算每行起点 */
