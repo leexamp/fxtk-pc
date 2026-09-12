@@ -184,6 +184,14 @@ void fx_image_quad_set_corners(fx_widget_t *w, const float *xy8);   /* 编辑器
   改用 ①图元羽化 ②掉帧自动降档 两项替代。若要 4x MSAA, 按"启动时 `FXTK_MSAA=4` 申请 +
   离屏画布 pass 多重采样 + resolve"的形式补, 不影响现有档位。
 
+### 验收项状态（实测）
+- ✅ `make test` 双后端全绿(真实 + stub)
+- ✅ **ASan/UBSan 干净**: `gcc -O1 -g -fsanitize=address,undefined` 构建无头测试并运行 → `PASS (0 fail)`,
+  零 `ERROR:` / 零 `runtime error`(第 17 轮实测; 命令见下)
+- ✅ bench 无回归(bench 页 0.36ms/帧); ✅ Linux 体积 144KB(≤150KB); ✅ 12 页 sweep panic=0
+- ⏳ Windows 交叉构建 + 单 exe 无 DLL(≤250KB)、ESP32 编译冒烟、14 张画布金图回归 —— 未做
+- 已知非阻断警告: `fxtk_backends.c:816` format-truncation(255 字节源写进 96 字节缓冲, 有意的截断)
+
 ### 每轮必须留下的验证证据（至少跑一遍）
 ```
 make test      # 双后端无头测试, 必须 PASS
