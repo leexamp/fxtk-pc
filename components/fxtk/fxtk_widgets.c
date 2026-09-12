@@ -71,7 +71,19 @@ void fxtk_draw_label(fx_widget_t *w)
     int x = w->x1;
     if (w->rows == 1) x = w->x1 + (cw - tw) / 2;
     else if (w->rows == 2) x = w->x2 - tw;
-    if (w->bg != FX_BLACK) { fx_set_color(w->bg); fx_fill_rect(w->x1, w->y1, w->x2, w->y2); }
+    /* P5 审美迭代 9/9(标签): 带底色的"色块标签"(如"颜色显示区"那种色条)原为硬直角, 与其它控件不一致。
+     * 圆角要【自保护】: 文字是用 fx_draw_text_c 铺一块底色矩形画上去的, 若文字块够到四角就会把圆角重新切方 ——
+     * 所以只在"文字块四周留白 ≥ 圆角半径"时才圆, 否则保持方形(宁可不圆, 也不出现半圆角)。 */
+    int rad = 0;
+    if (w->bg != FX_BLACK) {
+        int r = FX_TOK_RADIUS_M;      /* 色块标签用中号圆角: 小号在 50px 高的色条上几乎看不出来 */
+        if (cw - tw >= r * 2 && ch - th >= r * 2) rad = r;
+        if (rad > ch / 2) rad = ch / 2;
+        if (rad > cw / 2) rad = cw / 2;
+        fx_set_color(w->bg);
+        if (rad > 0) fx_fill_rect_round(w->x1, w->y1, w->x2, w->y2, rad);
+        else         fx_fill_rect(w->x1, w->y1, w->x2, w->y2);
+    }
     fx_color_t tbg = (w->bg == FX_BLACK) ? fx_get_bg() : w->bg;
     if (fs <= 0) fx_draw_text_c(x, w->y1 + (ch - 18) / 2, w->title, w->fg, tbg);
     else fxtk_draw_text_size(fs, x, w->y1 + (ch - th) / 2 + 2, w->title, w->fg, tbg);
