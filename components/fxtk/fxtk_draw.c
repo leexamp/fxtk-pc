@@ -3,6 +3,7 @@
  */
 #include "fxtk.h"
 #include "fxtk_internal.h"
+#include "fxtk_backends.h"   /* v2.4: 统一日志出口 */
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -808,6 +809,180 @@ void fx_draw_image_ex(fx_image_t *img, int x, int y, int dw, int dh, int dark)
 void fx_draw_image(fx_image_t *img, int x, int y, int dw, int dh)
 {
     fx_draw_image_ex(img, x, y, dw, dh, 0);
+}
+
+/* ================= v2.4 四边形形变 (projective quad warp) =================
+ * 把整张图映射到任意凸四边形 —— 真透视, 不是两个三角形的仿射近似(那种画法有对角缝)。
+ * 数学: 解 8 元线性方程组得单应矩阵 H (源单位方 → 目标四角), 渲染时用 H⁻¹ 逐像素
+ * 反查源坐标并做双线性采样; "uv 是否落在 [0,1]" 即"是否在凸四边形内"。
+ * 无 GPU 平台(ESP32)走这条 CPU 路径; 有 GPU 时由驱动的 draw_image_quad 钩子接管(P4)。
+ */
+
+/* 解 A·x = b (n×n 高斯消元, 双精度), 成功 1 */
+static int solve_linear(double *A, double *b, int n, double *x)
+{
+    for (int c = 0; c < n; c++) {
+        int piv = c;
+        double best = fabs(A[c * n + c]);
+        for (int r = c + 1; r < n; r++) {
+            double v = fabs(A[r * n + c]);
+            if (v > best) { best = v; piv = r; }
+        }
+        if (best < 1e-12) return 0;
+        if (piv != c)
+            for (int k = 0; k < n; k++) {
+                double t = A[c * n + k]; A[c * n + k] = A[piv * n + k]; A[piv * n + k] = t;
+            }
+        { double t = b[c]; b[c] = b[piv]; b[piv] = t; }
+        for (int r = 0; r < n; r++) {
+            if (r == c) continue;
+            double f = A[r * n + c] / A[c * n + c];
+            if (f == 0.0) continue;
+            for (int k = c; k < n; k++) A[r * n + k] -= f * A[c * n + k];
+            b[r] -= f * b[c];
+        }
+    }
+    for (int i = 0; i < n; i++) x[i] = b[i] / A[i * n + i];
+    return 1;
+}
+
+int fx_quad_homography(const float *src8, const float *dst8, float m[9])
+{
+    if (!src8 || !dst8 || !m) return 0;
+    double A[64], b[8], x[8];
+    for (int i = 0; i < 4; i++) {
+        double sx = src8[i * 2], sy = src8[i * 2 + 1];
+        double dx = dst8[i * 2], dy = dst8[i * 2 + 1];
+        double *r0 = &A[(i * 2) * 8], *r1 = &A[(i * 2 + 1) * 8];
+        r0[0] = sx; r0[1] = sy; r0[2] = 1; r0[3] = 0;  r0[4] = 0;  r0[5] = 0; r0[6] = -sx * dx; r0[7] = -sy * dx;
+        r1[0] = 0;  r1[1] = 0;  r1[2] = 0; r1[3] = sx; r1[4] = sy; r1[5] = 1; r1[6] = -sx * dy; r1[7] = -sy * dy;
+        b[i * 2] = dx; b[i * 2 + 1] = dy;
+    }
+    if (!solve_linear(A, b, 8, x)) return 0;
+    for (int i = 0; i < 8; i++) m[i] = (float)x[i];
+    m[8] = 1.0f;
+    return 1;
+}
+
+int fx_mat3_invert(const float *m, float out[9])
+{
+    if (!m || !out) return 0;
+    double a = m[0], b = m[1], c = m[2], d = m[3], e = m[4], f = m[5], g = m[6], h = m[7], i = m[8];
+    double A =  (e * i - f * h), B = -(d * i - f * g), C =  (d * h - e * g);
+    double det = a * A + b * B + c * C;
+    if (fabs(det) < 1e-12) return 0;
+    double id = 1.0 / det;
+    out[0] = (float)(A * id);
+    out[1] = (float)(-(b * i - c * h) * id);
+    out[2] = (float)( (b * f - c * e) * id);
+    out[3] = (float)(B * id);
+    out[4] = (float)( (a * i - c * g) * id);
+    out[5] = (float)(-(a * f - c * d) * id);
+    out[6] = (float)(C * id);
+    out[7] = (float)(-(a * h - b * g) * id);
+    out[8] = (float)( (a * e - b * d) * id);
+    return 1;
+}
+
+/* 双线性采样 (uv 已在 [0,1]) */
+static uint32_t sample_bilinear(const fx_image_t *img, float u, float v)
+{
+    float fx = u * (float)(img->w - 1), fy = v * (float)(img->h - 1);
+    int x0 = (int)fx, y0 = (int)fy;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x0 > img->w - 1) x0 = img->w - 1;
+    if (y0 > img->h - 1) y0 = img->h - 1;
+    int x1 = x0 + 1 < img->w ? x0 + 1 : x0;
+    int y1 = y0 + 1 < img->h ? y0 + 1 : y0;
+    float tx = fx - (float)x0, ty = fy - (float)y0;
+    if (tx < 0) tx = 0; if (tx > 1) tx = 1;
+    if (ty < 0) ty = 0; if (ty > 1) ty = 1;
+    uint32_t c00 = img->px[y0 * img->w + x0], c10 = img->px[y0 * img->w + x1];
+    uint32_t c01 = img->px[y1 * img->w + x0], c11 = img->px[y1 * img->w + x1];
+    float w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty), w01 = (1 - tx) * ty, w11 = tx * ty;
+    int r = (int)(((c00 >> 16 & 255) * w00 + (c10 >> 16 & 255) * w10 + (c01 >> 16 & 255) * w01 + (c11 >> 16 & 255) * w11) + 0.5f);
+    int g = (int)(((c00 >> 8 & 255) * w00 + (c10 >> 8 & 255) * w10 + (c01 >> 8 & 255) * w01 + (c11 >> 8 & 255) * w11) + 0.5f);
+    int b = (int)(((c00 & 255) * w00 + (c10 & 255) * w10 + (c01 & 255) * w01 + (c11 & 255) * w11) + 0.5f);
+    if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+}
+
+/* 退化四边形回退: 用包围盒矩形映射 (并只告警一次, 不刷屏) */
+static void quad_fallback(const fx_image_t *img, const float *xy8)
+{
+    static int warned = 0;
+    if (!warned) { fx_log(FX_LOG_WARN, "fx_draw_image_quad: 四边形退化(面积≈0/自交?), 回退为包围盒映射"); warned = 1; }
+    float minx = xy8[0], maxx = xy8[0], miny = xy8[1], maxy = xy8[1];
+    for (int i = 1; i < 4; i++) {
+        if (xy8[i * 2] < minx) minx = xy8[i * 2];
+        if (xy8[i * 2] > maxx) maxx = xy8[i * 2];
+        if (xy8[i * 2 + 1] < miny) miny = xy8[i * 2 + 1];
+        if (xy8[i * 2 + 1] > maxy) maxy = xy8[i * 2 + 1];
+    }
+    int w = (int)(maxx - minx + 1), h = (int)(maxy - miny + 1);
+    if (w > 0 && h > 0) fx_draw_image_ex((fx_image_t *)img, (int)minx, (int)miny, w, h, 0);
+}
+
+void fx_draw_image_quad(const fx_image_t *img, const float *xy8)
+{
+    if (!img || !img->px || !xy8 || img->w <= 0 || img->h <= 0) return;
+
+    /* GPU 路径 (P4: sokol 顶点着色器做透视校正插值) */
+    if (!s_offing && s_drv && s_drv->draw_image_quad) {
+        flush_line();
+        if (s_drv->set_clip_rect) s_drv->set_clip_rect(s_clip_x1 + s_ox, s_clip_y1 + s_oy, s_clip_x2 + s_ox, s_clip_y2 + s_oy);
+        s_drv->draw_image_quad(img->px, img->w, img->h, xy8, 1);
+        if (s_drv->set_clip_rect) s_drv->set_clip_rect(0, 0, 32767, 32767);
+        return;
+    }
+
+    /* CPU 路径: H = 单位方 → 目标四角; 渲染用 H⁻¹ */
+    static const float unit8[8] = { 0, 0, 1, 0, 1, 1, 0, 1 };
+    float H[9], Hi[9];
+    if (!fx_quad_homography(unit8, xy8, H) || !fx_mat3_invert(H, Hi)) { quad_fallback(img, xy8); return; }
+
+    float minx = xy8[0], maxx = xy8[0], miny = xy8[1], maxy = xy8[1];
+    for (int i = 1; i < 4; i++) {
+        if (xy8[i * 2] < minx) minx = xy8[i * 2];
+        if (xy8[i * 2] > maxx) maxx = xy8[i * 2];
+        if (xy8[i * 2 + 1] < miny) miny = xy8[i * 2 + 1];
+        if (xy8[i * 2 + 1] > maxy) maxy = xy8[i * 2 + 1];
+    }
+    int bx1 = (int)floorf(minx), by1 = (int)floorf(miny);
+    int bx2 = (int)ceilf(maxx), by2 = (int)ceilf(maxy);
+    if (bx1 < s_clip_x1) bx1 = s_clip_x1;
+    if (by1 < s_clip_y1) by1 = s_clip_y1;
+    if (bx2 > s_clip_x2) bx2 = s_clip_x2;
+    if (by2 > s_clip_y2) by2 = s_clip_y2;
+    if (bx1 > bx2 || by1 > by2) return;
+
+    for (int y = by1; y <= by2; y++) {
+        for (int x = bx1; x <= bx2; x++) {
+            float px = (float)x + 0.5f, py = (float)y + 0.5f;
+            float wq = Hi[6] * px + Hi[7] * py + Hi[8];
+            if (fabsf(wq) < 1e-9f) continue;
+            float u = (Hi[0] * px + Hi[1] * py + Hi[2]) / wq;
+            float v = (Hi[3] * px + Hi[4] * py + Hi[5]) / wq;
+            if (u < 0.0f || u > 1.0f || v < 0.0f || v > 1.0f) continue;   /* 凸四边形内外判定 */
+            fxtk_put_px(x, y, sample_bilinear(img, u, v));
+        }
+    }
+}
+
+void fx_draw_image_quad_persp(const fx_image_t *img, int x1, int y1, int x2, int y2,
+                              float top_inset, float top_shift)
+{
+    float w = (float)(x2 - x1), h = (float)(y2 - y1);
+    float in = top_inset * w * 0.5f;      /* 顶部左右各内缩 */
+    float sh = top_shift * w;             /* 顶部整体水平偏移 */
+    float xy8[8] = {
+        (float)x1 + in + sh, (float)y1,
+        (float)x2 - in + sh, (float)y1,
+        (float)x2,           (float)y2,
+        (float)x1,           (float)y2,
+    };
+    fx_draw_image_quad(img, xy8);
 }
 int fxtk_is_offing(void){ return s_offing; }
 void fxtk_text_blit(void *tex,int x,int y,int w,int h)

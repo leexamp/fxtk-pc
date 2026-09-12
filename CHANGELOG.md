@@ -1,5 +1,37 @@
 # Changelog
 
+## v2.4（开发中）
+
+> 路线图见 `docs/ROADMAP_v2.4.md`。目标：sokol 自裁剪后端（替代实验性 SDL2）+ GPU 全局抗锯齿
+> + 通用跨平台服务层 + 纹理四边形形变（真透视）+ 控件逐个审美打磨。
+
+### 新增
+- **通用后端服务层 `fxtk_backends.h/.c`**（P0）: 能力协商 `fx_backend_caps()` / 日志 / **PCG32 随机(同种子可复现)**
+  / 单调时间 / 路径工具 / 文件与目录 / 图片解码(stb)与 PNG 编码 / 剪贴板 / 文件对话框 / 偏好持久化 / 系统信息。
+  `-DFXTK_BACKEND_STUB` 提供确定性时钟 + 定种子随机 + **内存文件系统**，`make test` 同时跑真实与 stub 两份。
+  设计原则：不引入新链接依赖（屏幕/DPI 由驱动注入）；PNG 编码经 `fx_file_write` 回调，真实 FS 与 stub 行为一致。
+  `fxtk_fs.c` 已并入并删除，`fxtk_fs.h` 保留为 inline 兼容薄壳。
+- **截图能力 + 截图画廊**（P0）: `fx_driver_t.read_pixels` 钩子 + `fx_screenshot(path)`（统一走 stb PNG 编码）。
+  已接线 SDL 驱动与 render_canvas 假驱动（**无头 harness 也能出 PNG，CI 金图不需要显示器**）。
+  `tools/gallery.sh` 一条命令生成 12 个演示页 + 9 个画布示例 × 2 分辨率。
+- **四边形形变 `fx_draw_image_quad`**（P1）: 把整张图映射到任意凸四边形，**真透视**（单应矩阵求解 +
+  逆变换逐像素双线性采样；"uv∈[0,1]"即凸四边形内判定）。附 `fx_draw_image_quad_persp` 参数化便捷版、
+  `fx_quad_homography`/`fx_mat3_invert` 工具函数、退化四边形自动回退与告警。无 GPU(ESP32)与离屏画布走 CPU 路径，
+  GPU 路径由驱动 `draw_image_quad` 钩子接管（P4）。新示例 `examples/canvas/canvas_09_quad.c`（矩形/梯形/强透视/旋转/斜切）。
+- **vendored 依赖**（P0）: `third_party/sokol`（app/gfx/glue/time/log/fetch，pin 到 commit）+
+  `components/fxtk/vendor/stb`（truetype/image/image_write/rect_pack）提交入库，CI 无需联网拉依赖。
+  `tools/ppm2png.c` 提供 PPM→PNG 转换。
+
+### 工程链
+- 构建清单同步新增 `fxtk_backends.c`（Makefile / build*.sh / CI / ESP32 CMakeLists）；Win32 侧补 `-lcomdlg32`。
+- `tools/spike/README.md` 记录 sokol 迁移的 7 个坑位（EGL 上下文类型、GLSL 310 es、uniform block 名、
+  surfaceless 无默认帧缓冲、stdout 缓冲、mingw 链接等）。
+
+### 测试
+- 无头测试扩至 14 节：新增 [13] 后端服务层（随机可复现/边界、路径、文件往返+追加、PNG 往返、
+  偏好持久化、能力/时间单调、截图优雅失败）与 [14] 四边形形变（四角精确映射、逆单应回代、退化拒绝）。
+- 真实后端与 stub 后端**都**跑同一套测试。
+
 ## v2.3
 
 > 本版次随发布做了一次全面审查, 覆盖工程链(构建/CI)与正确性(渲染/核心/平台)两部分。

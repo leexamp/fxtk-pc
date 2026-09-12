@@ -23,6 +23,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <math.h>
 
 /* ---------- 假驱动 ---------- */
 static int s_hit_cb_ok = 0;          /* 命中回调用触发器 */
@@ -342,6 +343,43 @@ int main(void) {
         if (fx_file_exists("/tmp/fxtk_should_not_exist.png")) { printf("  [FAIL] 失败路径却写了文件\n"); fails++; }
     }
 
-    printf("== done: %s (%d fail) ==\n", fails ? "FAIL" : "PASS", fails);
-    return fails ? 1 : 0;
+    /* 14. v2.4 四边形形变: 单应矩阵与逆矩阵 (数学层, 不依赖像素) */
+    printf("[14] 四边形形变 (单应)\n");
+    {
+        const float unit[8] = { 0, 0, 1, 0, 1, 1, 0, 1 };
+        float quad[8] = { 120.0f, 40.0f, 360.0f, 40.0f, 440.0f, 200.0f, 40.0f, 200.0f };  /* 梯形 */
+        float H[9];
+        if (!fx_quad_homography(unit, quad, H)) { printf("  [FAIL] 单应求解失败\n"); fails++; }
+        else {
+            int ok = 1;
+            for (int i = 0; i < 4; i++) {
+                float x = unit[i * 2], y = unit[i * 2 + 1];
+                float w = H[6] * x + H[7] * y + H[8];
+                float dx = (H[0] * x + H[1] * y + H[2]) / w;
+                float dy = (H[3] * x + H[4] * y + H[5]) / w;
+                if (fabsf(dx - quad[i * 2]) > 0.01f || fabsf(dy - quad[i * 2 + 1]) > 0.01f) ok = 0;
+            }
+            if (ok) printf("  [ok]   四角精确映射 (误差 < 0.01px)\n");
+            else { printf("  [FAIL] 角点映射不准\n"); fails++; }
+            float Hi[9];
+            if (fx_mat3_invert(H, Hi)) {
+                int ok2 = 1;
+                for (int i = 0; i < 4; i++) {
+                    float px = quad[i * 2], py = quad[i * 2 + 1];
+                    float w = Hi[6] * px + Hi[7] * py + Hi[8];
+                    float u = (Hi[0] * px + Hi[1] * py + Hi[2]) / w;
+                    float v = (Hi[3] * px + Hi[4] * py + Hi[5]) / w;
+                    if (fabsf(u - unit[i * 2]) > 0.01f || fabsf(v - unit[i * 2 + 1]) > 0.01f) ok2 = 0;
+                }
+                if (ok2) printf("  [ok]   逆单应回代 (四边形 → 单位方)\n");
+                else { printf("  [FAIL] 逆单应不准\n"); fails++; }
+            } else { printf("  [FAIL] 3x3 求逆失败\n"); fails++; }
+        }
+        float degen[8] = { 10, 10, 20, 10, 30, 10, 40, 10 };   /* 共线 = 零面积 */
+        float Hd[9];
+        if (!fx_quad_homography(unit, degen, Hd)) printf("  [ok]   退化四边形被拒绝\n");
+        else { printf("  [FAIL] 退化四边形竟求解成功\n"); fails++; }
+    }
+
+    printf("== done: %s (%d fail) ==\n", fails ? "FAIL" : "PASS", fails);    return fails ? 1 : 0;
 }
