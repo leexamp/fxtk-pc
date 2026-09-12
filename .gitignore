@@ -11,8 +11,10 @@ demo-main/canvas*
 # 发布产物 (由 git archive 生成)
 dist/
 
-# 交叉编译 vendored 依赖 (setup_win_cross.sh 自动下载)
-third_party/
+# SDL2 Windows 开发包 (setup_win_cross.sh 自动下载, 体积大不入库)
+demo-main/third_party/
+
+# 注: 顶层 third_party/(sokol, stb) 是【提交入库】的框架级 vendor —— 保证 CI 无需联网
 
 # 系统杂项
 .DS_Store
