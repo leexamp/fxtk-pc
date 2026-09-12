@@ -1172,7 +1172,12 @@ void fx_draw_image_quad(const fx_image_t *img, const float *xy8)
     if (!s_offing && s_drv && s_drv->draw_image_quad) {
         flush_line();
         if (s_drv->set_clip_rect) s_drv->set_clip_rect(s_clip_x1 + s_ox, s_clip_y1 + s_oy, s_clip_x2 + s_ox, s_clip_y2 + s_oy);
-        s_drv->draw_image_quad(img->px, img->w, img->h, xy8, 1);
+        /* 【v2.4 修正】四角坐标必须同样加上画布原点偏移。CPU 路径是在离屏缓冲里按局部坐标画的、
+         * 再由框架整体 blit, 所以不需要偏移; 而 GPU 钩子是直接画到【屏幕坐标系】的批次里 ——
+         * 上面裁剪加了 s_ox/s_oy 而这里没加, 结果整幅图会偏移一个画布原点的量(实测偏了 (41,152))。 */
+        float q8[8];
+        for (int i = 0; i < 4; i++) { q8[i * 2] = xy8[i * 2] + s_ox; q8[i * 2 + 1] = xy8[i * 2 + 1] + s_oy; }
+        s_drv->draw_image_quad(img->px, img->w, img->h, q8, 1);
         if (s_drv->set_clip_rect) s_drv->set_clip_rect(0, 0, 32767, 32767);
         return;
     }

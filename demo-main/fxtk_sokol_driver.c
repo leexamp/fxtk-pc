@@ -30,6 +30,7 @@
 #include "sokol_log.h"
 #include "raymarch_fs330.h"   /* 由 tools/gen_raymarch_glsl330.py 生成 */
 #include "fxtk_backends.h"   /* fx_time_ms: 统一计时, 免依赖 sokol_time */
+#include "fxtk_image.h"      /* v2.4: fx_quad_corner_weights (GPU 真透视四边形的每角权重) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -83,7 +84,7 @@ static int s_tex_n = 0;
 /* ================= 驱动状态 ================= */
 
 static int s_w = 480, s_h = 272;
-static sg_pipeline s_pip_sdf, s_pip_solid, s_pip_tex, s_pip_raymarch;
+static sg_pipeline s_pip_sdf, s_pip_solid, s_pip_tex, s_pip_raymarch, s_pip_quad;
 static sg_shader s_sh_raymarch;
 static sg_buffer   s_vbuf;
 static sg_sampler  s_smp_nearest, s_smp_linear;
@@ -435,6 +436,7 @@ static void px_flush(void)
 
 static int drv_init(void)
 {
+    if (getenv("FXTK_NO_QUADGPU")) fx_sokol_driver.draw_image_quad = NULL;   /* A/B: 强制走 CPU 逆单应 */
     sg_desc desc = {0};
     /* 环境默认值与我们的管线保持一致: 2D UI 不需要深度缓冲。
      * (交换链的 depth_format 取自环境默认值, 不一致会让 sokol 校验直接 panic) */
@@ -593,6 +595,44 @@ static int drv_init(void)
         spd.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
         spd.shader = sh_sdf; spd.label = "fxtk-sdf";
         s_pip_sdf = sg_make_pipeline(&spd);
+    }
+    /* v2.4 P4: 真透视四边形管线 —— 顶点着色器把"每角透视权重 d_i"放进 gl_Position.w,
+     * 硬件于是按透视校正插值 uv(片元着色器与普通贴图完全相同, 直接复用 fs_tex_src)。
+     * 这是"两个三角形各做仿射 → 对角缝"的正解: 单次 draw, 无缝隙。 */
+    {
+        static const char *vs_quad_src =
+            "#version 330\n"
+            "layout(location=0) in vec2 position;\n"
+            "layout(location=1) in vec2 texcoord0;\n"
+            "layout(location=2) in vec4 color0;\n"
+            "layout(location=3) in vec4 sdf0;\n"      /* sdf0.x = 该角权重 */
+            "out vec2 uv; out vec4 vcol; out vec4 vsdf;\n"
+            "void main() { uv = texcoord0; vcol = color0; vsdf = sdf0;\n"
+            "    gl_Position = vec4(position * sdf0.x, 0.0, sdf0.x); }\n";
+        sg_shader_desc qd;
+        memset(&qd, 0, sizeof(qd));
+        qd.vertex_func.source = vs_quad_src;
+        qd.vertex_func.entry = "main";
+        qd.fragment_func.source = fs_tex_src;
+        qd.fragment_func.entry = "main";
+        qd.attrs[0].glsl_name = "position";
+        qd.attrs[1].glsl_name = "texcoord0";
+        qd.attrs[2].glsl_name = "color0";
+        qd.attrs[3].glsl_name = "sdf0";
+        qd.views[0].texture.stage = SG_SHADERSTAGE_FRAGMENT;
+        qd.views[0].texture.image_type = SG_IMAGETYPE_2D;
+        qd.views[0].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT;
+        qd.samplers[0].stage = SG_SHADERSTAGE_FRAGMENT;
+        qd.samplers[0].sampler_type = SG_SAMPLERTYPE_FILTERING;
+        qd.texture_sampler_pairs[0].stage = SG_SHADERSTAGE_FRAGMENT;
+        qd.texture_sampler_pairs[0].view_slot = 0;
+        qd.texture_sampler_pairs[0].sampler_slot = 0;
+        qd.texture_sampler_pairs[0].glsl_name = "u_tex";
+        sg_shader sh_quad = sg_make_shader(&qd);
+        sg_pipeline_desc qpd;
+        qpd = pd;                       /* 与 2D 管线同状态, 只换着色器 */
+        qpd.shader = sh_quad; qpd.label = "fxtk-quadwarp";
+        s_pip_quad = sg_make_pipeline(&qpd);
     }
 
     /* ---- 光追管线: 同一个全屏四边形, 片元着色器做光线步进 ---- */
@@ -771,11 +811,9 @@ static void drv_blit_tex(void *tex, int sx, int sy, int sw, int sh, int dx, int 
     emit_quad(1, slot, (float)dx, (float)dy, (float)(dx + sw), (float)(dy + sh), u0, v0, u1, v1, 0xFFFFFFFFu);
 }
 
-/* 图片 blit: 取一张空闲图片上传后按贴图绘制 (见上面 img pool 注释) */
-static void drv_blit_img(const uint32_t *px, int w, int h, int dx, int dy, int dw, int dh, int dark)
+/* 把一张图上传到图片池的下一张, 返回可用纹理槽(失败 -1)。只上传不绘制 —— blit 与四边形形变共用。 */
+static int img_upload(const uint32_t *px, int w, int h, int dark)
 {
-    if (!px || w <= 0 || h <= 0 || dw <= 0 || dh <= 0) return;
-    px_flush();
     int k = s_img_slot++;
     if (k < IMG_SLOTS) {
         s_img_used = k + 1;
@@ -784,7 +822,7 @@ static void drv_blit_img(const uint32_t *px, int w, int h, int dx, int dy, int d
     if (k >= IMG_SLOTS) {
         /* 池用尽: 宁可跳过这一张, 也不能对同一张图更新两次(会 abort 整个进程) */
         if (s_img_over++ == 0) fx_log(FX_LOG_WARN, "[sokol] 单帧图片数超过 %d, 已跳过多余的图片", IMG_SLOTS);
-        return;
+        return -1;
     }
     if (s_img_w[k] != w || s_img_h[k] != h || s_img_tex[k].id == SG_INVALID_ID) {
         if (s_img_tex[k].id != SG_INVALID_ID) { sg_destroy_view(s_img_view[k]); sg_destroy_image(s_img_tex[k]); }
@@ -795,16 +833,60 @@ static void drv_blit_img(const uint32_t *px, int w, int h, int dx, int dy, int d
         s_img_w[k] = w; s_img_h[k] = h;
         if (s_img_cap < w * h) { free(s_img_stage); s_img_stage = (uint32_t *)malloc((size_t)w * h * 4); s_img_cap = w * h; }
     }
-    if (!s_img_stage) return;
+    if (!s_img_stage) return -1;
     for (int i = 0; i < w * h; i++) {
         uint32_t c = px[i] & 0xFFFFFFu;
         if (dark) c = ((c >> 1) & 0x7F7F7Fu);
         s_img_stage[i] = rgba_pack(c);
     }
     sg_update_image(s_img_tex[k], &(sg_image_data){ .mip_levels[0] = { s_img_stage, (size_t)w * h * 4 } });
-    int slot = tex_alloc(s_img_tex[k], s_img_view[k], w, h);
+    return tex_alloc(s_img_tex[k], s_img_view[k], w, h);
+}
+
+/* 图片 blit: 取一张空闲图片上传后按贴图绘制 (见上面 img pool 注释) */
+static void drv_blit_img(const uint32_t *px, int w, int h, int dx, int dy, int dw, int dh, int dark)
+{
+    if (!px || w <= 0 || h <= 0 || dw <= 0 || dh <= 0) return;
+    px_flush();
+    int slot = img_upload(px, w, h, dark);
     if (slot < 0) return;
     emit_quad(1, slot, (float)dx, (float)dy, (float)(dx + dw), (float)(dy + dh), 0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu);
+}
+
+/* v2.4 P4: GPU 真透视四边形形变。每角权重 d_i 由 fx_quad_corner_weights 从单应算出,
+ * 写进顶点 sdf0.x → 由 gl_Position.w 承载, 硬件做透视校正插值。
+ * 退化/自交四边形回退成包围盒直绘(与框架 CPU 路径的回退语义一致)。 */
+static void drv_draw_image_quad(const uint32_t *px, int w, int h, const float *xy8, int bilinear)
+{
+    (void)bilinear;
+    if (!px || w <= 0 || h <= 0 || !xy8) return;
+    px_flush();
+    float d4[4];
+    if (!fx_quad_corner_weights(xy8, d4)) {
+        float minx = xy8[0], maxx = xy8[0], miny = xy8[1], maxy = xy8[1];
+        for (int i = 1; i < 4; i++) {
+            if (xy8[i * 2]     < minx) minx = xy8[i * 2];
+            if (xy8[i * 2]     > maxx) maxx = xy8[i * 2];
+            if (xy8[i * 2 + 1] < miny) miny = xy8[i * 2 + 1];
+            if (xy8[i * 2 + 1] > maxy) maxy = xy8[i * 2 + 1];
+        }
+        drv_blit_img(px, w, h, (int)minx, (int)miny, (int)(maxx - minx + 1), (int)(maxy - miny + 1), 0);
+        return;
+    }
+    int slot = img_upload(px, w, h, 0);
+    if (slot < 0) return;
+    if (cmd_new(4, slot) < 0) return;
+    if (s_vb_n + 4 > VB_MAX || s_ib_n + 6 > IB_MAX) return;
+    cmd_t *cm = &s_cmd[s_cmd_n - 1];
+    uint32_t b = (uint32_t)s_vb_n;
+    const uint32_t col = 0xFFFFFFFFu;
+    vtx_push_sdf(xy8[0], xy8[1], 0.0f, 0.0f, col, d4[0], 0.0f, 0.0f, 0.0f);
+    vtx_push_sdf(xy8[2], xy8[3], 1.0f, 0.0f, col, d4[1], 0.0f, 0.0f, 0.0f);
+    vtx_push_sdf(xy8[4], xy8[5], 1.0f, 1.0f, col, d4[2], 0.0f, 0.0f, 0.0f);
+    vtx_push_sdf(xy8[6], xy8[7], 0.0f, 1.0f, col, d4[3], 0.0f, 0.0f, 0.0f);
+    s_ib[s_ib_n++] = b;     s_ib[s_ib_n++] = b + 1; s_ib[s_ib_n++] = b + 2;
+    s_ib[s_ib_n++] = b;     s_ib[s_ib_n++] = b + 2; s_ib[s_ib_n++] = b + 3;
+    cm->count += 6;
 }
 
 static int drv_touch_read(int *x, int *y, int *pressed)
@@ -970,6 +1052,7 @@ fx_driver_t fx_sokol_driver = {
     .fill_rect_round = drv_fill_rect_round,     /* v2.4: GPU SDF 圆角矩形 (抗锯齿) */
     .stroke_rect_round = drv_stroke_rect_round, /* v2.4: GPU SDF 圆角描边 (抗锯齿) */
     .draw_line_aa = drv_draw_line_aa,           /* v2.4 档位 2: GPU 羽化线段 */
+    .draw_image_quad = drv_draw_image_quad,     /* v2.4 P4: GPU 真透视四边形形变 */
 };
 
 /* ================= 帧的呈现 (由 sokol_app 回调触发) ================= */
@@ -1061,11 +1144,12 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
             sg_apply_viewport(0, 0, s_w, s_h, true);   /* 复原, 免得影响后续命令 */
             continue;
         }
-        sg_apply_pipeline(c->pip == 0 ? s_pip_solid : (c->pip == 3 ? s_pip_sdf : s_pip_tex));
+        sg_apply_pipeline(c->pip == 0 ? s_pip_solid :
+                          (c->pip == 3 ? s_pip_sdf : (c->pip == 4 ? s_pip_quad : s_pip_tex)));
         sg_bindings b = {0};
         b.vertex_buffers[0] = s_vbuf;
         b.index_buffer = s_ibuf;
-        if (c->pip == 1 && c->tex >= 0) {
+        if ((c->pip == 1 || c->pip == 4) && c->tex >= 0) {
             b.views[0] = s_tex[c->tex].view;
             b.samplers[0] = s_tex[c->tex].smp;
         }
