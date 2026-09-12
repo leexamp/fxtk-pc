@@ -188,7 +188,11 @@ void fx_image_quad_set_corners(fx_widget_t *w, const float *xy8);   /* 编辑器
 - ✅ `make test` 双后端全绿(真实 + stub)
 - ✅ **ASan/UBSan 干净**: `gcc -O1 -g -fsanitize=address,undefined` 构建无头测试并运行 → `PASS (0 fail)`,
   零 `ERROR:` / 零 `runtime error`(第 17 轮实测; 命令见下)
-- ✅ bench 无回归(bench 页 0.36ms/帧); ✅ Linux 体积 144KB(≤150KB); ✅ 12 页 sweep panic=0
+- ✅ **bench 不低于 v2.3(已用同机同命令对拍确认)**: 压测页饱和后
+  1080P/2816 控件 → v2.3 **9.40~9.95ms(100~106fps)** vs v2.4 **9.02~9.31ms(107~111fps)**(v2.4 快 3~6%);
+  720P/1235 控件 → v2.3 4.416ms(226.5fps) vs v2.4 4.386ms(228.0fps)(持平)。
+  注: 本节原先写的"2816 控件 8.0ms/125fps"是**不同口径**测出来的, 不能直接比; 现已换成对拍数字。
+- ✅ Linux 体积 144KB(≤150KB); ✅ 12 页 sweep panic=0; ✅ 单 exe 无 DLL(见下)
 - ✅ **Windows 交叉构建通过**(第 18 轮实测): `demo-main/build_win_cross.sh` → `dist/win/fxtk_win.exe`
 - ✅ **"单个 exe 无 DLL 依赖"已达标(sokol 路径, 第 20 轮)**: `build_win_sokol.sh` → 431KB,
   `objdump` 只剩 Windows 系统 DLL; 体积 431KB 超 ≤250KB 口径(待定口径/再瘦)
