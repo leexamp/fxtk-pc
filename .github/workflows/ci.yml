@@ -62,6 +62,13 @@ jobs:
           n=$(grep -c 'warning:' /tmp/fxtk_warnings.txt)
           echo "Total -Wall -Wextra warnings: $n (v2.3.1 baseline: 69, advisory only)"
 
+
+      - name: Golden image regression (画布金图, 逐像素)
+        # 只跑画布示例金图: 它们走【纯软件假驱动】, 不依赖 GPU/SDL/字体文件, 因此在 CI runner 上可复现。
+        # 演示页金图依赖 SDL/SDL_ttf 版本(不同 runner 渲染可能不逐位一致), 只在本地/参考环境跑, 见 tools/golden.sh。
+        # 容差 1 用于吸收不同 gcc 版本下浮点抗锯齿的最后一位差异。
+        run: GOLDEN_SKIP_DEMO=1 GOLDEN_TOL=1 ./tools/golden.sh
+
   windows-cross:
     name: Windows cross-build (mingw)
     runs-on: ubuntu-latest
