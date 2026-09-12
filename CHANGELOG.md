@@ -92,7 +92,16 @@
 - **SDF 着色器不能复用带纹理绑定的 shader desc**: 复用会让 SDF 管线要求 view/sampler 绑定,
   未绑定直接 `VALIDATE_ABND_EXPECTED_VIEW_BINDING` panic。改用独立 desc。
 
-### 变更（后端策略: sokol 转为默认, SDL2 降为遗留）
+### 新增（P5 审美迭代 1/9: 按钮）
+- 按 `docs/design/README.md` 的流程做的第一轮控件审美(改前留档 → 改后出图 → 逐图 imgdiff → 看图评审):
+  - 圆角 4 → **7**(新增令牌 `FX_TOK_RADIUS_BTN`): 触摸目标边缘更柔和;
+  - 描边加深到 25%(`FX_TOK_BTN_EDGE_MIX`): 按钮与背景分离度更好, 边缘更清晰;
+  - 按下态整块压暗 12%(原先只压暗顶边), 触摸屏上"按没按到"一眼可辨。
+- **刻意不增加绘制调用**(只改圆角与描边颜色) → 压测页开销不变(实测 1080P/2816 控件仍 9.2ms 级)。
+- 前后对比: 差异 7848/921600 像素(0.85%), 全部落在按钮上; 放大目视可见圆角与描边改善。
+- 这是**刻意改观感**的一轮, 已按流程执行 `make golden-update` 更新金图基线(20 张)。
+
+### 变更（后端策略### 变更（后端策略: sokol 转为默认, SDL2 降为遗留）
 - `make` / `make fxtk_sim` 现在构建 **sokol 版**（产物仍是 `./fxtk_sim`，361KB）；
   `make fxtk_sim_en` 也换成 sokol（361KB）；`fxtk_sim_sokol` 保留为别名，旧脚本/文档不用改。
 - SDL 版移到 `fxtk_sim_sdl` / `fxtk_sim_sdl_en`，**明确标注为遗留**（仅对照/过渡，不再加新功能）。

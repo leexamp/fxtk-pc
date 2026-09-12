@@ -28,8 +28,10 @@ void fxtk_draw_button(fx_widget_t *w)
     /* Adwaita 经典: 纯平圆角 + 锐利1px高光/阴影 (锐线不产生灰阶) */
     int cw = w->x2-w->x1+1, ch = w->y2-w->y1+1;
     int pr = (fx_pressed() == w);
-    int r = 4; if (r > ch/2) r = ch/2; if (r > cw/2) r = cw/2;
-    fx_set_color(w->bg);
+    /* P5 审美迭代 1/9: 圆角走设计令牌(4 → FX_TOK_RADIUS_M=6, 边缘更柔和);
+     * 按下态不再只压暗顶边, 而是整块略压暗 —— 触摸屏上"按没按到"更容易一眼看出。 */
+    int r = FX_TOK_RADIUS_BTN; if (r > ch/2) r = ch/2; if (r > cw/2) r = cw/2;
+    fx_set_color(pr ? btn_mix(w->bg, FX_BLACK, 12) : w->bg);
     fx_fill_rect_round(w->x1, w->y1, w->x2, w->y2, r);
     if (!pr) {
         fx_set_color(btn_mix(w->bg, FX_WHITE, 90));          /* 顶高光 */
@@ -40,7 +42,7 @@ void fxtk_draw_button(fx_widget_t *w)
         fx_set_color(btn_mix(w->bg, FX_BLACK, 90));          /* 按下: 顶变阴影=内凹 */
         fx_draw_hline(w->x1 + r, w->x2 - r, w->y1 + 1);
     }
-    fx_set_color(pr ? FX_TOK_EDGE_DOWN : darken(w->bg));   /* 1px 同系深边 */
+    fx_set_color(pr ? FX_TOK_EDGE_DOWN : btn_mix(w->bg, FX_BLACK, FX_TOK_BTN_EDGE_MIX));   /* 1px 同系深边(加深以提高分离度) */
     fx_draw_hline(w->x1 + r, w->x2 - r, w->y1);
     fx_draw_hline(w->x1 + r, w->x2 - r, w->y2);
     fx_draw_vline(w->x1, w->y1 + r, w->y2 - r);

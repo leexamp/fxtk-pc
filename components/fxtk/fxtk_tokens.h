@@ -40,6 +40,8 @@
 #define FX_TOK_RADIUS_S       4     /* 小圆角: 进度条/小按钮 */
 #define FX_TOK_RADIUS_M       6     /* 中圆角: 常规按钮 */
 #define FX_TOK_RADIUS_L       8     /* 大圆角: 卡片/面板 */
+#define FX_TOK_RADIUS_BTN     7     /* 按钮圆角: 比通用中号略圆, 触摸目标更"软" */
+#define FX_TOK_BTN_EDGE_MIX   25    /* 按钮描边加深比例(%): 提高与背景的分离度, 不增加绘制调用 */
 #define FX_TOK_TRACK_H_MIN    6     /* 滑杆轨道厚度下限 */
 #define FX_TOK_TRACK_H_MAX    10    /* 滑杆轨道厚度上限 */
 #define FX_TOK_KNOB_W_MIN     12    /* 滑块宽度下限 */
