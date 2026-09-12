@@ -201,6 +201,21 @@ void fx_image_quad_set_corners(fx_widget_t *w, const float *xy8);   /* 编辑器
   改用 ①图元羽化 ②掉帧自动降档 两项替代。若要 4x MSAA, 按"启动时 `FXTK_MSAA=4` 申请 +
   离屏画布 pass 多重采样 + resolve"的形式补, 不影响现有档位。
 
+### 第 39 轮最终验收快照（全部实测, 可复跑）
+```
+make test              -> 2/2 PASS   (真实后端 + stub 后端)
+GOLDEN_SKIP_DEMO=1 GOLDEN_TOL=1 tools/golden.sh
+                       -> 10/10 画布金图一致 (容差 1; 演示页金图依赖 SDL 版本, 只在本地跑)
+tools/esp32_smoke.sh   -> 6/6 核心文件通过 (无需 ESP-IDF 工具链)
+make bench (1080P)     -> 2819 控件饱和 9.0~9.3ms/帧 ≈ 107~111fps (v2.3 同机同命令 9.40~9.95ms)
+ASan+UBSan             -> 干净 (无头测试套件)
+Linux 体积             -> make 产物 361KB(sokol, 单文件无第三方 DLL); 遗留 SDL 版 144KB ≤150KB
+Windows                -> 交叉构建通过; 单 exe 431KB, 依赖仅系统 DLL
+```
+**仅剩两项待拍板**(其余全部完成并有证据):
+1. Windows 单 exe 431KB vs 目标 ≤250KB —— 已实测否证"拆 DLL"路径, 只能"改口径(~450KB)"或"砍功能(去掉图片解码/PNG 编码)"。
+2. 双语文档范围 —— 英文 README/quickstart 已同步 v2.4 事实并标注其余英文档对应 v2.3; 是否需要全量翻译由用户定。
+
 ### 验收项状态（实测）
 - ✅ `make test` 双后端全绿(真实 + stub)
 - ✅ **ASan/UBSan 干净**: `gcc -O1 -g -fsanitize=address,undefined` 构建无头测试并运行 → `PASS (0 fail)`,
