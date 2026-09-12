@@ -174,7 +174,7 @@ void fx_image_quad_set_corners(fx_widget_t *w, const float *xy8);   /* 编辑器
 | P1 canvas 变换栈 + 四边形形变 + 图片页 UI | ✅ | 真透视 CPU 路径、四角手柄/缩放/复位/导入, 示例 canvas_09/10 |
 | P2 vendored sokol 后端 | ✅ | 事件队列适配轮询契约、顶点批、软件像素层、stb 字形文本、逐帧回读与屏幕一致 |
 | P3 GPU 抗锯齿 | ✅(分层) | 档 1 = 控件 SDF(命令数 1184→7)；档 2 = 图元羽化线段(过渡像素 0→5916)；掉帧自动降档 |
-| P4 GPU 四边形形变 + 伪 3D demo | ⏳ 下一轮 | 设计: 驱动加 `draw_image_quad` —— 顶点传 `(u/w, v/w, 1/w)`、片元重建 `uv = (u/w)/(1/w)`, 即单次 draw 两三角的**透视正确**插值(正解"两三角有对角缝"); HUD 显示四边形数/draw call/GPU 路径 |
+| P4 GPU 四边形形变 + 伪 3D demo | ⏳ 下一轮 | 规格已定, 见下 §5.6 |
 | P5 控件审美 + 设计令牌 | ⏳ | 依赖 P3/P4 稳定 |
 | P6 双语 + CI 金图 + ESP32 冒烟 + 发布 | ⏳ | 体积: **SDL 版 144KB / 英文版 143KB ✅ 达标 ≤150KB**(gold `--icf=all`+`--as-needed`); sokol 版 361KB(含 vendored sokol, 独立口径) |
 
@@ -191,6 +191,37 @@ make bench     # 不低于 v2.3 基线(2816 控件 8.0ms/125fps; 当前 bench �
 12 页 sweep    # FXTK_CLICKS=<tab x>,80,60 + FXTK_QUIT_AFTER=140, 每页 panic=0
 截图 vs 屏幕    # fx_screenshot 的 PNG 与 X11 抓屏直方图一致(回读契约)
 ```
+
+## 5.6 P4 落地规格（已核实接口, 可直接照做）
+
+**框架侧已就绪, 不用改**: `fxtk_draw.c:1155` 已有 `if (!s_offing && s_drv && s_drv->draw_image_quad) → 走钩子`,
+否则回落 CPU 逆单应逐像素路径; `fx_quad_homography(unit8, xy8, H)` 已经把【单位方 → 目标四边形】的
+单应矩阵算好了（`components/fxtk/fxtk_image.h:44`）。
+
+**驱动侧只需加一条管线 + 一个钩子**, 关键点:**不要让 CPU 算 w 再传 (u/w, v/w, 1/w)**,
+而是把 w 塞进 `gl_Position.w`, 让硬件自己做透视校正插值 —— 片元着色器一行都不用改(直接复用 tex FS):
+
+```
+VS(quad):  in vec2 position(NDC); in vec2 uv; in vec4 color; in vec4 sdf;
+           sdf.x = 该角的 w
+           gl_Position = vec4(position * sdf.x, 0.0, sdf.x);   // ndc 不变, 但 w 参与插值
+           uv = texcoord0; vcol = color0;
+FS:        frag_color = texture(u_tex, uv) * vcol;              // 复用 s_pip_tex 的 FS
+```
+
+平的 w 从哪里来: 单应 `H = [[a,c,e],[b,d,f],[g,h,1]]`(映射单位方 → 目标四边),
+分母 `d(x,y) = g*x + h*y + 1`, 于是四个角（单位方 (0,0)(1,0)(1,1)(0,1)）的权重是:
+
+```
+w0 = 1;  w1 = 1/(g+1);  w2 = 1/(g+h+1);  w3 = 1/(h+1)
+```
+
+（下一轮先写 3 行断言核对 `m[]` 的实际排布是行主序 `m[6]=g, m[7]=h`, 用 CPU 路径的
+`fx_canvas_transform_point` 反推即可验证, 不要凭记忆。）
+
+**验收**: ①同一个被拉成不规则四边形的图片, GPU 路径与 CPU 路径逐像素差 ≤ 1/255（对角线处不再有缝）;
+②图形页伪 3D: 地板/天花板大 quad + 走廊两侧四边形序列 + 立方体 6 面(每面一次 quad warp) + 公告板;
+HUD 显示 `四边形数 / draw call / 路径(GPU|CPU) / fps`; ③1080p 下 200 个四边形 ≥60fps(GPU)。
 
 ## 6. 阶段、依赖与排期（粗估，按专注工作日）
 
