@@ -143,6 +143,7 @@ static void on_imgq(fx_widget_t *w, void *ud)
     for (int i = 0; i < 4; i++) quad_corner_px(cw, ch, i, &q[i * 2], &q[i * 2 + 1]);
     fx_draw_image_quad(img, q);
 
+    fx_draw_text_c(8, ch - 20, "拖动四角顶点 → 任意四边形", FX_RGB(90, 90, 90), FX_RGB(245, 245, 245));   /* 提示放画布左下, 避开手柄 */
     /* 手柄 + 边线 */
     if (s_quad_show) {
         fx_set_color(FX_RGB(200, 60, 60));
@@ -152,13 +153,14 @@ static void on_imgq(fx_widget_t *w, void *ud)
         }
         for (int i = 0; i < 4; i++) {
             int hx = (int)q[i*2], hy = (int)q[i*2+1];
-            fx_set_color(s_quad_drag == i ? FX_RGB(255, 160, 0) : FX_RGB(255, 255, 255));
-            fx_fill_rect(hx - 5, hy - 5, hx + 5, hy + 5);
-            fx_set_color(FX_RGB(200, 60, 60));
-            fx_draw_rect(hx - 5, hy - 5, hx + 5, hy + 5);
+            int near_h = (abs(lx - hx) <= 14 && abs(ly - hy) <= 14);
+            fx_set_color(s_quad_drag == i || near_h ? FX_RGB(255, 160, 0) : FX_RGB(255, 255, 255));
+            fx_fill_rect(hx - 7, hy - 7, hx + 7, hy + 7);
+            fx_set_color(FX_RGB(160, 40, 40));
+            fx_draw_rect(hx - 8, hy - 8, hx + 8, hy + 8);
+            fx_draw_rect(hx - 7, hy - 7, hx + 7, hy + 7);
         }
     }
-    fx_draw_text_c(4, 4, "拖动四角顶点 → 任意四边形", FX_RGB(90, 90, 90), FX_RGB(245, 245, 245));
 }
 
 static void on_img_load(fx_widget_t *w, void *ud)

@@ -320,6 +320,11 @@ const char *gpu_raymarch_renderer(void) {
 
 void gpu_raymarch_start(void)
 {
+    /* v2.4: 该通道是"独立 EGL 上下文 + 独立线程"的实验性实现, 在某些 NVIDIA 驱动上
+     * EGL 设备枚举/初始化会直接崩在驱动内部 (libnvidia-glsi/libEGL_nvidia, 实测 SIGSEGV,
+     * 无法在用户态捕获)。v2.4 的 sokol 后端会把光追改成同一上下文的 render pass 从而
+     * 彻底移除本通道; 在那之前默认【关闭】, 需要时用 FXTK_GPU=1 显式开启。 */
+    if (!getenv("FXTK_GPU")) return;
     if (!g_started) {
         g_started = 1;
         atexit(gpu_raymarch_shutdown);   /* v2.3.1: 退出时唤醒 GPU 线程, 不再仅靠 exit(0) 硬杀 */

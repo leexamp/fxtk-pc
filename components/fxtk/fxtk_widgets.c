@@ -113,25 +113,35 @@ void fxtk_draw_canvas(fx_widget_t *w)
 
 #endif
 #if FXTK_WIDGET_SLIDER
+/* v2.4 视觉修正 (视觉评审指出旧实现像"坏掉的进度条": 整块 fg 铺底 + 4px 细线 + 全高竖条):
+ * 现在按现代滑条画 —— 不铺底、居中 6px 圆角轨道(未填充部分用浅灰)、已填充段用主题色、
+ * 右侧 14px 宽圆角滑块带 1px 深色描边与按下位移。 */
 void fxtk_draw_slider(fx_widget_t *w)
 {
     int h = w->y2 - w->y1 + 1;
-    fx_set_color(w->fg);
-    fx_fill_rect(w->x1, w->y1, w->x2, w->y2);
-    int track_y = w->y1 + h / 2 - 2;
-    fx_set_color(w->fg);
-    fx_fill_rect(w->x1, track_y, w->x2, track_y + 3);
+    int cy = w->y1 + h / 2;
+    int th = h / 4; if (th < 6) th = 6; if (th > 10) th = 10;   /* 轨道厚度 6~10px */
+    int ty0 = cy - th / 2, ty1 = ty0 + th - 1;
     int rw = w->x2 - w->x1 + 1;
-    int filled = rw * w->value / 100;
-    if (filled > 1) {   /* v2.3.1: value=0 时 filled-1 是反向矩形, 交换后仍画出 1px 假填充 */
-        fx_set_color(w->bg);
-        fx_fill_rect(w->x1, track_y, w->x1 + filled - 1, track_y + 3);
-    }
-    int kx = w->x1 + filled - 3;
-    if (kx < w->x1) kx = w->x1;
-    if (kx > w->x2 - 6) kx = w->x2 - 6;
-    fx_set_color((w->flags & FX_F_PRESSED) ? darken(w->bg) : w->bg);
-    fx_fill_rect(kx, w->y1, kx + 6, w->y2);
+    int kw = h / 2; if (kw < 12) kw = 12; if (kw > 20) kw = 20;  /* 滑块宽度 */
+    int kx = w->x1 + rw * w->value / 100;
+    if (kx < w->x1 + kw / 2) kx = w->x1 + kw / 2;
+    if (kx > w->x2 - kw / 2) kx = w->x2 - kw / 2;
+
+    fx_set_color(FX_RGB(200, 202, 206));                                  /* 轨道底色 */
+    fx_fill_rect_round(w->x1, ty0, w->x2, ty1, th / 2);
+    fx_set_color(w->bg);                                                  /* 已填充段 = 主题色 */
+    if (kx > w->x1 + 1) fx_fill_rect_round(w->x1, ty0, kx - 1, ty1, th / 2);
+    fx_set_color(FX_RGB(140, 142, 148));                                  /* 轨道描边 */
+    fx_draw_hline(w->x1 + th / 2, w->x2 - th / 2, ty1);
+
+    int pr = (w->flags & FX_F_PRESSED) ? 1 : 0;
+    int kh = h - 4; if (kh < kw) kh = kw;                                 /* 滑块略高, 更易点 */
+    int ky0 = cy - kh / 2 + pr, ky1 = ky0 + kh - 1;
+    fx_set_color(FX_RGB(255, 255, 255));
+    fx_fill_rect_round(kx - kw / 2, ky0, kx + kw / 2, ky1, kw / 3);
+    fx_set_color(pr ? FX_RGB(90, 92, 98) : FX_RGB(150, 152, 158));
+    fx_draw_rect(kx - kw / 2, ky0, kx + kw / 2, ky1);
 }
 
 #endif

@@ -49,7 +49,10 @@ static void on_cv(fx_widget_t *w, void *ud)
 
     int m = cw / 40;
     int top = ch / 8, hgt = (ch * 3) / 8;
-    int w0 = (cw - 5 * m) / 5;            /* 每个四边形宽度 */
+    /* v2.4: 统一格子 —— 5 格等宽 + 24px 间隙, 左右各留 m, 保证不越界 (斜切件曾被右边界裁掉) */
+    int gap = cw / 20;
+    int w0 = (cw - 2 * m - 4 * gap) / 5;
+    if (w0 < 8) w0 = 8;
     int y1 = top, y2 = top + hgt;
 
     /* 1) 矩形 (对照) */
@@ -86,11 +89,12 @@ static void on_cv(fx_widget_t *w, void *ud)
     /* 5) 斜切 (顶边右移 = 侧面墙) */
     {
         x = m * 5 + w0 * 4;
+        float sh = w0 * 0.22f;                 /* 顶边整体右移: 上下边等长 → 平行四边形 */
         float q[8] = {
-            (float)x + w0 * 0.25f, (float)y1,
-            (float)x + w0 * 1.25f, (float)y1,
-            (float)x + w0,         (float)y2,
-            (float)x,              (float)y2,
+            (float)x + sh,          (float)y1,
+            (float)x + w0 + sh,     (float)y1,
+            (float)x + w0,          (float)y2,
+            (float)x,               (float)y2,
         };
         fx_draw_image_quad(s_check, q);
         fx_draw_text_c(x, y2 + 4, "斜切", FX_LGRAY, FX_RGB(24, 26, 32));

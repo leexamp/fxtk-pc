@@ -1040,7 +1040,9 @@ void fx_fill_quad(const float *xy8)
             if (fabsf(wq) < 1e-9f) continue;
             float u = (Hi[0] * px + Hi[1] * py + Hi[2]) / wq;
             float v = (Hi[3] * px + Hi[4] * py + Hi[5]) / wq;
-            if (u < 0.0f || u > 1.0f || v < 0.0f || v > 1.0f) continue;
+            /* v2.4: 边界留 1e-3 容差 —— 严格 [0,1] 判定会让相邻四边形之间漏出 1px 缝
+             * (平铺贴图/瓷砖的"散架"观感即由此而来) */
+            if (u < -1e-3f || u > 1.0f + 1e-3f || v < -1e-3f || v > 1.0f + 1e-3f) continue;
             fxtk_put_px(x, y, col);
         }
     }
@@ -1102,7 +1104,10 @@ void fx_draw_image_quad(const fx_image_t *img, const float *xy8)
             if (fabsf(wq) < 1e-9f) continue;
             float u = (Hi[0] * px + Hi[1] * py + Hi[2]) / wq;
             float v = (Hi[3] * px + Hi[4] * py + Hi[5]) / wq;
-            if (u < 0.0f || u > 1.0f || v < 0.0f || v > 1.0f) continue;   /* 凸四边形内外判定 */
+            /* 凸四边形内外判定 (边界留容差, 见 fx_fill_quad 的说明) */
+            if (u < -1e-3f || u > 1.0f + 1e-3f || v < -1e-3f || v > 1.0f + 1e-3f) continue;
+            if (u < 0.0f) u = 0.0f; else if (u > 1.0f) u = 1.0f;
+            if (v < 0.0f) v = 0.0f; else if (v > 1.0f) v = 1.0f;
             fxtk_put_px(x, y, sample_bilinear(img, u, v));
         }
     }
