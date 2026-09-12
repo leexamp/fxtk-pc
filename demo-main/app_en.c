@@ -4,6 +4,8 @@
  * (5 pages: wave / graphics / controls / images / 3D ray marching)
  */
 #include "fxtk.h"
+#include "fxtk_backends.h"
+#include <stdarg.h>
 #include "fxtk_image.h"
 #include "fxtk_desktop.h"
 #include "fxtk_effects.h"
@@ -33,6 +35,13 @@ static int s_wave_on = 1;
 static int s_speed = 30;
 static int s_pic = 0;
 static fx_image_t *s_pics[3];
+/* v2.4 page3 quad-warp editor state */
+static void img_info_set(const char *fmt, ...);
+static float s_quad_n[8] = { 0.04f, 0.04f, 0.96f, 0.04f, 0.96f, 0.96f, 0.04f, 0.96f };
+static float s_quad_scale = 1.0f;
+static int   s_quad_drag = -1;
+static int   s_quad_show = 1;
+static fx_image_t *s_imported = NULL;
 static int s_gfx_t = 0, s_spin = 30, s_gfx_mode = 0;
 #define TRAIL_N 14
 static int s_tx[TRAIL_N], s_ty[TRAIL_N], s_ti = 0;
@@ -68,15 +77,99 @@ static void on_reset(fx_widget_t *w, void *ud) {
     s_phase = 0;
     fx_set_title(fx_find("info"), "Reset · Try clicking the number keys");
 }
-static void on_img(fx_widget_t *w, void *ud) {
-    s_pic = (s_pic + 1) % 3;
-    fx_set_image(w, s_pics[s_pic]);
-    char buf[64];
-    snprintf(buf, sizeof(buf), "Pattern %d / 3 (click to switch)", s_pic + 1);
+static void img_info_set(const char *fmt, ...)
+{
+    char buf[160];
+    va_list ap; va_start(ap, fmt); vsnprintf(buf, sizeof(buf), fmt, ap); va_end(ap);
     fx_set_title(fx_find("img_info"), buf);
 }
+
+static void quad_corner_px(int cw, int ch, int i, float *ox, float *oy)
+{
+    *ox = (0.5f + (s_quad_n[i * 2] - 0.5f) * s_quad_scale) * (float)cw;
+    *oy = (0.5f + (s_quad_n[i * 2 + 1] - 0.5f) * s_quad_scale) * (float)ch;
+}
+
+static void on_imgq(fx_widget_t *w, void *ud)
+{
+    (void)ud;
+    int cw, ch; fx_canvas_size(w, &cw, &ch);
+    fx_canvas_clear(w, FX_RGB(245, 245, 245));
+    fx_image_t *img = s_imported ? s_imported : s_pics[s_pic];
+    if (!img) return;
+    int x1, y1, x2, y2; fx_widget_rect(w, &x1, &y1, &x2, &y2);
+    int mx, my, mp; fx_touch_state(&mx, &my, &mp);
+    int lx = mx - x1, ly = my - y1;
+    if (mp && s_quad_drag < 0) {
+        for (int i = 0; i < 4; i++) {
+            float hx, hy; quad_corner_px(cw, ch, i, &hx, &hy);
+            if (lx >= (int)hx - 10 && lx <= (int)hx + 10 && ly >= (int)hy - 10 && ly <= (int)hy + 10) { s_quad_drag = i; break; }
+        }
+    }
+    if (!mp) s_quad_drag = -1;
+    if (s_quad_drag >= 0) {
+        float nx = (float)lx / (float)cw, ny = (float)ly / (float)ch;
+        float sc = s_quad_scale > 0.01f ? s_quad_scale : 1.0f;
+        s_quad_n[s_quad_drag * 2]     = 0.5f + (nx - 0.5f) / sc;
+        s_quad_n[s_quad_drag * 2 + 1] = 0.5f + (ny - 0.5f) / sc;
+    }
+    float q[8];
+    for (int i = 0; i < 4; i++) quad_corner_px(cw, ch, i, &q[i * 2], &q[i * 2 + 1]);
+    fx_draw_image_quad(img, q);
+    if (s_quad_show) {
+        fx_set_color(FX_RGB(200, 60, 60));
+        for (int i = 0; i < 4; i++) {
+            int j = (i + 1) & 3;
+            fx_draw_line((int)q[i*2], (int)q[i*2+1], (int)q[j*2], (int)q[j*2+1]);
+        }
+        for (int i = 0; i < 4; i++) {
+            int hx = (int)q[i*2], hy = (int)q[i*2+1];
+            fx_set_color(s_quad_drag == i ? FX_RGB(255, 160, 0) : FX_RGB(255, 255, 255));
+            fx_fill_rect(hx - 5, hy - 5, hx + 5, hy + 5);
+            fx_set_color(FX_RGB(200, 60, 60));
+            fx_draw_rect(hx - 5, hy - 5, hx + 5, hy + 5);
+        }
+    }
+    fx_draw_text_c(4, 4, "Drag corners to warp", FX_RGB(90, 90, 90), FX_RGB(245, 245, 245));
+}
+
+static void on_img_load(fx_widget_t *w, void *ud)
+{
+    (void)w; (void)ud;
+    char path[512];
+    if (!fx_backend_pick_file(path, (int)sizeof(path), "Select image", "png,jpg,jpeg,bmp,gif,tga")) {
+        img_info_set("cancelled / dialog unavailable");
+        return;
+    }
+    fx_image_t *img = fx_image_load(path);
+    if (!img) { img_info_set("decode failed: %s", fx_path_basename(path)); return; }
+    if (s_imported) fx_image_free(s_imported);
+    s_imported = img;
+    s_quad_scale = 1.0f;
+    img_info_set("imported %s (%dx%d)", fx_path_basename(path), img->w, img->h);
+}
+
+static void on_img_reset(fx_widget_t *w, void *ud)
+{
+    (void)w; (void)ud;
+    static const float def[8] = { 0.04f, 0.04f, 0.96f, 0.04f, 0.96f, 0.96f, 0.04f, 0.96f };
+    memcpy(s_quad_n, def, sizeof(def));
+    s_quad_scale = 1.0f;
+    s_quad_show = 1;
+    img_info_set("quad reset");
+}
+
+static void on_img(fx_widget_t *w, void *ud) {
+    (void)w; (void)ud;
+    s_pic = (s_pic + 1) % 3;
+    if (s_imported) { fx_image_free(s_imported); s_imported = NULL; }
+    static const float def[8] = { 0.04f, 0.04f, 0.96f, 0.04f, 0.96f, 0.96f, 0.04f, 0.96f };
+    memcpy(s_quad_n, def, sizeof(def));
+    img_info_set("built-in pattern %d / 3", s_pic + 1);
+}
 static void on_zoom(fx_widget_t *w, void *ud) {
-    fx_image_set_zoom(fx_find("pic"), 10 + fx_get_value(w) * 3);
+    (void)ud;
+    s_quad_scale = 0.4f + (float)fx_get_value(w) / 100.0f * 1.6f;
 }
 static void on_spin(fx_widget_t *w, void *ud) { s_spin = fx_get_value(w); }
 static void on_mode(fx_widget_t *w, void *ud) {
@@ -260,10 +353,15 @@ static void build_ui(void) {
     fx_label_new(pixel("280,224","459,236"), page(2), name("info"), title("Click a number key"), fgcolor(FX_RGB(51, 51, 51)));
 fx_label_new(pixel("318,152", "438,220"), name("info"), page(2), title("Click a number key"), fgcolor(FX_RGB(51, 51, 51)));
 
-    fx_image_new(pixel("93,32", "309,220"), name("pic"), page(3), image(s_pics[0]), call(on_img));
+    /* page3 (v2.4): image + quad-warp editor */
+    fx_canvas_new(pixel("93,32", "309,220"), name("imgq"), page(3), anim(1), color(FX_RGB(245, 245, 245)), call(on_imgq));
+    fx_button_new(pixel("318,36", "438,58"), name("img_load"), page(3), title("Import image..."), color(FX_RGB(33, 150, 243)), call(on_img_load));
+    fx_button_new(pixel("318,64", "374,86"), name("img_next"), page(3), title("Next"), call(on_img));
+    fx_button_new(pixel("380,64", "438,86"), name("img_reset"), page(3), title("Reset"), color(FX_RGB(244, 67, 54)), call(on_img_reset));
     fx_label_new(pixel("318,40", "438,58"), page(3), title("Zoom (try dragging)"), fgcolor(FX_RGB(51, 51, 51)));
-    fx_slider_new(pixel("318,64", "438,84"), name("zoom"), page(3), value(30), color(FX_RGB(33, 150, 243)), call(on_zoom));
-    fx_label_new(pixel("318,100", "438,220"), name("img_info"), page(3), title("Pattern 1 / 3 (click to switch)"), fgcolor(FX_RGB(51, 51, 51)));
+    fx_label_new(pixel("318,92", "438,110"), page(3), title("Zoom (about center)"), fgcolor(FX_RGB(51, 51, 51)));
+    fx_slider_new(pixel("318,112", "438,132"), name("zoom"), page(3), value(30), color(FX_RGB(33, 150, 243)), call(on_zoom));
+    fx_label_new(pixel("318,142", "438,238"), name("img_info"), page(3), title("Drag the 4 corners"), fgcolor(FX_RGB(51, 51, 51)));
 
     /* Page 5: 3D ray marching */
     fx_canvas_new(pixel("93,32", "438,196"), name("rt_cv"), page(4), anim(1), color(FX_BLACK), call(on_3d));

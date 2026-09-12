@@ -3,6 +3,8 @@
  * app.c — fxtk 综合演示 (5 页: 波形/动效/控件/图片/3D光追)
  */
 #include "fxtk.h"
+#include "fxtk_backends.h"
+#include <stdarg.h>
 #include "fxtk_image.h"
 #include "fxtk_desktop.h"
 #include "fxtk_effects.h"
@@ -35,6 +37,13 @@ static int s_wave_on = 1;
 static int s_speed = 30;
 static int s_pic = 0;
 static fx_image_t *s_pics[3];
+static void img_info_set(const char *fmt, ...);   /* 前向声明 (on_img 早于其定义) */
+/* v2.4 页3 四边形形变编辑器状态 (声明须早于 on_img/on_zoom) */
+static float s_quad_n[8] = { 0.04f, 0.04f, 0.96f, 0.04f, 0.96f, 0.96f, 0.04f, 0.96f };   /* 四角(归一化, 内缩 4% 让手柄可见) */
+static float s_quad_scale = 1.0f;                        /* 缩放(以中心为基准) */
+static int   s_quad_drag = -1;
+static int   s_quad_show = 1;
+static fx_image_t *s_imported = NULL;                    /* 导入的图片 */
 static int s_gfx_t = 0, s_spin = 30, s_gfx_mode = 0;
 #define TRAIL_N 14
 static int s_tx[TRAIL_N], s_ty[TRAIL_N], s_ti = 0;
@@ -71,20 +80,111 @@ static void on_reset(fx_widget_t *w, void *ud) {
     fx_set_title(fx_find("info"), "已重置 · 点击数字键试试");
 }
 static void on_img(fx_widget_t *w, void *ud) {
+    (void)w; (void)ud;
     s_pic = (s_pic + 1) % 3;
-    fx_set_image(w, s_pics[s_pic]);
-    char buf[48];
-    snprintf(buf, sizeof(buf), "图案 %d / 3 (点击切换)", s_pic + 1);
-    fx_set_title(fx_find("img_info"), buf);
+    if (s_imported) { fx_image_free(s_imported); s_imported = NULL; }   /* 换回内置图案 */
+    static const float def[8] = { 0.04f, 0.04f, 0.96f, 0.04f, 0.96f, 0.96f, 0.04f, 0.96f };
+    memcpy(s_quad_n, def, sizeof(def));
+    img_info_set("内置图案 %d / 3", s_pic + 1);
 }
 static void on_zoom(fx_widget_t *w, void *ud) {
-    fx_image_set_zoom(fx_find("pic"), 10 + fx_get_value(w) * 3);
+    (void)ud;
+    s_quad_scale = 0.4f + (float)fx_get_value(w) / 100.0f * 1.6f;   /* 0.4x ~ 2.0x */
 }
 static void on_spin(fx_widget_t *w, void *ud) { s_spin = fx_get_value(w); }
 static void on_mode(fx_widget_t *w, void *ud) {
     s_gfx_mode = (s_gfx_mode + 1) % 3;
     const char *m[3] = { "模式: 全部", "模式: 贴图", "模式: 矢量" };
     fx_set_title(fx_find("gfx_info"), m[s_gfx_mode]);
+}
+
+/* ================= v2.4 页3: 图片四边形形变编辑器 ================= */
+static void img_info_set(const char *fmt, ...)
+{
+    char buf[160];
+    va_list ap; va_start(ap, fmt); vsnprintf(buf, sizeof(buf), fmt, ap); va_end(ap);
+    fx_set_title(fx_find("img_info"), buf);
+}
+
+static void quad_corner_px(int cw, int ch, int i, float *ox, float *oy)
+{
+    *ox = (0.5f + (s_quad_n[i * 2] - 0.5f) * s_quad_scale) * (float)cw;
+    *oy = (0.5f + (s_quad_n[i * 2 + 1] - 0.5f) * s_quad_scale) * (float)ch;
+}
+
+static void on_imgq(fx_widget_t *w, void *ud)
+{
+    (void)ud;
+    int cw, ch; fx_canvas_size(w, &cw, &ch);
+    fx_canvas_clear(w, FX_RGB(245, 245, 245));
+    fx_image_t *img = s_imported ? s_imported : s_pics[s_pic];
+    if (!img) return;
+
+    int x1, y1, x2, y2; fx_widget_rect(w, &x1, &y1, &x2, &y2);
+    int mx, my, mp; fx_touch_state(&mx, &my, &mp);
+    int lx = mx - x1, ly = my - y1;                      /* 画布本地坐标 */
+
+    /* 命中手柄 → 开始拖; 松手结束 */
+    if (mp && s_quad_drag < 0) {
+        for (int i = 0; i < 4; i++) {
+            float hx, hy; quad_corner_px(cw, ch, i, &hx, &hy);
+            if (lx >= (int)hx - 10 && lx <= (int)hx + 10 && ly >= (int)hy - 10 && ly <= (int)hy + 10) { s_quad_drag = i; break; }
+        }
+    }
+    if (!mp) s_quad_drag = -1;
+    if (s_quad_drag >= 0) {                              /* 反解回归一化坐标 */
+        float nx = (float)lx / (float)cw, ny = (float)ly / (float)ch;
+        s_quad_n[s_quad_drag * 2]     = 0.5f + (nx - 0.5f) / (s_quad_scale > 0.01f ? s_quad_scale : 1.0f);
+        s_quad_n[s_quad_drag * 2 + 1] = 0.5f + (ny - 0.5f) / (s_quad_scale > 0.01f ? s_quad_scale : 1.0f);
+    }
+
+    /* 画四边形 (真透视) */
+    float q[8];
+    for (int i = 0; i < 4; i++) quad_corner_px(cw, ch, i, &q[i * 2], &q[i * 2 + 1]);
+    fx_draw_image_quad(img, q);
+
+    /* 手柄 + 边线 */
+    if (s_quad_show) {
+        fx_set_color(FX_RGB(200, 60, 60));
+        for (int i = 0; i < 4; i++) {
+            int j = (i + 1) & 3;
+            fx_draw_line((int)q[i*2], (int)q[i*2+1], (int)q[j*2], (int)q[j*2+1]);
+        }
+        for (int i = 0; i < 4; i++) {
+            int hx = (int)q[i*2], hy = (int)q[i*2+1];
+            fx_set_color(s_quad_drag == i ? FX_RGB(255, 160, 0) : FX_RGB(255, 255, 255));
+            fx_fill_rect(hx - 5, hy - 5, hx + 5, hy + 5);
+            fx_set_color(FX_RGB(200, 60, 60));
+            fx_draw_rect(hx - 5, hy - 5, hx + 5, hy + 5);
+        }
+    }
+    fx_draw_text_c(4, 4, "拖动四角顶点 → 任意四边形", FX_RGB(90, 90, 90), FX_RGB(245, 245, 245));
+}
+
+static void on_img_load(fx_widget_t *w, void *ud)
+{
+    (void)w; (void)ud;
+    char path[512];
+    if (!fx_backend_pick_file(path, (int)sizeof(path), "选择图片", "png,jpg,jpeg,bmp,gif,tga")) {
+        img_info_set("已取消 / 系统对话框不可用");
+        return;
+    }
+    fx_image_t *img = fx_image_load(path);
+    if (!img) { img_info_set("解码失败: %s", fx_path_basename(path)); return; }
+    if (s_imported) fx_image_free(s_imported);
+    s_imported = img;
+    s_quad_scale = 1.0f;
+    img_info_set("已导入 %s (%dx%d)", fx_path_basename(path), img->w, img->h);
+}
+
+static void on_img_reset(fx_widget_t *w, void *ud)
+{
+    (void)w; (void)ud;
+    static const float def[8] = { 0.04f, 0.04f, 0.96f, 0.04f, 0.96f, 0.96f, 0.04f, 0.96f };
+    memcpy(s_quad_n, def, sizeof(def));
+    s_quad_scale = 1.0f;
+    s_quad_show = 1;
+    img_info_set("四边形已复位");
 }
 
 static void on_canvas(fx_widget_t *w, void *ud) {
@@ -262,10 +362,14 @@ static void build_ui(void) {
     fx_button_new(pixel("262,200","352,220"), page(2), title("重置"), color(FX_RGB(244, 67, 54)), call(on_reset));
 fx_label_new(pixel("262,224","470,236"), name("info"), page(2), title("点击数字键试试"), fgcolor(FX_RGB(51, 51, 51)));
 
-    fx_image_new(pixel("6,32", "280,220"), name("pic"), page(3), image(s_pics[0]), call(on_img));
-    fx_label_new(pixel("292,40", "444,58"), page(3), title("缩放 (拖动试试)"), fgcolor(FX_RGB(51, 51, 51)));
-    fx_slider_new(pixel("292,64", "444,84"), name("zoom"), page(3), value(30), color(FX_RGB(33, 150, 243)), call(on_zoom));
-    fx_label_new(pixel("292,100", "444,220"), name("img_info"), page(3), title("图案 1 / 3 (点击切换)"), fgcolor(FX_RGB(51, 51, 51)));
+    /* 页3 (v2.4): 图片 + 四边形形变编辑器 */
+    fx_canvas_new(pixel("6,32", "280,220"), name("imgq"), page(3), anim(1), color(FX_RGB(245, 245, 245)), call(on_imgq));
+    fx_button_new(pixel("292,36", "444,58"), name("img_load"), page(3), title("导入图片…"), color(FX_RGB(33, 150, 243)), call(on_img_load));
+    fx_button_new(pixel("292,64", "366,86"), name("img_next"), page(3), title("换图案"), call(on_img));
+    fx_button_new(pixel("372,64", "444,86"), name("img_reset"), page(3), title("复位"), color(FX_RGB(244, 67, 54)), call(on_img_reset));
+    fx_label_new(pixel("292,92", "444,110"), page(3), title("缩放 (以中心为基准)"), fgcolor(FX_RGB(51, 51, 51)));
+    fx_slider_new(pixel("292,112", "444,132"), name("zoom"), page(3), value(30), color(FX_RGB(33, 150, 243)), call(on_zoom));
+    fx_label_new(pixel("292,142", "444,238"), name("img_info"), page(3), title("拖动四角顶点可任意形变"), fgcolor(FX_RGB(51, 51, 51)));
 
     /* 页5: 3D 光线步进 */
     fx_canvas_new(pixel("6,32", "444,196"), name("rt_cv"), page(4), anim(1), color(FX_BLACK), call(on_3d));
