@@ -34,6 +34,10 @@
 #define FX_TOK_KNOB_EDGE      FX_RGB(150, 152, 158)   /* 滑块描边 */
 #define FX_TOK_KNOB_EDGE_DOWN FX_RGB(90, 92, 98)      /* 滑块按下描边 */
 #define FX_TOK_EDGE_DOWN      FX_RGB(60, 60, 60)      /* 按钮按下时的 1px 深边 */
+#define FX_TOK_LIST_EDGE      FX_RGB(150, 150, 150)   /* 列表外框 */
+#define FX_TOK_LIST_HOVER     FX_RGB(200, 220, 245)   /* 列表悬停行 */
+#define FX_TOK_SCROLL_TRACK   FX_GRAY                 /* 滚动条槽 */
+#define FX_TOK_SCROLL_THUMB   FX_LGRAY                /* 滚动条滑块 */
 #define FX_TOK_SELECT_TEXT_BG FX_RGB(40, 40, 40)      /* 列表选中项文字底色 */
 
 /* ---------- 几何 ---------- */
