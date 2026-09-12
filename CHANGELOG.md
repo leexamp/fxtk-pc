@@ -92,6 +92,22 @@
 - **SDF 着色器不能复用带纹理绑定的 shader desc**: 复用会让 SDF 管线要求 view/sampler 绑定,
   未绑定直接 `VALIDATE_ABND_EXPECTED_VIEW_BINDING` panic。改用独立 desc。
 
+### 新增（动态库打包 —— 多示例共享同一份框架）
+- `build_shared.sh` + `make shared`: 把框架拆成 **`libfxtk.so`**(核心 6 个 .c, 与后端无关) +
+  **`libfxtk_sokol.so`**(sokol 平台层 + stb 文本; `SOKOL_*_IMPL` 只在这一个 TU 里) + app 层 exe。
+  rpath 用 `$ORIGIN`, 整包拷到任何位置都能直接运行(实测拷到 /tmp/bundle 正常启动)。
+- **体积**: exe **361KB → 62.3KB**(5.8 倍); 两个库 147.8KB + 326.4KB, 多个示例/多语言版共用同一份。
+- **正确性**: 同一页截图与静态版**逐像素一致**(最大通道差 0), 证明拆分不影响渲染语义。
+
+### 修复（图形页与 SDL 版不一致: 旋转贴图整块消失）
+- **根因**: sokol 驱动的 `blit_img_rot` 自 P2 起一直是空实现(注释写着"走 quadrilateral"待办),
+  而图形页正好用 `fx_draw_image_rot` 画两张旋转图片 —— 于是那两张图在 sokol 后端**完全不见**,
+  与 SDL 版一眼可见的差别。
+- **修法**: 用 P4 的 GPU 真透视四边形实现(旋转是仿射特例, 每角权重恒 1, 硬件做旋转+双线性);
+  语义与 SDL 驱动严格对齐: 以 (cx,cy) 为中心、尺寸 dw x dh、角度取 **-ang 度**
+  (SDL_RenderCopyEx 正角为顺时针, 框架传的是逆时针角)。
+- **实测**: 修前后对比截图可见两张旋转图片恢复; 与 SDL 版的差异从"结构性缺失"降为动画相位差。
+
 ### 修复（压测页在 1280x720 段错误 / Windows 崩溃 —— 无限递归爆栈）
 - **根因**: 上一轮修"滑块残影"时, 我把立即重绘改成了 `redraw_region()`(会遍历控件树),
   于是形成递归环: `draw_widget → redraw_region → redraw_widget_now → fx_set_value → 控件回调 → draw_widget …`,
