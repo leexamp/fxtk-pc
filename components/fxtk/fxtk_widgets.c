@@ -141,10 +141,15 @@ void fxtk_draw_slider(fx_widget_t *w)
     int pr = (w->flags & FX_F_PRESSED) ? 1 : 0;
     int kh = h - 4; if (kh < kw) kh = kw;                                 /* 滑块略高, 更易点 */
     int ky0 = cy - kh / 2 + pr, ky1 = ky0 + kh - 1;
+    /* P5 审美迭代 3/9(滑杆): 滑块原本是"圆角填充 + 直角描边" —— 圆角被描边的直角切掉,
+     * 看起来像方形贴了个圆角, 与按钮/输入框的圆角语言也不统一。描边改用同半径的圆角矩形,
+     * 调用次数不变(1 填充 + 1 描边), 零额外开销。半径比例走令牌 FX_TOK_RADIUS_KNOB_DIV。 */
+    int kr = kw / FX_TOK_RADIUS_KNOB_DIV;
+    if (kr < 2) kr = 2;
     fx_set_color(FX_TOK_KNOB);
-    fx_fill_rect_round(kx - kw / 2, ky0, kx + kw / 2, ky1, kw / 3);
+    fx_fill_rect_round(kx - kw / 2, ky0, kx + kw / 2, ky1, kr);
     fx_set_color(pr ? FX_TOK_KNOB_EDGE_DOWN : FX_TOK_KNOB_EDGE);
-    fx_draw_rect(kx - kw / 2, ky0, kx + kw / 2, ky1);
+    fx_draw_rect_round(kx - kw / 2, ky0, kx + kw / 2, ky1, kr);
 }
 
 #endif
