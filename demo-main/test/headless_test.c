@@ -379,6 +379,36 @@ int main(void) {
         float Hd[9];
         if (!fx_quad_homography(unit, degen, Hd)) printf("  [ok]   退化四边形被拒绝\n");
         else { printf("  [FAIL] 退化四边形竟求解成功\n"); fails++; }
+        /* 14b. v2.4 P4: 四角透视权重 (GPU 真透视用) */
+        {
+            float rect[8] = { 0, 0, 100, 0, 100, 60, 0, 60 };          /* 无透视: 权重应全为 1 */
+            float rect_w[4];
+            int ok = fx_quad_corner_weights(rect, rect_w);
+            int all1 = ok && fabsf(rect_w[0]-1)<1e-4f && fabsf(rect_w[1]-1)<1e-4f &&
+                              fabsf(rect_w[2]-1)<1e-4f && fabsf(rect_w[3]-1)<1e-4f;
+            printf("  [%s] 矩形(无透视)权重恒为 1\n", all1 ? "ok" : "FAIL"); if (!all1) fails++;
+
+            /* 梯形(上边收窄 → 有透视): 权重须使【透视插值】与 CPU 单应结果一致。
+             * 取四边形四角坐标平均点 C(屏幕空间), CPU 用 H⁻¹ 求 uv; 另用四角权重做
+             * 透视校正插值(uv = Σλ·uv_i/d_i ÷ Σλ/d_i, λ=1/4) —— 两者应吻合。 */
+            float trap[8] = { 25, 0, 75, 0, 100, 60, 0, 60 };
+            float w4[4]; float H2[9], Hi2[9];
+            int ok2 = fx_quad_corner_weights(trap, w4) && fx_quad_homography(unit, trap, H2) && fx_mat3_invert(H2, Hi2);
+            float cx = (trap[0]+trap[2]+trap[4]+trap[6])*0.25f;
+            float cy = (trap[1]+trap[3]+trap[5]+trap[7])*0.25f;
+            float uu = Hi2[0]*cx + Hi2[1]*cy + Hi2[2];
+            float vv = Hi2[3]*cx + Hi2[4]*cy + Hi2[5];
+            float ww = Hi2[6]*cx + Hi2[7]*cy + Hi2[8];
+            uu /= ww; vv /= ww;
+            const float cu[4] = { 0, 1, 1, 0 }, cv[4] = { 0, 0, 1, 1 };
+            float su = 0, sv = 0, sw = 0;
+            for (int i = 0; i < 4; i++) { float l = 0.25f / w4[i]; su += l*cu[i]; sv += l*cv[i]; sw += l; }
+            su /= sw; sv /= sw;
+            int near_ok = ok2 && fabsf(su-uu) < 2e-3f && fabsf(sv-vv) < 2e-3f;
+            printf("  [%s] 梯形透视权重: 插值 uv=(%.4f,%.4f) vs 单应 uv=(%.4f,%.4f)\n",
+                   near_ok ? "ok" : "FAIL", su, sv, uu, vv);
+            if (!near_ok) fails++;
+        }
     }
 
     /* 15. v2.4 canvas 变换栈 (2D 仿射) */

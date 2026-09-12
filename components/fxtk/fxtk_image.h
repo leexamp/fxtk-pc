@@ -42,5 +42,11 @@ void fx_draw_image_quad_persp(const fx_image_t *img, int x1, int y1, int x2, int
 /* 工具(也是测试入口): 求把 src8 四角映射到 dst8 四角的单应矩阵(行优先 3x3, m[8]=1);
  * 以及 3x3 求逆。成功返回 1, 退化返回 0。 */
 int fx_quad_homography(const float *src8, const float *dst8, float m[9]);
+/* v2.4 P4: 给 GPU 真透视四边形用的【四角裁剪权重】(即单应的分母 d_i)。
+ * 驱动把 d_i 直接写进 gl_Position.w, 硬件就会按透视校正插值 uv —— 单次 draw 两个三角形即
+ * 透视正确, 不会出现"两个三角形各做仿射"的对角缝(这是该问题的正解)。
+ * 权重来自 H: 单位方 → 目标四边形, d(x,y)=g*x+h*y+1, 四角 (0,0)(1,0)(1,1)(0,1) 对应
+ * d = 1, g+1, g+h+1, h+1。退化(某角灭点落在角上)返回 0。 */
+int fx_quad_corner_weights(const float *xy8, float d4[4]);
 int fx_mat3_invert(const float *m, float out[9]);
 #endif

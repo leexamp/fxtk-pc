@@ -1040,6 +1040,23 @@ int fx_quad_homography(const float *src8, const float *dst8, float m[9])
     return 1;
 }
 
+int fx_quad_corner_weights(const float *xy8, float d4[4])
+{
+    static const float unit8[8] = { 0, 0, 1, 0, 1, 1, 0, 1 };
+    float H[9];
+    if (!xy8 || !d4) return 0;
+    if (!fx_quad_homography(unit8, xy8, H)) return 0;
+    float g = H[6], h = H[7];
+    float d[4];
+    d[0] = 1.0f; d[1] = g + 1.0f; d[2] = g + h + 1.0f; d[3] = h + 1.0f;
+    for (int i = 0; i < 4; i++) {
+        if (fabs(d[i]) < 1e-6f) return 0;         /* 灭点落在角点 → 权重发散, 交回 CPU 路径 */
+        if (d[i] < 0) d[i] = -d[i];               /* 只取比例, 符号无关(整幅同号) */
+    }
+    for (int i = 0; i < 4; i++) d4[i] = d[i];
+    return 1;
+}
+
 int fx_mat3_invert(const float *m, float out[9])
 {
     if (!m || !out) return 0;
