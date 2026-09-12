@@ -56,9 +56,14 @@ static int      s_ib_n = 0;
 
 typedef struct {
     int  first, count;
-    int  pip;               /* 0 = 实心, 1 = 贴图 */
+    int  pip;               /* 0 = 实心, 1 = 贴图, 2 = 光追 */
     int  tex;               /* 纹理槽位 (-1 = 无) */
+    /* v2.4: 每条命令携带裁剪矩形 —— 框架通过 set_clip_rect 表达裁剪(画布/滚动/标签页),
+     * 驱动必须落到 GPU scissor 上, 否则线宽外扩的 0.5px 会溢出容器(实测: 波形溢出画布 1~2px)。 */
+    int  cx1, cy1, cx2, cy2;
+    float time;             /* pip=2 光追用 */
 } cmd_t;
+static int s_clip_x1 = 0, s_clip_y1 = 0, s_clip_x2 = 32767, s_clip_y2 = 32767;
 static cmd_t  s_cmd[CMD_MAX];
 static int    s_cmd_n = 0;
 static sg_buffer s_ibuf;
@@ -148,6 +153,9 @@ static int cmd_new(int pip, int tex)
     s_cmd[s_cmd_n].count = 0;
     s_cmd[s_cmd_n].pip = pip;
     s_cmd[s_cmd_n].tex = tex;
+    s_cmd[s_cmd_n].cx1 = s_clip_x1; s_cmd[s_cmd_n].cy1 = s_clip_y1;
+    s_cmd[s_cmd_n].cx2 = s_clip_x2; s_cmd[s_cmd_n].cy2 = s_clip_y2;
+    s_cmd[s_cmd_n].time = 0.0f;
     return s_cmd_n++;
 }
 
@@ -265,7 +273,13 @@ static void px_flush(void)
         }
     }
     sg_write_image_transient(&(sg_write_image_desc){
-        .src  = { .data = { s_px_stage, (size_t)w * h * 4 } },
+        /* bytes_per_row 必须显式给: 不然 sokol 按后端行对齐(实测 256B)推算所需大小,
+         * 遇到 43*4=172 这种非对齐行宽就判越界 → panic (图形/图片页闪退的根因)。 */
+        /* 三个字段都必须给: bytes_per_slice 缺省为 0 会被校验拒绝(图形/图片页闪退根因);
+         * 校验公式 size = bytes_per_slice * num_slices ≤ data.size */
+        .src  = { .data = { s_px_stage, (size_t)w * h * 4 },
+                  .bytes_per_row = w * 4,
+                  .bytes_per_slice = (size_t)w * 4 * h },
         .dst  = { .image = s_px_img, .mip_level = 0, .x = x0, .y = y0, .slice = 0 },
         .size = { .width = w, .height = h, .num_slices = 1 } });
     int slot = tex_alloc(s_px_img, s_px_view, s_w, s_h);
@@ -536,8 +550,7 @@ static int drv_wheel_read(int *x, int *y, int *dy)
 static void drv_set_title(const char *s) { sapp_set_window_title(s ? s : "fxtk"); }
 static void drv_set_clip_rect(int x1, int y1, int x2, int y2)
 {
-    /* 顶点管线用 scissor 表达裁剪: 记录并作为命令属性(简化: 立即生效于当前命令) */
-    (void)x1; (void)y1; (void)x2; (void)y2;
+    s_clip_x1 = x1; s_clip_y1 = y1; s_clip_x2 = x2; s_clip_y2 = y2;
 }
 static void drv_clip_set(const char *s) { (void)s; }
 static const char *drv_clip_get(void) { return ""; }
@@ -675,6 +688,14 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
     for (int i = 0; i < s_cmd_n; i++) {
         cmd_t *c = &s_cmd[i];
         if (c->count <= 0) continue;
+        {   /* 裁剪: 与屏幕求交后设 scissor (origin_top_left) */
+            int cx1 = c->cx1 < 0 ? 0 : c->cx1;
+            int cy1 = c->cy1 < 0 ? 0 : c->cy1;
+            int cx2 = c->cx2 > s_w - 1 ? s_w - 1 : c->cx2;
+            int cy2 = c->cy2 > s_h - 1 ? s_h - 1 : c->cy2;
+            if (cx2 < cx1 || cy2 < cy1) continue;
+            sg_apply_scissor_rect(cx1, cy1, cx2 - cx1 + 1, cy2 - cy1 + 1, true);
+        }
         sg_apply_pipeline(c->pip == 0 ? s_pip_solid : s_pip_tex);
         sg_bindings b = {0};
         b.vertex_buffers[0] = s_vbuf;
@@ -693,6 +714,7 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
         .action = { .colors[0] = { .load_action = SG_LOADACTION_CLEAR,
                                    .clear_value = { 0.0f, 0.0f, 0.0f, 1.0f } } },
         .swapchain = sglue_swapchain() });
+    sg_apply_scissor_rect(0, 0, s_w, s_h, true);   /* 整屏 blit 不受之前命令的裁剪影响 */
     sg_apply_pipeline(s_pip_tex);
     sg_bindings bb = {0};
     bb.vertex_buffers[0] = s_blit_vb;
@@ -741,6 +763,7 @@ int  fxtk_sokol_vtx_count(void) { return s_vb_n; }
  * 漏掉 fx_layout/fx_repaint 会让新暴露的区域一直没人画 → 缩放后几乎全屏黑(实测踩坑)。 */
 void fxtk_sokol_apply_size(int w, int h)
 {
+    s_clip_x1 = 0; s_clip_y1 = 0; s_clip_x2 = 32767; s_clip_y2 = 32767;
     if (w < 160) w = 160;
     if (h < 120) h = 120;
     if (w == s_w && h == s_h) return;

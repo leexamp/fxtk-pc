@@ -204,7 +204,7 @@ static void on_canvas(fx_widget_t *w, void *ud) {
         for (int x = 0; x < cw; x++) {
             float t = (float)(x + s_phase) * PI2_32;
             int y = ch / 2 + (int)(amp * sinf(t) * 0.7f + amp * 0.3f * sinf(t / 3.0f));
-            fx_draw_line(x - 1, prev_y, x, y);
+            fx_draw_line(x > 0 ? x - 1 : 0, prev_y, x, y);   /* x=0 时别用 -1: 会越出画布左边界 1px */
             prev_y = y;
         }
         fx_set_color(FX_RED);
