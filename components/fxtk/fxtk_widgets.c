@@ -156,17 +156,22 @@ void fxtk_draw_slider(fx_widget_t *w)
 #if FXTK_WIDGET_PROGRESS
 void fxtk_draw_progress(fx_widget_t *w)
 {
-    fx_set_color(w->fg);
-    fx_fill_rect(w->x1, w->y1, w->x2, w->y2);
+    /* P5 审美迭代 6/9(进度条): 轨道/填充/描边原为硬直角, 与其它控件不一致。改为圆角,
+     * 填充的圆角按高度收敛(短填充不会因圆角过大而变形)。调用次数不变。 */
     int rw = w->x2 - w->x1 + 1;
+    int rh = w->y2 - w->y1 + 1;
+    int pr = rh / 2; if (pr > FX_TOK_RADIUS_M) pr = FX_TOK_RADIUS_M; if (pr < 2) pr = 2;
+    fx_set_color(w->fg);
+    fx_fill_rect_round(w->x1, w->y1, w->x2, w->y2, pr);
     int filled = rw * w->value / 100;
     if (filled > 0) {
+        int fr = pr; if (fr > filled / 2) fr = filled / 2; if (fr < 1) fr = 1;
         fx_set_color(w->bg);
-        fx_fill_rect(w->x1, w->y1, w->x1 + filled - 1, w->y2);
+        fx_fill_rect_round(w->x1, w->y1, w->x1 + filled - 1, w->y2, fr);
     }
     if (w->border > 0) {
         fx_set_color(darken(w->fg));
-        fx_draw_rect(w->x1, w->y1, w->x2, w->y2);
+        fx_draw_rect_round(w->x1, w->y1, w->x2, w->y2, pr);
     }
 }
 
@@ -183,15 +188,18 @@ void fxtk_draw_checkbox(fx_widget_t *w)
         fx_set_color(w->bg);
         fx_fill_rect(w->x1, w->y1, w->x2, w->y2);
     }
+    /* P5 审美迭代 7/9(复选框): 方框由硬直角改圆角(令牌 S), 与输入框/列表同一套语言;
+     * 勾选标记仍是两条线(形状本身没问题), 调用次数不变。 */
+    int cbr = FX_TOK_RADIUS_S; if (cbr > box / 3) cbr = box / 3; if (cbr < 1) cbr = 1;
     fx_set_color(w->fg);
-    fx_draw_rect(w->x1, by, w->x1 + box - 1, by + box - 1);
+    fx_draw_rect_round(w->x1, by, w->x1 + box - 1, by + box - 1, cbr);
     if (w->value) {
         fx_draw_line(w->x1 + 3, by + box / 2, w->x1 + box / 2 - 1, by + box - 4);
         fx_draw_line(w->x1 + box / 2 - 1, by + box - 4, w->x1 + box - 4, by + 2);
     }
     if (w->title[0]) {
         fx_color_t text_bg = (w->bg != FX_BLACK) ? w->bg : fx_get_bg();
-        fx_draw_text_c(w->x1 + box + 6, by, w->title, w->fg, text_bg);
+        fx_draw_text_c(w->x1 + box + FX_TOK_TEXT_PAD_X, by, w->title, w->fg, text_bg);
     }
 }
 
