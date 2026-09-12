@@ -19,6 +19,7 @@ extern fx_driver_t fx_sokol_driver;
 
 /* 窗口尺寸变化时调用 (事件回调与测试钩子共用) */
 void fxtk_sokol_apply_size(int w, int h);
+void fxtk_sokol_inject_drag(int x0,int y0,int x1,int y1,int steps);
 
 /* 把本帧累积的顶点命令流提交并呈现 (fx_poll 之后调用) */
 void fxtk_sokol_frame(int fb_w, int fb_h);

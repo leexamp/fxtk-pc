@@ -106,8 +106,19 @@ static font_t *font_get(int size)
     if (size <= 0) size = s_cur_size;
     for (int i = 0; i < s_font_n; i++)
         if (s_fonts[i].size == size) return &s_fonts[i];
-    if (!s_path[0] || s_font_n >= FONT_MAX) return s_font_n ? &s_fonts[0] : NULL;
-    font_t *f = &s_fonts[s_font_n];
+    if (!s_path[0]) return s_font_n ? &s_fonts[0] : NULL;
+    int slot = s_font_n;
+    if (slot >= FONT_MAX) {          /* 满了: 淘汰最久未用的字号(1 号起, 0 号留作默认),
+                                      * 旧实现直接退回 16px → 演示里"字号滑杆只能小范围缩放" */
+        slot = 1;
+        for (int i = 2; i < FONT_MAX; i++)
+            if (s_fonts[i].size != s_cur_size && s_fonts[i].size < s_fonts[slot].size) slot = i;
+        free(s_fonts[slot].data);
+        memset(&s_fonts[slot], 0, sizeof(font_t));
+    } else {
+        s_font_n++;
+    }
+    font_t *f = &s_fonts[slot];
     memset(f, 0, sizeof(*f));
     f->data = (unsigned char *)fx_file_read(s_path, &(int){0});
     if (!f->data) return &s_fonts[0];
@@ -116,7 +127,6 @@ static font_t *font_get(int size)
     f->size = size;
     f->scale = stbtt_ScaleForPixelHeight(&f->info, (float)size);
     stbtt_GetFontVMetrics(&f->info, &f->ascent, &f->descent, &f->linegap);
-    s_font_n++;
     return f;
 }
 

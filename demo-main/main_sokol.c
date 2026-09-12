@@ -65,6 +65,18 @@ extern void fxtk_sokol_inject_click(int x, int y);   /* 测试: 注入一次点�
 
 static void frame_cb(void)
 {
+    {   /* 测试钩子: FXTK_DRAG="x0,y0,x1,y1[,steps]" 在第 30 帧注入一次拖拽 */
+        const char *dg = getenv("FXTK_DRAG");
+        if (dg && s_frames + 1 == 30) {
+            int x0 = 0, y0 = 0, x1 = 0, y1 = 0, st = 12;
+            int n = sscanf(dg, "%d,%d,%d,%d,%d", &x0, &y0, &x1, &y1, &st);
+            if (n >= 4) {
+                extern void fxtk_sokol_inject_drag(int, int, int, int, int);
+                fxtk_sokol_inject_drag(x0, y0, x1, y1, st > 0 ? st : 12);
+                fx_log(FX_LOG_INFO, "[test] 注入拖拽 (%d,%d)->(%d,%d)", x0, y0, x1, y1);
+            }
+        }
+    }
     {   /* 测试钩子: FXTK_RESIZE="WxH" 在第 20 帧模拟一次窗口缩放 */
         const char *rs = getenv("FXTK_RESIZE");
         if (rs && s_frames + 1 == 20) {

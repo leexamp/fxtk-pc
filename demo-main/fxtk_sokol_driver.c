@@ -193,7 +193,11 @@ static void emit_quad(int pip, int tex, float x0, float y0, float x1, float y1,
 
 static int tex_alloc(sg_image img, sg_view view, int w, int h)
 {
-    if (s_tex_n >= TEX_MAX) return -1;
+    for (int i = 0; i < s_tex_n; i++)          /* 同一纹理复用绑定点:
+                                                * 旧实现每次绘制都新占一槽, 文本多的页面会耗尽
+                                                * TEX_MAX=256 → 后续绘制被静默跳过(表现为内容缺失) */
+        if (s_tex[i].img.id == img.id) return i;
+    if (s_tex_n >= TEX_MAX) { s_tex[0].img = img; s_tex[0].view = view; s_tex[0].w = w; s_tex[0].h = h; return 0; }
     s_tex[s_tex_n].img = img;
     s_tex[s_tex_n].view = view;
     s_tex[s_tex_n].smp = s_smp_nearest;
@@ -218,53 +222,58 @@ static void px_mark(int x, int y)
     if (s_fb[(size_t)y * s_w + x] == 0) s_fb[(size_t)y * s_w + x] = 0xFF000000u;   /* 标记已写(含透明黑) */
 }
 
-/* 像素层: 每帧【一次】上传到全屏纹理(sokol 规定同一资源每帧只能写一次),
- * 命令流里按脏区插入贴图四边形; UV 直接用屏幕绝对坐标 → 无需回填, z 序天然正确。
- * (P2.3 可用 sg_write_image_transient 的 dst/extent 改成按脏区子矩形上传, 省带宽) */
+/* 像素层: 脏区子矩形直接 transient 上传 (sokol 允许同帧多次 write_transient, 只要绑定前完成)。
+ * 旧实现每帧把整屏(1080p 约 200 万像素)转一遍 RGBA 再上传 4MB —— 拖动滑块时延迟 300ms 级的元凶。 */
 static void px_ensure_img(void)
 {
     if (s_px_img.id != SG_INVALID_ID && s_px_w == s_w && s_px_h == s_h) return;
     if (s_px_img.id != SG_INVALID_ID) { sg_destroy_view(s_px_view); sg_destroy_image(s_px_img); }
     s_px_img = sg_make_image(&(sg_image_desc){
         .width = s_w, .height = s_h, .pixel_format = SG_PIXELFORMAT_RGBA8,
-        .usage.dynamic_update = true, .label = "fxtk-pixels" });
+        .usage.write_transient = true,          /* 同帧多次子矩形写入 */
+        .label = "fxtk-pixels" });
     s_px_view = sg_make_view(&(sg_view_desc){ .texture = { .image = s_px_img }, .label = "fxtk-pixels-view" });
     s_px_w = s_w; s_px_h = s_h;
-    if (s_px_stage_cap < s_w * s_h) { free(s_px_stage); s_px_stage = (uint32_t *)malloc((size_t)s_w * s_h * 4); s_px_stage_cap = s_w * s_h; }
     s_dirty = 0;
 }
 
 static void px_flush(void)
 {
-    if (!s_dirty || !s_fb || !s_px_stage) { s_dirty = 0; cur_idx = 0; return; }
+    if (!s_dirty || !s_fb) { s_dirty = 0; cur_idx = 0; return; }
     int x0 = s_dx0, y0 = s_dy0, x1 = s_dx1, y1 = s_dy1;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 >= s_fb_w) x1 = s_fb_w - 1;
+    if (y1 >= s_fb_h) y1 = s_fb_h - 1;
+    int w = x1 - x0 + 1, h = y1 - y0 + 1;
+    s_dirty = 0; cur_idx = 0;
+    if (w < 1 || h < 1) return;
     px_ensure_img();
+    if (s_px_stage_cap < w * h) {
+        free(s_px_stage);
+        s_px_stage = (uint32_t *)malloc((size_t)w * h * 4);
+        if (!s_px_stage) { s_px_stage_cap = 0; return; }
+        s_px_stage_cap = w * h;
+    }
+    if (!s_px_stage) return;
+    for (int y = 0; y < h; y++) {
+        const uint32_t *src = &s_fb[(size_t)(y0 + y) * s_fb_w + x0];
+        uint32_t *dst = &s_px_stage[(size_t)y * w];
+        for (int x = 0; x < w; x++) {
+            uint32_t c = src[x];
+            dst[x] = (c == 0u) ? 0u : rgba_pack(c & 0xFFFFFFu);   /* 未写过 → 透明 */
+        }
+    }
+    sg_write_image_transient(&(sg_write_image_desc){
+        .src  = { .data = { s_px_stage, (size_t)w * h * 4 } },
+        .dst  = { .image = s_px_img, .mip_level = 0, .x = x0, .y = y0, .slice = 0 },
+        .size = { .width = w, .height = h, .num_slices = 1 } });
     int slot = tex_alloc(s_px_img, s_px_view, s_w, s_h);
     if (slot >= 0)
         emit_quad(1, slot, (float)x0, (float)y0, (float)(x1 + 1), (float)(y1 + 1),
                   (float)x0 / (float)s_w, (float)y0 / (float)s_h,
                   (float)(x1 + 1) / (float)s_w, (float)(y1 + 1) / (float)s_h, 0xFFFFFFFFu);
-    s_dirty = 0; cur_idx = 0;
-}
-
-/* 帧开始: 把整屏软件像素一次性转成 RGBA 并上传 (未写过的像素透明) */
-static void px_upload(void)
-{
-    px_ensure_img();
-    if (!s_px_stage || !s_fb) return;
-    int any = 0;
-    int n = s_w * s_h;
-    if (s_fb_w * s_fb_h < n) n = s_fb_w * s_fb_h;        /* 防御: 三个缓冲长度取最小 */
-    if (s_px_stage_cap < n) n = s_px_stage_cap;
-    for (int i = 0; i < n; i++) {
-        uint32_t c = s_fb[i];
-        if (c) { s_px_stage[i] = rgba_pack(c & 0xFFFFFFu); any = 1; }
-        else s_px_stage[i] = 0u;
-    }
-    if (any) {
-        sg_update_image(s_px_img, &(sg_image_data){ .mip_levels[0] = { s_px_stage, (size_t)s_w * s_h * 4 } });
-        memset(s_fb, 0, (size_t)s_w * s_h * 4);
-    }
+    for (int y = y0; y <= y1; y++) memset(&s_fb[(size_t)y * s_fb_w + x0], 0, (size_t)w * 4);
 }
 
 /* ================= fx_driver_t 钩子 ================= */
@@ -553,6 +562,15 @@ void fxtk_sokol_inject_click(int x, int y)
     q_push_touch(x, y, 0);
 }
 
+/* 测试用: 注入一次拖拽 (按下 → 中间移动若干步 → 抬起), 用于自动化验证拖动/残留 */
+void fxtk_sokol_inject_drag(int x0, int y0, int x1, int y1, int steps)
+{
+    q_push_touch(x0, y0, 1);
+    for (int i = 1; i <= steps; i++)
+        q_push_touch(x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps, 1);
+    q_push_touch(x1, y1, 0);
+}
+
 void fxtk_sokol_request_shot(void) { s_shot_req = 1; s_shot_ready = 0; }
 
 static void shot_capture(void)
@@ -637,7 +655,6 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
         if (now - t0 >= 1000) { s_fps = s_fps_n; s_fps_n = 0; t0 = now; }
     }
     px_flush();
-    px_upload();
     /* 自检 B: FXTK_SOKOL_TEST=1 时追加红/绿两个实心块 (必须在 update 之前) */
     if (getenv("FXTK_SOKOL_TEST")) {
         emit_quad(0, -1, 40, 40, 240, 190, 0, 0, 0, 0, 0xFFFF0000u);
@@ -691,8 +708,8 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
     if (getenv("FXTK_STAT")) {
         static int n = 0;
         if ((n++ % 30) == 0)
-            fprintf(stderr, "[stat] 顶点=%d 索引=%d 命令=%d 纹理=%d 分辨率=%dx%d\n",
-                    s_vb_n, s_ib_n, s_cmd_n, s_tex_n, s_w, s_h);
+            fprintf(stderr, "[stat] 顶点=%d 索引=%d 命令=%d 纹理=%d 分辨率=%dx%d fps=%d\n",
+                    s_vb_n, s_ib_n, s_cmd_n, s_tex_n, s_w, s_h, s_fps);
     }
     s_vb_n = 0; s_ib_n = 0; s_cmd_n = 0; s_tex_n = 0;
 }
