@@ -533,9 +533,16 @@ static int drv_init(void)
         "    vec2 q = abs(p) - h + vec2(r);\n"
         "    return min(max(q.x, q.y), 0.0) + length(max(q, vec2(0.0))) - r;\n"
         "}\n"
+        "/* 胶囊(线段 + 圆头): 用 vsdf.z < 0 复用同一条管线, |z| 即半宽 */\n"
+        "float sd_capsule(vec2 p, float half_len, float hw) {\n"
+        "    p.x -= clamp(p.x, -half_len, half_len);\n"
+        "    return length(p) - hw;\n"
+        "}\n"
         "void main() {\n"
-        "    float d = sd_rbox(uv, vsdf.xy, vsdf.z);\n"
-        "    if (vsdf.w > 0.0) d = abs(d) - vsdf.w * 0.5;\n"   /* 描边: 以边界为中心 */
+        "    float d;\n"
+        "    if (vsdf.z < 0.0) d = sd_capsule(uv, vsdf.x, -vsdf.z);\n"
+        "    else              d = sd_rbox(uv, vsdf.xy, vsdf.z);\n"
+        "    if (vsdf.w > 0.0) d = abs(d) - vsdf.w * 0.5;\n"   /* 描边/羽化宽度: 以边界为中心 */
         "    float aa = max(fwidth(d), 0.0001);\n"
         "    float cov = clamp(0.5 - d / aa, 0.0, 1.0);\n"
         "    if (cov <= 0.0) discard;\n"
@@ -704,6 +711,41 @@ static void drv_fill_tri(int x1, int y1, int x2, int y2, int x3, int y3, uint32_
 }
 
 /* 纹理 blit (文字/离屏画布): tex 指向文本层或本驱动创建的 fxtk_sokol_tex_t */
+/* v2.4 档位 2: 羽化线段。把线段扩成四边形, 局部坐标沿线段轴向 → 片元用胶囊距离羽化边缘。
+ * 相比双三角硬边: 任意角度都平滑(斜线不再有阶梯)。 */
+static void drv_draw_line_aa(int x1, int y1, int x2, int y2, int w, uint32_t c)
+{
+    if (w < 1) w = 1;
+    float hw = (float)w * 0.5f;
+    float dx = (float)(x2 - x1), dy = (float)(y2 - y1);
+    float len = sqrtf(dx * dx + dy * dy);
+    if (len < 0.01f) {          /* 退化成一个点 → 用圆点(胶囊半径) */
+        emit_round(x1 - w / 2, y1 - w / 2, x1 + w / 2, y1 + w / 2, w / 2, 0, 0xFF000000u | (c & 0xFFFFFFu));
+        return;
+    }
+    float ux = dx / len, uy = dy / len;      /* 轴向 */
+    float px = -uy, py = ux;                 /* 法向 */
+    float hl = len * 0.5f;                   /* 半长 */
+    float pad = hw + 1.0f;                   /* 留 1px 给羽化, 免得被几何切掉 */
+    float cx = (x1 + x2) * 0.5f, cy = (y1 + y2) * 0.5f;
+    float ex = ux * (hl + pad), ey = uy * (hl + pad);   /* 轴向端点(含端帽空间) */
+    float nx = px * pad, ny = py * pad;                 /* 法向半宽空间 */
+    if (cmd_new(3, -1) < 0) return;
+    if (s_vb_n + 4 > VB_MAX || s_ib_n + 6 > IB_MAX) return;
+    cmd_t *cm = &s_cmd[s_cmd_n - 1];
+    uint32_t b = (uint32_t)s_vb_n;
+    float lx = hl + pad, ly = pad;           /* 局部坐标半宽(片元里用) */
+    uint32_t col = 0xFF000000u | (c & 0xFFFFFFu);
+    /* 四角: (±ex±nx, ±ey±ny); 局部 uv 与之一一对应 */
+    vtx_push_sdf(cx - ex - nx, cy - ey - ny, -lx, -ly, col, hl, hw, -1.0f, 0.0f);
+    vtx_push_sdf(cx + ex - nx, cy + ey - ny,  lx, -ly, col, hl, hw, -1.0f, 0.0f);
+    vtx_push_sdf(cx + ex + nx, cy + ey + ny,  lx,  ly, col, hl, hw, -1.0f, 0.0f);
+    vtx_push_sdf(cx - ex + nx, cy - ey + ny, -lx,  ly, col, hl, hw, -1.0f, 0.0f);
+    s_ib[s_ib_n++] = b;     s_ib[s_ib_n++] = b + 1; s_ib[s_ib_n++] = b + 2;
+    s_ib[s_ib_n++] = b;     s_ib[s_ib_n++] = b + 2; s_ib[s_ib_n++] = b + 3;
+    cm->count += 6;
+}
+
 /* v2.4: GPU SDF 抗锯齿钩子 (框架的 fx_fill_rect_round / fx_draw_rect_round 在档位≥1 时走这里) */
 static void drv_fill_rect_round(int x1, int y1, int x2, int y2, int r, uint32_t c)
 {
@@ -927,6 +969,7 @@ fx_driver_t fx_sokol_driver = {
     .raymarch = fxtk_sokol_raymarch,   /* v2.4: GPU 实时光线步进 */
     .fill_rect_round = drv_fill_rect_round,     /* v2.4: GPU SDF 圆角矩形 (抗锯齿) */
     .stroke_rect_round = drv_stroke_rect_round, /* v2.4: GPU SDF 圆角描边 (抗锯齿) */
+    .draw_line_aa = drv_draw_line_aa,           /* v2.4 档位 2: GPU 羽化线段 */
 };
 
 /* ================= 帧的呈现 (由 sokol_app 回调触发) ================= */

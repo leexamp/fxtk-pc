@@ -549,6 +549,14 @@ void fx_draw_line(int x1, int y1, int x2, int y2)
 static void fx_draw_line_plain(int x1, int y1, int x2, int y2)
 {
     if (s_aa && s_offing) { aa_line(x1, y1, x2, y2, s_color); return; }   /* v2.2 抗锯齿 */
+    /* v2.4 档位 2: GPU 羽化线段(片元按到线心距离混合) —— 斜线不再有阶梯; 无钩子自动跳过 */
+    if (!s_offing && !s_xf_active && s_widget_aa >= 2 && s_drv && s_drv->draw_line_aa) {
+        flush_line();
+        int pushed = gpu_clip_push();
+        s_drv->draw_line_aa(x1 + s_ox, y1 + s_oy, x2 + s_ox, y2 + s_oy, 1, s_color);
+        gpu_clip_pop(pushed);
+        return;
+    }
     if (!s_offing && s_drv && s_drv->draw_line) {   /* v2: 折线GPU; v2.3.1 补上 clip */
         flush_line();
         int pushed = gpu_clip_push();
