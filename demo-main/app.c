@@ -515,6 +515,9 @@ static void build_ui(void) {
     fx_label_new(pixel("262,172","470,192"), page(2), name("cp_sw"), title("颜色显示区"), fgcolor(FX_WHITE), color(FX_RGB(255,90,0)));
     fx_button_new(pixel("262,200","352,220"), page(2), title("重置"), color(FX_RGB(244, 67, 54)), call(on_reset));
 fx_label_new(pixel("262,224","470,236"), name("info"), page(2), title("点击数字键试试"), fgcolor(FX_RGB(51, 51, 51)));
+    /* v2.4 P5: 卡片示范 —— 圆角 + 1px 描边的小面板, 托住整组"颜色选择器"。
+     * 创建顺序有讲究: 同级新控件排在链表头、绘制时先画(等于最底层), 所以卡片必须【最后】创建。 */
+    fx_panel_new(pixel("256,28","470,240"), page(2), color(FX_RGB(250, 250, 250)), border(1));
 
     /* 页3 (v2.4): 图片 + 四边形形变编辑器 */
     fx_canvas_new(pixel("6,32", "280,220"), name("imgq"), page(3), anim(1), color(FX_RGB(245, 245, 245)), call(on_imgq));

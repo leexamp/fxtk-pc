@@ -207,11 +207,22 @@ void fxtk_draw_checkbox(fx_widget_t *w)
 #if FXTK_WIDGET_PANEL
 void fxtk_draw_panel(fx_widget_t *w)
 {
+    /* P5 审美迭代 8/9(面板/卡片): 面板一直是硬直角。圆角规则取"卡片 vs 底板"的实用判据 ——
+     * 铺满整屏的面板(页面底板/根面板)保持方形, 否则圆角: 底板上露圆角会在四角透出窗口底色,
+     * 那是视觉 bug 而不是美化; 卡片(通常是带描边的小面板)则应该圆。
+     * 调用次数不变(填充/描边各 1 次, 只是换圆角版本)。 */
+    int pw = w->x2 - w->x1 + 1, ph = w->y2 - w->y1 + 1;
+    int full = (pw >= (int)fx_width() - 2 && ph >= (int)fx_height() - 2);
+    int r = full ? 0 : FX_TOK_RADIUS_L;
+    if (r > ph / 2) r = ph / 2;
+    if (r > pw / 2) r = pw / 2;
     fx_set_color(w->bg);
-    fx_fill_rect(w->x1, w->y1, w->x2, w->y2);
+    if (r > 0) fx_fill_rect_round(w->x1, w->y1, w->x2, w->y2, r);
+    else       fx_fill_rect(w->x1, w->y1, w->x2, w->y2);
     if (w->border > 0) {
-        fx_set_color(darken(w->bg));
-        fx_draw_rect(w->x1, w->y1, w->x2, w->y2);
+        fx_set_color(btn_mix(w->bg, FX_BLACK, 18));
+        if (r > 0) fx_draw_rect_round(w->x1, w->y1, w->x2, w->y2, r);
+        else       fx_draw_rect(w->x1, w->y1, w->x2, w->y2);
     }
 }
 
