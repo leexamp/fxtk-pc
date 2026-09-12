@@ -3,6 +3,7 @@
  * 直接整文件覆盖, 不要再打补丁!
  */
 #include "fxtk_internal.h"
+#include "fxtk_tokens.h"
 #include "fxtk_desktop.h"
 #include "fxtk_backends.h"   /* v2.4: 截图走 backends 的 PNG 编码 */
 #include <string.h>
@@ -216,11 +217,11 @@ fx_widget_t *fx_widget_new_impl(int type, fx_attr_t attrs[])
     case FX_W_CHECKBOX: w->bg = FX_BLACK; break;
     case FX_W_IMAGE: w->bg = FX_BLACK; break;                            /* 图片透明底 */
     case FX_W_GRID: case FX_W_PANEL: case FX_W_TAB: case FX_W_SCROLL: w->bg = FX_RGB(245, 245, 245); w->fg = FX_LGRAY; break;  /* 浅底+浅网格线 */
-    case FX_W_SLIDER: w->bg = FX_RGB(76, 175, 80); w->fg = FX_LGRAY; break;   /* 绿色填充, 浅灰轨道 */
-    case FX_W_PROGRESS: w->bg = FX_RGB(76, 175, 80); w->fg = FX_LGRAY; break;
-    case FX_W_TEXTEDIT: w->bg = FX_BLACK; w->fg = FX_RGB(40, 40, 40); break;  /* 哨兵→绘制时白底黑字 */
-    case FX_W_BUTTON: w->bg = FX_RGB(33, 150, 243); w->fg = FX_WHITE; break;  /* 蓝底白字 */
-    default: w->bg = FX_RGB(33, 150, 243); w->fg = FX_WHITE; break;
+    case FX_W_SLIDER: w->bg = FX_TOK_SUCCESS; w->fg = FX_TOK_MUTED; break;   /* 绿色填充, 浅灰轨道 */
+    case FX_W_PROGRESS: w->bg = FX_TOK_SUCCESS; w->fg = FX_TOK_MUTED; break;
+    case FX_W_TEXTEDIT: w->bg = FX_BLACK; w->fg = FX_TOK_TEXT; break;  /* 哨兵→绘制时白底黑字 */
+    case FX_W_BUTTON: w->bg = FX_TOK_PRIMARY; w->fg = FX_TOK_ON_PRIMARY; break;  /* 蓝底白字 */
+    default: w->bg = FX_TOK_PRIMARY; w->fg = FX_TOK_ON_PRIMARY; break;
     }
     for (int i = 0; attrs[i].tag != FX_A_NONE; i++) {
         switch (attrs[i].tag) {

@@ -3,6 +3,7 @@
  * fxtk_widgets.c — 控件绘制实现 (复选框居中+透明背景修复)
  */
 #include "fxtk_internal.h"
+#include "fxtk_tokens.h"
 #include "fxtk_desktop.h"
 #include <string.h>
 #include <stdio.h>
@@ -39,7 +40,7 @@ void fxtk_draw_button(fx_widget_t *w)
         fx_set_color(btn_mix(w->bg, FX_BLACK, 90));          /* 按下: 顶变阴影=内凹 */
         fx_draw_hline(w->x1 + r, w->x2 - r, w->y1 + 1);
     }
-    fx_set_color(pr ? FX_RGB(60, 60, 60) : darken(w->bg));   /* 1px 同系深边 */
+    fx_set_color(pr ? FX_TOK_EDGE_DOWN : darken(w->bg));   /* 1px 同系深边 */
     fx_draw_hline(w->x1 + r, w->x2 - r, w->y1);
     fx_draw_hline(w->x1 + r, w->x2 - r, w->y2);
     fx_draw_vline(w->x1, w->y1 + r, w->y2 - r);
@@ -120,27 +121,27 @@ void fxtk_draw_slider(fx_widget_t *w)
 {
     int h = w->y2 - w->y1 + 1;
     int cy = w->y1 + h / 2;
-    int th = h / 4; if (th < 6) th = 6; if (th > 10) th = 10;   /* 轨道厚度 6~10px */
+    int th = h / 4; if (th < FX_TOK_TRACK_H_MIN) th = FX_TOK_TRACK_H_MIN; if (th > FX_TOK_TRACK_H_MAX) th = FX_TOK_TRACK_H_MAX;
     int ty0 = cy - th / 2, ty1 = ty0 + th - 1;
     int rw = w->x2 - w->x1 + 1;
-    int kw = h / 2; if (kw < 12) kw = 12; if (kw > 20) kw = 20;  /* 滑块宽度 */
+    int kw = h / 2; if (kw < FX_TOK_KNOB_W_MIN) kw = FX_TOK_KNOB_W_MIN; if (kw > FX_TOK_KNOB_W_MAX) kw = FX_TOK_KNOB_W_MAX;
     int kx = w->x1 + rw * w->value / 100;
     if (kx < w->x1 + kw / 2) kx = w->x1 + kw / 2;
     if (kx > w->x2 - kw / 2) kx = w->x2 - kw / 2;
 
-    fx_set_color(FX_RGB(200, 202, 206));                                  /* 轨道底色 */
+    fx_set_color(FX_TOK_TRACK);                                  /* 轨道底色 */
     fx_fill_rect_round(w->x1, ty0, w->x2, ty1, th / 2);
     fx_set_color(w->bg);                                                  /* 已填充段 = 主题色 */
     if (kx > w->x1 + 1) fx_fill_rect_round(w->x1, ty0, kx - 1, ty1, th / 2);
-    fx_set_color(FX_RGB(140, 142, 148));                                  /* 轨道描边 */
+    fx_set_color(FX_TOK_TRACK_EDGE);                                  /* 轨道描边 */
     fx_draw_hline(w->x1 + th / 2, w->x2 - th / 2, ty1);
 
     int pr = (w->flags & FX_F_PRESSED) ? 1 : 0;
     int kh = h - 4; if (kh < kw) kh = kw;                                 /* 滑块略高, 更易点 */
     int ky0 = cy - kh / 2 + pr, ky1 = ky0 + kh - 1;
-    fx_set_color(FX_RGB(255, 255, 255));
+    fx_set_color(FX_TOK_KNOB);
     fx_fill_rect_round(kx - kw / 2, ky0, kx + kw / 2, ky1, kw / 3);
-    fx_set_color(pr ? FX_RGB(90, 92, 98) : FX_RGB(150, 152, 158));
+    fx_set_color(pr ? FX_TOK_KNOB_EDGE_DOWN : FX_TOK_KNOB_EDGE);
     fx_draw_rect(kx - kw / 2, ky0, kx + kw / 2, ky1);
 }
 
@@ -239,7 +240,7 @@ void fxtk_draw_tab(fx_widget_t *w)
         seg[len] = 0;
         int sw = fx_text_width(seg);
         fx_draw_text_c(tx1 + (tx2 - tx1 + 1 - sw) / 2, ty1 + (ty2 - ty1 - 16) / 2,
-                       seg, sel ? FX_RGB(40, 40, 40) : FX_LGRAY, bg);
+                       seg, sel ? FX_TOK_SELECT_TEXT_BG : FX_TOK_MUTED, bg);
         p = comma ? comma + 1 : p + strlen(p);
     }
     /* 标签条与内容区之间: 深阴影 + 高光, 增强分层 (按方位) */
@@ -296,7 +297,7 @@ void fxtk_draw_textedit(fx_widget_t *w)
     int len = (int)strlen(txt);
     fx_set_color(bg);
     fx_fill_rect(w->x1, w->y1, w->x2, w->y2);
-    fx_set_color(focused ? FX_RGB(33, 150, 243) : FX_GRAY);
+    fx_set_color(focused ? FX_TOK_PRIMARY : FX_GRAY);
     fx_draw_rect(w->x1, w->y1, w->x2, w->y2);
 
     int tx = w->x1 + 6;
@@ -337,9 +338,9 @@ void fxtk_draw_textedit(fx_widget_t *w)
             if (he > hs) {
                 int wxs = fx_text_width_n(txt + s0, hs - s0);
                 int wxe = fx_text_width_n(txt + s0, he - s0);
-                fx_set_color(FX_RGB(33, 150, 243));
+                fx_set_color(FX_TOK_PRIMARY);
                 fx_fill_rect(tx + wxs, y - 1, tx + wxe, y + lh - 2);
-                fx_draw_text_c_n(tx + wxs, y, txt + hs, he - hs, FX_WHITE, FX_RGB(33, 150, 243));
+                fx_draw_text_c_n(tx + wxs, y, txt + hs, he - hs, FX_TOK_ON_PRIMARY, FX_TOK_PRIMARY);
             }
         }
     }
@@ -358,9 +359,9 @@ if (total_h > vis_h) {
 int rw2 = w->x2 - 2;
 int th = vis_h * vis_h / total_h; if (th < 20) th = 20;
 int ty = w->y1 + 2 + (int)((long)w->scroll_y * (w->y2 - w->y1 - 4 - th) / (total_h - vis_h));
-fx_set_color(FX_RGB(200, 200, 200));
+fx_set_color(FX_TOK_BORDER);
 fx_fill_rect(rw2 - 3, w->y1 + 2, rw2, w->y2 - 2);
-fx_set_color(FX_RGB(120, 120, 120));
+fx_set_color(FX_TOK_TEXT_DIM);
 fx_fill_rect(rw2 - 3, ty, rw2, ty + th);
 }
     if (w->text_max > 0) {

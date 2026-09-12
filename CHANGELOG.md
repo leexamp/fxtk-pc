@@ -92,7 +92,17 @@
 - **SDF 着色器不能复用带纹理绑定的 shader desc**: 复用会让 SDF 管线要求 view/sampler 绑定,
   未绑定直接 `VALIDATE_ABND_EXPECTED_VIEW_BINDING` panic。改用独立 desc。
 
-### 优化（动态库再瘦身: libfxtk.so 147.8 → 119.8 KB）
+### 新增（P5 地基: 设计令牌）
+- `components/fxtk/fxtk_tokens.h`: 把散落在 `fxtk.c` / `fxtk_widgets.c` 里的颜色与几何字面量
+  收拢成一套语义化令牌(PRIMARY/SUCCESS/DANGER/TEXT_DIM/TRACK/KNOB/EDGE_DOWN/BORDER +
+  圆角/轨道厚度/滑块宽度上下限)。**改这一处就能统一换肤/统一圆角**, 是后续控件审美优化的前提。
+- 替换 18 处字面量(控件绘制 13 处 + 每类型默认色板 5 处);
+- **本次是纯重构**: 令牌取值与改造前逐位相同 → `make test` PASS 且 **金图回归 20/20 逐像素一致(容差 0)**,
+  即"没有顺手改坏画面"的机器证据。
+- `docs/design/README.md`: 写入审美迭代的标准动作(改前留档 → 改后出图 → 逐图 imgdiff →
+  纯重构要求金图不变 / 改观感才 make golden-update 并写清原因), 避免"我觉得更好看了"式空口评审。
+
+### 优化（动态库再瘦身### 优化（动态库再瘦身: libfxtk.so 147.8 → 119.8 KB）
 - ①`--exclude-libs,ALL` + gold 的 `--icf=all`（折叠等价函数）;
   ②版本脚本 `fxtk.exports` 只隐藏内部符号（`stbi_*`/`_sg_*`/`_sapp_*` 等）。
 - **踩坑记录**: 版本脚本 `local: *` 不能配 `-fvisibility=hidden` —— sokol 实现段里的 `main` 会一起被隐藏,
