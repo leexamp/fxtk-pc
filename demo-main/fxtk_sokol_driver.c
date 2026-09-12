@@ -106,26 +106,37 @@ static uint16_t cur_x0, cur_y0, cur_w; static uint32_t cur_idx = 0;
 static sg_image s_img_tex; static sg_view s_img_view; static int s_img_w = 0, s_img_h = 0;
 static uint32_t *s_img_stage = NULL; static int s_img_cap = 0;
 
-/* ================= 输入事件队列 ================= */
-
+/* ================= 输入事件队列 (按类型分队列) =================
+ * 注意: 框架按类型分别轮询(touch/key/wheel), 早期实现用单队列+延迟数组,
+ * 会在某类型轮询时把其它类型的事件吞掉 → 输入完全失效。这里分成三个环形队列。 */
 #define EVQ_MAX 256
-typedef struct { int type; int x, y, p; int dy; fx_keyev_t key; } evq_t;   /* type: 0=none 1=touch 2=wheel 3=key */
-static evq_t s_evq[EVQ_MAX];
-static int s_evq_head = 0, s_evq_tail = 0;
+typedef struct { int x, y, p; } ev_touch_t;
+typedef struct { int x, y, dy; } ev_wheel_t;
 
-static void evq_push(const evq_t *e)
+static ev_touch_t s_q_touch[EVQ_MAX]; static int s_qt_h = 0, s_qt_t = 0;
+static ev_wheel_t s_q_wheel[EVQ_MAX]; static int s_qw_h = 0, s_qw_t = 0;
+static fx_keyev_t s_q_key[EVQ_MAX];   static int s_qk_h = 0, s_qk_t = 0;
+
+static void q_push_touch(int x, int y, int p)
 {
-    int next = (s_evq_tail + 1) % EVQ_MAX;
-    if (next == s_evq_head) return;          /* 满则丢弃最旧(不阻塞) */
-    s_evq[s_evq_tail] = *e;
-    s_evq_tail = next;
+    int n = (s_qt_t + 1) % EVQ_MAX;
+    if (n == s_qt_h) { s_qt_h = (s_qt_h + 1) % EVQ_MAX; }   /* 满: 丢最旧, 不阻塞 */
+    s_q_touch[s_qt_t].x = x; s_q_touch[s_qt_t].y = y; s_q_touch[s_qt_t].p = p;
+    s_qt_t = n;
 }
-static int evq_pop(evq_t *out)
+static void q_push_wheel(int x, int y, int dy)
 {
-    if (s_evq_head == s_evq_tail) return 0;
-    *out = s_evq[s_evq_head];
-    s_evq_head = (s_evq_head + 1) % EVQ_MAX;
-    return 1;
+    int n = (s_qw_t + 1) % EVQ_MAX;
+    if (n == s_qw_h) { s_qw_h = (s_qw_h + 1) % EVQ_MAX; }
+    s_q_wheel[s_qw_t].x = x; s_q_wheel[s_qw_t].y = y; s_q_wheel[s_qw_t].dy = dy;
+    s_qw_t = n;
+}
+static void q_push_key(const fx_keyev_t *ev)
+{
+    int n = (s_qk_t + 1) % EVQ_MAX;
+    if (n == s_qk_h) { s_qk_h = (s_qk_h + 1) % EVQ_MAX; }
+    s_q_key[s_qk_t] = *ev;
+    s_qk_t = n;
 }
 
 /* ================= 顶点追加 ================= */
@@ -140,14 +151,25 @@ static int cmd_new(int pip, int tex)
     return s_cmd_n++;
 }
 
+/* 颜色打包: 顶点属性 UBYTE4N 按内存字节序读作 R,G,B,A。
+ * 我们的像素/颜色常量是 0xAARRGGBB(小端内存 = B,G,R,A) → 直接写入会让 R/B 互换
+ * (实测: 黄色波形线被画成蓝色)。这里显式交换, 得到 0xAABBGGRR。 */
+static inline uint32_t rgba_pack(uint32_t rgb)
+{
+    return 0xFF000000u | ((rgb & 0xFFu) << 16) | (rgb & 0xFF00u) | ((rgb >> 16) & 0xFFu);
+}
+
 /* 像素坐标 → NDC (在 CPU 侧算好, 免掉 uniform block 及其名字查找/420pack 扩展等一整类坑) */
 static void vtx_push(float x, float y, float u, float v, uint32_t c)
 {
     if (s_vb_n >= VB_MAX) return;
     float rw = (float)(s_w > 0 ? s_w : 1), rh = (float)(s_h > 0 ? s_h : 1);
     s_vb[s_vb_n].x = x / rw * 2.0f - 1.0f;
-    s_vb[s_vb_n].y = 1.0f - y / rh * 2.0f;
+    /* sokol 的默认视口是 top-left 原点(内部会翻转), 因此 NDC 的 +1 对应窗口【下边】:
+     * 屏幕 y=0 必须映射到 NDC -1。实测踩坑: 原写法让整幅画面上下颠倒。 */
+    s_vb[s_vb_n].y = y / rh * 2.0f - 1.0f;
     s_vb[s_vb_n].u = u; s_vb[s_vb_n].v = v;
+    /* 顶点色: 本版 sokol 的 UBYTE4N 直接按 0xAARRGGBB 写入即正确(实测), 不要再交换 */
     s_vb[s_vb_n].rgba = c;
     s_vb_n++;
 }
@@ -231,9 +253,12 @@ static void px_upload(void)
     px_ensure_img();
     if (!s_px_stage || !s_fb) return;
     int any = 0;
-    for (int i = 0; i < s_w * s_h; i++) {
+    int n = s_w * s_h;
+    if (s_fb_w * s_fb_h < n) n = s_fb_w * s_fb_h;        /* 防御: 三个缓冲长度取最小 */
+    if (s_px_stage_cap < n) n = s_px_stage_cap;
+    for (int i = 0; i < n; i++) {
         uint32_t c = s_fb[i];
-        if (c) { s_px_stage[i] = 0xFF000000u | (c & 0xFFFFFFu); any = 1; }
+        if (c) { s_px_stage[i] = rgba_pack(c & 0xFFFFFFu); any = 1; }
         else s_px_stage[i] = 0u;
     }
     if (any) {
@@ -377,14 +402,16 @@ static void drv_push_pixels(const uint32_t *px, uint32_t n)
         int x = cur_x0 + (int)(cur_idx % cur_w);
         int y = cur_y0 + (int)(cur_idx / cur_w);
         cur_idx++;
-        if (x < 0 || y < 0 || x >= s_w || y >= s_h) continue;
-        s_fb[(size_t)y * s_w + x] = 0xFF000000u | (px[i] & 0xFFFFFFu);
+        if (x < 0 || y < 0 || x >= s_fb_w || y >= s_fb_h) continue;
+        s_fb[(size_t)y * s_fb_w + x] = 0xFF000000u | (px[i] & 0xFFFFFFu);
         if (!s_dirty) { s_dx0 = s_dx1 = x; s_dy0 = s_dy1 = y; s_dirty = 1; }
         else {
             if (x < s_dx0) s_dx0 = x;
             if (x > s_dx1) s_dx1 = x;
             if (y < s_dy0) s_dy0 = y;
             if (y > s_dy1) s_dy1 = y;
+            if (s_dx1 >= s_fb_w) s_dx1 = s_fb_w - 1;
+            if (s_dy1 >= s_fb_h) s_dy1 = s_fb_h - 1;
         }
     }
 }
@@ -465,7 +492,7 @@ static void drv_blit_img(const uint32_t *px, int w, int h, int dx, int dy, int d
     for (int i = 0; i < w * h; i++) {
         uint32_t c = px[i] & 0xFFFFFFu;
         if (dark) c = ((c >> 1) & 0x7F7F7Fu);
-        s_img_stage[i] = 0xFF000000u | c;
+        s_img_stage[i] = rgba_pack(c);
     }
     sg_update_image(s_img_tex, &(sg_image_data){ .mip_levels[0] = { s_img_stage, (size_t)w * h * 4 } });
     int slot = tex_alloc(s_img_tex, s_img_view, w, h);
@@ -475,38 +502,26 @@ static void drv_blit_img(const uint32_t *px, int w, int h, int dx, int dy, int d
 
 static int drv_touch_read(int *x, int *y, int *pressed)
 {
-    evq_t e;
-    while (evq_pop(&e)) {
-        if (e.type == 1) { *x = e.x; *y = e.y; *pressed = e.p; return 1; }
-        /* 其它类型回塞: 简化处理 —— 只在本函数内消费 touch, 其余留给 key/wheel 队列 */
-        evq_t keep = e;
-        if (keep.type != 1) {
-            /* 放回队首: 用一个小的延迟缓冲 */
-            static evq_t defer[EVQ_MAX]; static int dn = 0;
-            if (dn < EVQ_MAX) defer[dn++] = keep;
-        }
-    }
-    return 0;
+    if (s_qt_h == s_qt_t) return 0;
+    *x = s_q_touch[s_qt_h].x; *y = s_q_touch[s_qt_h].y; *pressed = s_q_touch[s_qt_h].p;
+    s_qt_h = (s_qt_h + 1) % EVQ_MAX;
+    return 1;
 }
 
 static int drv_key_read(fx_keyev_t *ev)
 {
-    evq_t e;
-    while (evq_pop(&e)) {
-        if (e.type == 3) { *ev = e.key; return 1; }
-        static evq_t defer[EVQ_MAX]; static int dn = 0;
-        if (dn < EVQ_MAX) defer[dn++] = e;
-    }
-    return 0;
+    if (s_qk_h == s_qk_t) return 0;
+    *ev = s_q_key[s_qk_h];
+    s_qk_h = (s_qk_h + 1) % EVQ_MAX;
+    return 1;
 }
 
 static int drv_wheel_read(int *x, int *y, int *dy)
 {
-    evq_t e;
-    while (evq_pop(&e)) {
-        if (e.type == 2) { *x = e.x; *y = e.y; *dy = e.dy; return 1; }
-    }
-    return 0;
+    if (s_qw_h == s_qw_t) return 0;
+    *x = s_q_wheel[s_qw_h].x; *y = s_q_wheel[s_qw_h].y; *dy = s_q_wheel[s_qw_h].dy;
+    s_qw_h = (s_qw_h + 1) % EVQ_MAX;
+    return 1;
 }
 
 static void drv_set_title(const char *s) { sapp_set_window_title(s ? s : "fxtk"); }
@@ -530,6 +545,13 @@ static void drv_blit_img_rot(const uint32_t *px, int w, int h, int cx, int cy, i
  * 因此由 main 在需要的帧上"请求", 本驱动在 sg_commit() 前抓取并暂存。 */
 static uint32_t *s_shot_buf = NULL;
 static int s_shot_w = 0, s_shot_h = 0, s_shot_cap = 0, s_shot_req = 0, s_shot_ready = 0;
+
+/* 测试用: 直接往触摸队列注入一次按下+抬起 (验证输入链路, 不依赖真实鼠标) */
+void fxtk_sokol_inject_click(int x, int y)
+{
+    q_push_touch(x, y, 1);
+    q_push_touch(x, y, 0);
+}
 
 void fxtk_sokol_request_shot(void) { s_shot_req = 1; s_shot_ready = 0; }
 
@@ -604,7 +626,9 @@ static void canvas_ensure(void)
 
 void fxtk_sokol_frame(int fb_w, int fb_h)
 {
-    s_w = fb_w; s_h = fb_h;
+    /* 窗口尺寸变化统一走 apply_size(它会重建缓冲并让框架重排/重绘)。
+     * 早期实现在这里直接赋值 s_w/s_h, 会与按旧尺寸分配的 fb 脱节 → 堆越界崩溃。 */
+    if (fb_w != s_w || fb_h != s_h) fxtk_sokol_apply_size(fb_w, fb_h);
     {   /* FPS 统计 (与 SDL 驱动同款语义: 每秒刷新一次) */
         static uint32_t t0 = 0;
         uint32_t now = (uint32_t)fx_time_ms();
@@ -696,63 +720,80 @@ void fxtk_drv_set_uicap(int p) { if (p >= 100) g_uicap = p; }
 int  fxtk_sokol_tex_count(void) { return s_tex_n; }
 int  fxtk_sokol_vtx_count(void) { return s_vb_n; }
 
+/* 尺寸变化: 与 SDL 驱动同构 —— 丢缓冲、重建纹理、**让框架重排并全量重绘**。
+ * 漏掉 fx_layout/fx_repaint 会让新暴露的区域一直没人画 → 缩放后几乎全屏黑(实测踩坑)。 */
+void fxtk_sokol_apply_size(int w, int h)
+{
+    if (w < 160) w = 160;
+    if (h < 120) h = 120;
+    if (w == s_w && h == s_h) return;
+    s_w = w; s_h = h;
+    fx_sokol_driver.width = (uint32_t)s_w;
+    fx_sokol_driver.height = (uint32_t)s_h;
+    free(s_fb); s_fb = NULL; s_fb_w = s_fb_h = 0; s_dirty = 0;
+    fb_ensure();
+    s_need_clear = 1;          /* 离屏画布下一帧会按新尺寸重建并清一次 */
+    fx_layout();
+    fx_repaint();
+    fx_repaint();
+}
+
 /* ================= sokol_app 事件 → 框架轮询队列 =================
  * 语义与 SDL 驱动对齐: TEXTINPUT/CHAR → key=0 的文本事件; 特殊键 → fx_key* 常量;
  * Ctrl+C/V/X/A → utf8[0]=字母 + mod; mod 位: 1=Ctrl, 2=Shift。 */
 void fxtk_sokol_handle_event(const sapp_event *e)
 {
     static int s_mouse_down = 0;
-    evq_t q;
-    memset(&q, 0, sizeof(q));
+    fx_keyev_t k;
+    memset(&k, 0, sizeof(k));
     switch (e->type) {
     case SAPP_EVENTTYPE_MOUSE_DOWN:
         if (e->mouse_button == SAPP_MOUSEBUTTON_RIGHT) { s_rc = 1; s_rc_x = (int)e->mouse_x; s_rc_y = (int)e->mouse_y; break; }
-        s_mouse_down = 1; q.type = 1; q.x = (int)e->mouse_x; q.y = (int)e->mouse_y; q.p = 1; evq_push(&q); break;
+        s_mouse_down = 1; q_push_touch((int)e->mouse_x, (int)e->mouse_y, 1); break;
     case SAPP_EVENTTYPE_MOUSE_UP:
-        s_mouse_down = 0; q.type = 1; q.x = (int)e->mouse_x; q.y = (int)e->mouse_y; q.p = 0; evq_push(&q); break;
+        s_mouse_down = 0; q_push_touch((int)e->mouse_x, (int)e->mouse_y, 0); break;
     case SAPP_EVENTTYPE_MOUSE_MOVE:
-        q.type = 1; q.x = (int)e->mouse_x; q.y = (int)e->mouse_y; q.p = s_mouse_down; evq_push(&q); break;
+        q_push_touch((int)e->mouse_x, (int)e->mouse_y, s_mouse_down); break;
     case SAPP_EVENTTYPE_MOUSE_SCROLL:
-        q.type = 2; q.x = (int)e->mouse_x; q.y = (int)e->mouse_y; q.dy = (int)(e->scroll_y * 40.0f); evq_push(&q); break;
+        q_push_wheel((int)e->mouse_x, (int)e->mouse_y, (int)(e->scroll_y * 40.0f)); break;
     case SAPP_EVENTTYPE_TOUCHES_BEGAN:
     case SAPP_EVENTTYPE_TOUCHES_MOVED:
     case SAPP_EVENTTYPE_TOUCHES_ENDED:
-        for (int i = 0; i < e->num_touches && i < 1; i++) {
-            q.type = 1; q.x = (int)e->touches[i].pos_x; q.y = (int)e->touches[i].pos_y;
-            q.p = (e->type != SAPP_EVENTTYPE_TOUCHES_ENDED);
-            if (e->type == SAPP_EVENTTYPE_TOUCHES_ENDED && e->num_touches == 0) q.p = 0;
-            evq_push(&q);
-        }
+        if (e->num_touches > 0)
+            q_push_touch((int)e->touches[0].pos_x, (int)e->touches[0].pos_y,
+                         e->type != SAPP_EVENTTYPE_TOUCHES_ENDED);
+        else if (e->type == SAPP_EVENTTYPE_TOUCHES_ENDED)
+            q_push_touch(0, 0, 0);
         break;
     case SAPP_EVENTTYPE_CHAR: {
         uint32_t cp = e->char_code;
-        char *o = q.key.utf8;
+        char *o = k.utf8;
         if (cp < 0x80) { o[0] = (char)cp; o[1] = 0; }
         else if (cp < 0x800) { o[0] = (char)(0xC0 | (cp >> 6)); o[1] = (char)(0x80 | (cp & 0x3F)); o[2] = 0; }
         else if (cp < 0x10000) { o[0] = (char)(0xE0 | (cp >> 12)); o[1] = (char)(0x80 | ((cp >> 6) & 0x3F)); o[2] = (char)(0x80 | (cp & 0x3F)); o[3] = 0; }
         else { o[0] = (char)(0xF0 | (cp >> 18)); o[1] = (char)(0x80 | ((cp >> 12) & 0x3F)); o[2] = (char)(0x80 | ((cp >> 6) & 0x3F)); o[3] = (char)(0x80 | (cp & 0x3F)); o[4] = 0; }
-        q.type = 3; q.key.key = 0; q.key.down = 1;
-        evq_push(&q);
+        k.key = 0; k.down = 1;
+        q_push_key(&k);
         break; }
     case SAPP_EVENTTYPE_KEY_DOWN: {
         if (e->key_repeat) break;
-        int k = 0;
+        int kc = 0;
         switch (e->key_code) {
-        case SAPP_KEYCODE_BACKSPACE: k = FX_KEY_BACKSPACE; break;
-        case SAPP_KEYCODE_ENTER:     k = FX_KEY_RETURN; break;
-        case SAPP_KEYCODE_ESCAPE:    k = FX_KEY_ESCAPE; break;
-        case SAPP_KEYCODE_LEFT:      k = FX_KEY_LEFT; break;
-        case SAPP_KEYCODE_RIGHT:     k = FX_KEY_RIGHT; break;
-        case SAPP_KEYCODE_HOME:      k = FX_KEY_HOME; break;
-        case SAPP_KEYCODE_END:       k = FX_KEY_END; break;
-        case SAPP_KEYCODE_UP:        k = FX_KEY_UP; break;
-        case SAPP_KEYCODE_DOWN:      k = FX_KEY_DOWN; break;
-        case SAPP_KEYCODE_DELETE:    k = FX_KEY_DELETE; break;
+        case SAPP_KEYCODE_BACKSPACE: kc = FX_KEY_BACKSPACE; break;
+        case SAPP_KEYCODE_ENTER:     kc = FX_KEY_RETURN; break;
+        case SAPP_KEYCODE_ESCAPE:    kc = FX_KEY_ESCAPE; break;
+        case SAPP_KEYCODE_LEFT:      kc = FX_KEY_LEFT; break;
+        case SAPP_KEYCODE_RIGHT:     kc = FX_KEY_RIGHT; break;
+        case SAPP_KEYCODE_HOME:      kc = FX_KEY_HOME; break;
+        case SAPP_KEYCODE_END:       kc = FX_KEY_END; break;
+        case SAPP_KEYCODE_UP:        kc = FX_KEY_UP; break;
+        case SAPP_KEYCODE_DOWN:      kc = FX_KEY_DOWN; break;
+        case SAPP_KEYCODE_DELETE:    kc = FX_KEY_DELETE; break;
         default: break;
         }
         int mod = ((e->modifiers & SAPP_MODIFIER_CTRL) ? 1 : 0) | ((e->modifiers & SAPP_MODIFIER_SHIFT) ? 2 : 0);
         s_shift = (mod & 2) ? 1 : 0;
-        if (k) { q.type = 3; q.key.key = k; q.key.down = 1; q.key.mod = mod; evq_push(&q); }
+        if (kc) { fx_keyev_t ke; memset(&ke, 0, sizeof(ke)); ke.key = kc; ke.down = 1; ke.mod = mod; q_push_key(&ke); }
         else if (mod & 1) {
             char c = 0;
             if (e->key_code == SAPP_KEYCODE_C) c = 'c';
@@ -760,16 +801,11 @@ void fxtk_sokol_handle_event(const sapp_event *e)
             else if (e->key_code == SAPP_KEYCODE_X) c = 'x';
             else if (e->key_code == SAPP_KEYCODE_A) c = 'a';
             else if (e->key_code == SAPP_KEYCODE_L) c = 'l';
-            if (c) { q.type = 3; q.key.key = 0; q.key.down = 1; q.key.mod = mod; q.key.utf8[0] = c; evq_push(&q); }
+            if (c) { fx_keyev_t ke; memset(&ke, 0, sizeof(ke)); ke.key = 0; ke.down = 1; ke.mod = mod; ke.utf8[0] = c; q_push_key(&ke); }
         }
         break; }
     case SAPP_EVENTTYPE_RESIZED:
-        s_w = sapp_width(); s_h = sapp_height();
-        fx_driver_t *d = &fx_sokol_driver;
-        d->width = (uint32_t)s_w; d->height = (uint32_t)s_h;
-        free(s_fb); s_fb = NULL; s_fb_w = s_fb_h = 0; s_dirty = 0;
-        fb_ensure();
-        s_need_clear = 1;   /* 尺寸变了 → 帧缓冲内容未定义, 清一次 */
+        fxtk_sokol_apply_size(sapp_width(), sapp_height());
         break;
     default: break;
     }

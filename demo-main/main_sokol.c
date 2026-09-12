@@ -24,6 +24,8 @@ extern void fxtk_font_init(const char *font_path, int size);
 extern void app_init(void);
 
 static char s_shot_path[512];
+static char s_shot2_path[512];      /* 同一次运行内的第二次截图 (脏区残留检测) */
+static int  s_shot2_at = 0;
 static int  s_shot_at = 30;
 static int  s_quit_after = 0;
 static int  s_frames = 0;
@@ -47,17 +49,43 @@ static void init_cb(void)
         if (at) s_shot_at = atoi(at);
         if (s_shot_at < 1) s_shot_at = 1;
     }
+    const char *shot2 = getenv("FXTK_SHOT2");
+    if (shot2 && shot2[0]) {
+        snprintf(s_shot2_path, sizeof(s_shot2_path), "%s", shot2);
+        const char *at2 = getenv("FXTK_SHOT2_AT");
+        s_shot2_at = at2 ? atoi(at2) : 120;
+    }
     const char *qa = getenv("FXTK_QUIT_AFTER");
     if (qa) s_quit_after = atoi(qa);
     fx_log(FX_LOG_INFO, "[sokol] 窗口 %dx%d dpi=%.2f", sapp_width(), sapp_height(), sapp_dpi_scale());
 }
 
 extern void fxtk_sokol_request_shot(void);
+extern void fxtk_sokol_inject_click(int x, int y);   /* 测试: 注入一次点击 */
 
 static void frame_cb(void)
 {
-    int want_shot = (s_shot_path[0] && s_frames + 1 == s_shot_at);
-    if (want_shot) fxtk_sokol_request_shot();   /* 驱动在本帧 pass 内抓取 */
+    {   /* 测试钩子: FXTK_RESIZE="WxH" 在第 20 帧模拟一次窗口缩放 */
+        const char *rs = getenv("FXTK_RESIZE");
+        if (rs && s_frames + 1 == 20) {
+            int rw = 0, rh = 0;
+            if (sscanf(rs, "%dx%d", &rw, &rh) == 2) {
+                extern void fxtk_sokol_apply_size(int w, int h);
+                fxtk_sokol_apply_size(rw, rh);
+                fx_log(FX_LOG_INFO, "[test] 模拟缩放 -> %dx%d", rw, rh);
+            }
+        }
+    }
+    {   /* 测试钩子: FXTK_CLICK="x,y" 在第 20 帧注入一次点击(用于无人值守验证输入链路) */
+        const char *clk = getenv("FXTK_CLICK");
+        if (clk && s_frames + 1 == 20) {
+            int cx = 0, cy = 0;
+            if (sscanf(clk, "%d,%d", &cx, &cy) == 2) fxtk_sokol_inject_click(cx, cy);
+        }
+    }
+    int want_shot  = (s_shot_path[0]  && s_frames + 1 == s_shot_at);
+    int want_shot2 = (s_shot2_path[0] && s_frames + 1 == s_shot2_at);
+    if (want_shot || want_shot2) fxtk_sokol_request_shot();   /* 驱动在本帧 pass 内抓取 */
     fx_poll();
     fxtk_sokol_frame(sapp_width(), sapp_height());
     s_frames++;
@@ -65,7 +93,11 @@ static void frame_cb(void)
     if (want_shot) {
         if (fx_screenshot(s_shot_path)) fx_log(FX_LOG_INFO, "[shot] %s", s_shot_path);
         else fx_log(FX_LOG_WARN, "[shot] 失败 (后端不支持 read_pixels?)");
-        if (!s_quit_after) s_quit_after = s_frames + 1;
+        if (!s_quit_after && !s_shot2_path[0]) s_quit_after = s_frames + 1;   /* 配了第二次截图就不提前退出 */
+    }
+    if (want_shot2) {
+        if (fx_screenshot(s_shot2_path)) fx_log(FX_LOG_INFO, "[shot2] %s", s_shot2_path);
+        s_quit_after = s_frames + 1;
     }
     if (s_quit_after > 0 && s_frames >= s_quit_after) sapp_request_quit();
 }

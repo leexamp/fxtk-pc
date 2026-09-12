@@ -17,6 +17,9 @@ typedef struct { sg_image img; sg_view view; int w, h; } fxtk_sokol_tex_t;
 
 extern fx_driver_t fx_sokol_driver;
 
+/* 窗口尺寸变化时调用 (事件回调与测试钩子共用) */
+void fxtk_sokol_apply_size(int w, int h);
+
 /* 把本帧累积的顶点命令流提交并呈现 (fx_poll 之后调用) */
 void fxtk_sokol_frame(int fb_w, int fb_h);
 
