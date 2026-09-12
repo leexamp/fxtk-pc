@@ -17,7 +17,7 @@ mkdir -p dist/win_sokol
 # 实体化成几十 MB 零填充), 见 build_win_cross.sh 里的同一注释。
 # -static/-static-libgcc: 把 winpthreads 与 libgcc 静态链进去 —— 否则 raymarch 用的线程
 # 会引出 libwinpthread-1.dll, 那就又变成"要带 DLL"了(与达标目标相反)。
-SZ="-Os -s -flto -ffunction-sections -static -static-libgcc \
+SZ="-Os -s -flto -ffunction-sections -static -static-libgcc -fmerge-all-constants \
     -fno-asynchronous-unwind-tables -fno-unwind-tables \
     -fno-stack-protector -fno-ident \
     -Wl,--gc-sections -Wl,--build-id=none"
@@ -29,7 +29,7 @@ x86_64-w64-mingw32-gcc $SZ -I. -I../components/fxtk -I../third_party/sokol \
     fxtk_sokol_driver.c fxtk_font_stb.c main_sokol.c \
     $SRCS_APP raymarch.c gpu_raymarch_stub.c \
     -o dist/win_sokol/$OUT \
-    -mwindows -Wl,--exclude-all-symbols -Wl,--file-alignment=512 \
+    -mwindows -Wl,--exclude-all-symbols -Wl,--file-alignment=512 -Wl,--no-insert-timestamp \
     -lopengl32 -lgdi32 -luser32 -lshell32 -lole32 -lcomdlg32 -ldwmapi -lpthread -lm
 ls -la dist/win_sokol/$OUT | awk '{printf "✅ 产物: %s  (%.1f KB)\n", $9, $5/1024}'
 echo "依赖(应只有 Windows 系统 DLL):"

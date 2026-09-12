@@ -9,7 +9,7 @@
 #
 # 注意: `test` 目标显式声明了 .PHONY 且有真实规则 ——
 #       避免再次踩 "同名 test/ 目录被 make 当作已是最新" 的假成功坑。
-.PHONY: all test clean fxtk_sim fxtk_sim_en bench sokol
+.PHONY: all test clean fxtk_sim fxtk_sim_en fxtk_sim_sokol fxtk_sim_sdl fxtk_sim_sdl_en bench sokol
 .DEFAULT_GOAL := fxtk_sim
 
 # v2.3: 体积优化默认档 (-O2 基线 154KB → 101KB, -35%)
@@ -47,13 +47,32 @@ CORE := ../components/fxtk/fxtk.c \
 HDRS := ../components/fxtk/fxtk.h ../components/fxtk/fxtk_internal.h
 DRIVER := fxtk_sdl_driver.c main_linux.c
 
+# ---- v2.4 起【默认后端 = sokol】----
+# SDL2 降为遗留: 只保留 SDL 驱动作为【无头测试/基准/金图】用的假驱动 (SDL_VIDEODRIVER=dummy),
+# 因为 CI 里没有显示器, 而 sokol 需要真实 GL 上下文。发布用的演示程序一律走 sokol。
 all: fxtk_sim
 
-fxtk_sim: $(CORE) $(HDRS) $(DRIVER) raymarch.c gpu_raymarch.c app.c app_desktop.c
+# 旧名字继续可用(脚本/文档里引用的是它), 现在只是别名 —— 产物仍是 ./fxtk_sim(sokol 版)
+fxtk_sim_sokol: fxtk_sim
+
+fxtk_sim: $(SOKOL_CORE) fxtk_sokol_driver.c fxtk_font_stb.c main_sokol.c \
+          app.c app_desktop.c raymarch.c gpu_raymarch_stub.c
+	gcc $(CFLAGS) $(INC) $(SOKOL_INC) $(SOKOL_CORE) \
+	    fxtk_sokol_driver.c fxtk_font_stb.c main_sokol.c app.c app_desktop.c raymarch.c \
+	    gpu_raymarch_stub.c -o $@ $(LDFLAGS) $(SOKOL_LIBS)
+
+fxtk_sim_en: $(SOKOL_CORE) fxtk_sokol_driver.c fxtk_font_stb.c main_sokol.c \
+             app_en.c app_desktop_en.c raymarch.c gpu_raymarch_stub.c
+	gcc $(CFLAGS) $(INC) $(SOKOL_INC) $(SOKOL_CORE) \
+	    fxtk_sokol_driver.c fxtk_font_stb.c main_sokol.c app_en.c app_desktop_en.c raymarch.c \
+	    gpu_raymarch_stub.c -o $@ $(LDFLAGS) $(SOKOL_LIBS)
+
+# ---- 遗留: SDL 版演示 (仅用于对照/过渡; 新功能不再往里加) ----
+fxtk_sim_sdl: $(CORE) $(HDRS) $(DRIVER) raymarch.c gpu_raymarch.c app.c app_desktop.c
 	gcc $(CFLAGS) $(INC) $(CORE) $(DRIVER) raymarch.c gpu_raymarch.c \
 	    app.c app_desktop.c -o $@ $(LDFLAGS) $(LIBS)
 
-fxtk_sim_en: $(CORE) $(HDRS) $(DRIVER) raymarch.c gpu_raymarch.c app_en.c app_desktop_en.c
+fxtk_sim_sdl_en: $(CORE) $(HDRS) $(DRIVER) raymarch.c gpu_raymarch.c app_en.c app_desktop_en.c
 	gcc $(CFLAGS) $(INC) $(CORE) $(DRIVER) raymarch.c gpu_raymarch.c \
 	    app_en.c app_desktop_en.c -o $@ $(LDFLAGS) $(LIBS)
 
@@ -79,13 +98,7 @@ SOKOL_CORE := ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
               ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_effects.c \
               ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c
 
-fxtk_sim_sokol: $(SOKOL_CORE) fxtk_sokol_driver.c fxtk_font_stb.c main_sokol.c \
-                app.c app_desktop.c raymarch.c gpu_raymarch_stub.c
-	gcc $(CFLAGS) $(INC) $(SOKOL_INC) $(SOKOL_CORE) \
-	    fxtk_sokol_driver.c fxtk_font_stb.c main_sokol.c app.c app_desktop.c raymarch.c \
-	    gpu_raymarch_stub.c -o $@ $(LDFLAGS) $(SOKOL_LIBS)
-
-sokol: fxtk_sim_sokol
+sokol: fxtk_sim
 
 # ---- 渲染吞吐基准 (dummy 驱动, 无 vsync) ----
 #   SDL_VIDEODRIVER=dummy ./test/bench 1200 8 200

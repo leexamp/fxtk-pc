@@ -19,6 +19,9 @@
 
 ## 1. 工作流 A：PC 后端 SDL2 → sokol（最大工作量）
 
+> **已完成并定案(v2.4)**: sokol 为默认后端, SDL2 降为遗留(只当无头假驱动供 bench/金图使用)。
+> `make` = sokol; `make fxtk_sim_sdl` = 遗留对照。
+
 ### 1.1 为什么值得换
 - **体积/依赖**：SDL2 是动态库（Windows 侧 SDL2_ttf.dll 剥符号后仍 ~2 MB）；sokol 是单头文件、静态链入，
   可只保留 GL 后端并裁掉 audio/fetch/imgui，产出单文件可执行。

@@ -550,24 +550,52 @@ static void on_fix(fx_widget_t *w, void *ud)
 }
 
 /* ================= 页11: 粒子性能 (GPU 万级图元) ================= */
-#define PT_MAX 2000000
+/* v2.4: 粒子缓冲【按需分配】。原先是 static pt_t s_pt[2000000] —— 常驻 40MB 的 .bss,
+ * 对一个以 ESP32 为目标的框架完全不可接受, 而且首次进入要把 200 万粒子全部初始化。
+ * 现在只在真正需要时扩容, 且只初始化新增区间; 上限收敛到 40 万(滑杆 0~100 → 0~40 万)。 */
+#define PT_MAX 400000
 typedef struct { float x,y,vx,vy; uint8_t c; } pt_t;
-static pt_t s_pt[PT_MAX];
-static int s_pt_init = 0; static int s_pt_n = 6000;
+static pt_t *s_pt = NULL;      /* 动态缓冲(原为 40MB 静态数组) */
+static int   s_pt_cap = 0;     /* 已分配容量 */
+static int   s_pt_n = 6000;    /* 当前使用数量 */
 static fx_image_t *s_ptimg=NULL; static int s_ptimg_w=0, s_ptimg_h=0;
 static double s_pt_last = 0; static float s_pt_fps = 0;
 static double pt_now(void){ struct timespec ts; clock_gettime(CLOCK_MONOTONIC,&ts); return ts.tv_sec*1000.0+ts.tv_nsec/1e6; }
-static void on_pt_slider(fx_widget_t *w, void *ud){ (void)ud; int v=fx_get_value(w); s_pt_n=v*20000;
+/* 初始化 [from,to) 区间的粒子(位置/速度/颜色随机, 与改造前同一套随机序列) */
+static void pt_spawn(int from, int to, int cw, int ch)
+{
+    for (int i = from; i < to; i++) {
+        s_pt[i].x = (float)(rand() % cw); s_pt[i].y = (float)(rand() % ch);
+        float a = (float)(rand() % 360) * 0.01745f, sp = 0.5f + (float)(rand() % 100) / 100.0f;
+        s_pt[i].vx = cosf(a) * sp; s_pt[i].vy = sinf(a) * sp; s_pt[i].c = (uint8_t)(rand() % 6);
+    }
+}
+/* 保证容量 ≥ n(不足则翻倍扩容), 并把新分配的部分初始化好 */
+static int pt_reserve(int n, int cw, int ch)
+{
+    if (n < 100) n = 100;
+    if (n > PT_MAX) n = PT_MAX;
+    if (n > s_pt_cap) {
+        int nc = s_pt_cap ? s_pt_cap : 6000;
+        while (nc < n) nc *= 2;
+        if (nc > PT_MAX) nc = PT_MAX;
+        pt_t *np = (pt_t *)realloc(s_pt, (size_t)nc * sizeof(pt_t));
+        if (!np) return 0;
+        s_pt = np;
+        pt_spawn(s_pt_cap, nc, cw, ch);
+        s_pt_cap = nc;
+    }
+    s_pt_n = n;
+    return 1;
+}
+static void on_pt_slider(fx_widget_t *w, void *ud){ (void)ud; int v=fx_get_value(w); s_pt_n=v*4000;
 if (s_pt_n<100)s_pt_n=100;
 if (s_pt_n>PT_MAX)s_pt_n=PT_MAX; }
 static void on_pt(fx_widget_t *w, void *ud){
     (void)ud; int x1,y1,x2,y2; fx_widget_rect(w,&x1,&y1,&x2,&y2);
     int cw=x2-x1+1, ch=y2-y1+1;
-    if (!s_pt_init){ srand(12345);
-        for(int i=0;i<PT_MAX;i++){ s_pt[i].x=(float)(rand()%cw); s_pt[i].y=(float)(rand()%ch);
-            float a=(float)(rand()%360)*0.01745f, sp=0.5f+(float)(rand()%100)/100.0f;
-            s_pt[i].vx=cosf(a)*sp; s_pt[i].vy=sinf(a)*sp; s_pt[i].c=(uint8_t)(rand()%6); }
-        s_pt_init=1; s_pt_last=pt_now(); }
+    if (!s_pt_cap) { srand(12345); s_pt_last = pt_now(); }
+    if (!pt_reserve(s_pt_n, cw, ch)) return;     /* 首次进入只分配当前需要的量(默认 6000) */
     int hw=cw/2, hh=ch/2;
     if (hw<1)hw=1;
     if (hh<1)hh=1;

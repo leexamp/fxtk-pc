@@ -92,7 +92,22 @@
 - **SDF 着色器不能复用带纹理绑定的 shader desc**: 复用会让 SDF 管线要求 view/sampler 绑定,
   未绑定直接 `VALIDATE_ABND_EXPECTED_VIEW_BINDING` panic。改用独立 desc。
 
-### 新增（P5 地基: 设计令牌）
+### 变更（后端策略: sokol 转为默认, SDL2 降为遗留）
+- `make` / `make fxtk_sim` 现在构建 **sokol 版**（产物仍是 `./fxtk_sim`，361KB）；
+  `make fxtk_sim_en` 也换成 sokol（361KB）；`fxtk_sim_sokol` 保留为别名，旧脚本/文档不用改。
+- SDL 版移到 `fxtk_sim_sdl` / `fxtk_sim_sdl_en`，**明确标注为遗留**（仅对照/过渡，不再加新功能）。
+- **为什么保留 SDL 代码**：`test/bench` 与 `tools/golden.sh` 依赖 `SDL_VIDEODRIVER=dummy` 做
+  无头确定性渲染（CI 没有显示器，sokol 起不来 GL 上下文）—— 它现在的角色是"无头假驱动"，
+  不是发布后端。发布产物一律 sokol，也是 Windows 单 exe 无 DLL 的前提。
+- 实测: 默认 `make` 产物可运行出图(控件页 810 色)；`make test` PASS；金图回归 20/20 一致。
+
+### 修复（粒子页常驻 40MB 静态内存）
+- `app.c` 里 `static pt_t s_pt[2000000]` 常驻 **40MB `.bss`**，且首次进入要把 200 万粒子全部初始化 ——
+  对一个以 ESP32 为目标的框架完全不可接受。
+- 改为**按需分配**（`pt_reserve()` 扩容并只初始化新增区间；上限收敛到 40 万，滑杆 0~100 → 0~40 万）。
+- 实测: sokol 版 `.bss` **52MB → 12.7MB**（余下是顶点/索引缓冲与控件池），粒子页渲染正常。
+
+### 新增（P5 地基: 设计令牌）### 新增（P5 地基: 设计令牌）
 - `components/fxtk/fxtk_tokens.h`: 把散落在 `fxtk.c` / `fxtk_widgets.c` 里的颜色与几何字面量
   收拢成一套语义化令牌(PRIMARY/SUCCESS/DANGER/TEXT_DIM/TRACK/KNOB/EDGE_DOWN/BORDER +
   圆角/轨道厚度/滑块宽度上下限)。**改这一处就能统一换肤/统一圆角**, 是后续控件审美优化的前提。

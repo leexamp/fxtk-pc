@@ -117,3 +117,19 @@ cd demo-main
 ## 许可
 
 MIT（示例与文档同许可）。全文见 [LICENSE](LICENSE)。
+
+## 后端策略（v2.4 起）
+
+**sokol 是默认且唯一在演进的 PC 后端**，SDL2 降为遗留：
+
+| 目标 | 后端 | 用途 |
+|---|---|---|
+| `make` / `make fxtk_sim` | **sokol（OpenGL）** | 默认演示程序；新功能只往这里加 |
+| `make fxtk_sim_en` | sokol | 英文版 |
+| `make sokol` | sokol | `fxtk_sim` 的别名（旧脚本兼容） |
+| `make fxtk_sim_sdl` / `_sdl_en` | SDL2（遗留） | 仅用于对照与过渡，不再加新功能 |
+
+**为什么 SDL 代码还留着**：`test/bench`（性能基准）与 `tools/golden.sh`（金图回归）需要
+**无显示器的确定性渲染**，SDL 的 `SDL_VIDEODRIVER=dummy` 正好提供这个能力；而 sokol 需要真实
+GL 上下文，CI 里起不来。所以 SDL 驱动现在只当"无头假驱动"用，发布产物一律走 sokol
+（也正因如此，Windows 版才能做到单 exe 无第三方 DLL）。
