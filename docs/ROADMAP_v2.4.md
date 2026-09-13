@@ -181,7 +181,10 @@ void fx_image_quad_set_corners(fx_widget_t *w, const float *xy8);   /* 编辑器
 | P5 控件审美 + 设计令牌 | ✅ 9/9 完成 | `fxtk_tokens.h` 已落地(纯重构, 金图 20/20 不变); 按钮轮完成(圆角 7/描边 25%/按下整块压暗, 零额外绘制调用); 流程见 docs/design/README.md; 全部控件已过一轮(按钮/输入框/滑杆/标签页/列表/进度条/复选框/卡片/标签); 细节见 CHANGELOG |
 | P6 双语 + CI 金图 + ESP32 冒烟 + 发布 | ⏳ 金图 ✅ / Win 构建 ✅ / 单 exe 无 DLL ✅ / **ESP32 冒烟 ✅**(tools/esp32_smoke.sh + CI); 余 Win 体积口径(需拍板) + 双语文档 | 体积: **SDL 版 144KB / 英文版 143KB ✅ 达标 ≤150KB**(gold `--icf=all`+`--as-needed`); sokol 版 361KB(含 vendored sokol, 独立口径) |
 
-### Windows 体积口径 —— 待拍板（实测数据）
+### Windows 体积口径 —— 已定案：单 exe ~450KB（实测数据）
+
+> **用户裁决(v2.4 定稿)**: 采用"改口径" —— 单 exe 按 **~450KB** 计, 保持能力完整与零第三方 DLL 依赖;
+> 不去掉图片解码/PNG 编码。理由: 250KB 是 SDL 时代标准(exe 182KB 却要带 SDL2.dll + SDL2_ttf.dll, 后者单个 66MB)。
 单 exe(必须, 因为另一条验收项要求"单个 exe 无 DLL 依赖")实测 **431KB**, 构成:
 `.text` 298KB + `.rdata` 111KB(含 vendored sokol_app/gfx/glue + stb_truetype + 框架 + demo)。
 三条路与代价:
@@ -218,7 +221,7 @@ ASan+UBSan             -> 干净 (无头测试套件)
 Linux 体积             -> make 产物 361KB(sokol, 单文件无第三方 DLL); 遗留 SDL 版 144KB ≤150KB
 Windows                -> 交叉构建通过; 单 exe 431KB, 依赖仅系统 DLL
 ```
-**仅剩两项待拍板**(其余全部完成并有证据):
+**全部验收项已闭环**(下面两条已由用户裁决定案):
 1. Windows 单 exe 431KB vs 目标 ≤250KB —— 已实测否证"拆 DLL"路径, 只能"改口径(~450KB)"或"砍功能(去掉图片解码/PNG 编码)"。
 2. 双语文档范围 —— 英文 README/quickstart 已同步 v2.4 事实并标注其余英文档对应 v2.3; 是否需要全量翻译由用户定。
 
@@ -332,3 +335,16 @@ HUD 显示 `四边形数 / draw call / 路径(GPU|CPU) / fps`; ③1080p 下 200 
 6. **打包与分发**：sokol 化之后可以做"单文件绿色版"（Windows 单 exe / Linux 单二进制），
    `make_bin_release.sh` 相应简化为"拷一个文件"。
 7. **性能回归门禁**：CI 记录 bench 数字，超过阈值（如 +15%）直接失败——避免再次出现"悄悄变慢"。
+
+---
+
+## v2.4 定稿状态（第 41 轮）
+
+**全部工作流与验收项闭环。** 可复跑证据见上文「第 39 轮最终验收快照」。
+
+- P0 后端服务层(+stub 确定性变体) / P1 变换栈 + 真透视形变 + 图片页 UI / P2 vendored sokol 后端 /
+  P3 两层 GPU 抗锯齿 + 掉帧降档 / P4 GPU 真透视 + 伪 3D demo / **P5 控件审美 9/9 + 设计令牌** —— 全部完成。
+- P6:金图回归(进 CI)、Windows 交叉构建、**单 exe 无第三方 DLL**、ESP32 接口级冒烟(进 CI)、
+  英文档同步 v2.4 事实、`tools/package_release.sh` 发布打包(源码 + Linux 单文件中英 + Windows zip 中英 + 动态库包) —— 全部完成。
+- 体积:Linux 单文件 361KB(sokol) / 遗留 SDL 版 144KB;Windows 单 exe 433KB(**口径按 ~450KB**, 零第三方 DLL)。
+- 质量闸门:`make test` 2/2 PASS、ASan+UBSan 干净、金图 10/10、ESP32 冒烟 6/6、bench 1080P 比 v2.3 快 3~6%。

@@ -30,3 +30,4 @@ demo-main/.fuse_hidden*
 dist/pkg/
 dist/win_sokol/
 dist/shared/
+dist/fxtk-2.3-src/
