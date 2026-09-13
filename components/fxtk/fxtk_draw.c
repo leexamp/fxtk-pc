@@ -42,12 +42,13 @@ static int s_aa = FX_AA_DEFAULT;
 int fxtk_aa(void) { return s_aa; }
 /* v2.4: GPU 控件层抗锯齿档位。与画布 CPU AA(上面那个 s_aa)解耦 ——
  * 后者会把画布强制离屏并逐像素混合(开销大, 默认关), 前者是驱动的 SDF 钩子(默认开)。 */
-/* 【v2.4.1 止血】默认改为 0(关): SDF 控件填充在"图形页/画布 + 文字 + quadwarp 图元混排"的场景下
- * 会把四边形的半宽/半高参数丢掉, 实心填充退化成"一圈边界 + 中心 50% 混合"(用户实测截图)。
- * 已确认: 同一按钮在 AA=0(逐行填充)下完全正常(蓝像素 1635 → 9095), 且与圆角、伪 3D 无关。
- * 根因未定位前先默认关闭, 保证默认观感正确; 想用 SDF 可显式 fx_set_widget_aa(1) 或 FXTK_AA=1。
- * TODO(v2.4.2): 定位 emit_round 的参数丢失(疑与 pip==4 quadwarp 混排有关)后改回默认 1。 */
-static int s_widget_aa = 0;
+/* v2.4.2: 控件层 SDF 抗锯齿【恢复默认开启】。
+ * 之前默认关掉是因为"图形页按钮只画出一圈边界(填充退化成 50% 混合)"——当时定位到 SDF 顶点参数疑似丢失。
+ * 后来发现该现象与【输入状态机的按下态】有关:修复 fx_poll 分支顺序(释放事件被吞)之后,
+ * 同样场景下按钮蓝色像素从 1635 恢复到 8976(正常≈9095), 即 SDF 填充已正常。
+ * 因此恢复默认 AA=1: 圆角/斜线真正走距离场, 不再靠逐行填充"硬画"(用户反馈"看着不是矢量图")。
+ * 若某平台出现异常, 可用 FXTK_AA=0 或 fx_set_widget_aa(0) 即时回退。 */
+static int s_widget_aa = 1;
 int  fx_widget_aa_level(void) { return s_widget_aa; }
 void fx_set_widget_aa(int level)
 {

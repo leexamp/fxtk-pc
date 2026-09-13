@@ -305,7 +305,9 @@ static void emit_round(int x1, int y1, int x2, int y2, int rad, int border, uint
     if (rad * 2 > (int)(hh * 2)) rad = (int)hh;
     if (getenv("FXTK_SDFCMP")) emit_quad(0, -1, fx0, fy0, fx1, fy1, 0,0,0,0, 0xFF00FF00u);
     /* 与 emit_quad 同款合并: 相邻 SDF 四边形共用一条命令(否则一个控件一条 draw call) */
-    if (s_cmd_n == 0 || s_cmd[s_cmd_n - 1].pip != 3 || s_cmd[s_cmd_n - 1].tex != -1) {
+    /* 诊断开关: FXTK_SDFNOMERGE=1 → 每段 SDF 单独一条命令(用于判定"合并"是否为问题源头) */
+    int no_merge = getenv("FXTK_SDFNOMERGE") != NULL;
+    if (no_merge || s_cmd_n == 0 || s_cmd[s_cmd_n - 1].pip != 3 || s_cmd[s_cmd_n - 1].tex != -1) {
         if (cmd_new(3, -1) < 0) return;
     }
     s_sdf_n++;
