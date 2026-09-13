@@ -24,8 +24,9 @@ git archive --format=tar.gz --prefix="fxtk-$VER/" -o "$OUT/fxtk-$VER-src.tar.gz"
 
 echo "📦 Linux 单文件"
 cp demo-main/fxtk_sim "$OUT/linux/"
+[ -x demo-main/fxtk_sim_en ] && cp demo-main/fxtk_sim_en "$OUT/linux/"   # 英文版(与中文版同一后端, 仅文案不同)
 cp README.md LICENSE graph.png image.png rending.png texting.png "$OUT/linux/" 2>/dev/null || true
-printf 'fxtk %s · Linux x86_64 (sokol 单文件版)\n\n运行: ./fxtk_sim   (无第三方 .so 依赖)\n依赖: 系统 OpenGL(X11) + 中文字体(缺失时自动回退)\n' "$VER" > "$OUT/linux/运行说明.txt"
+printf 'fxtk %s · Linux x86_64 (sokol 单文件版)\n\n运行: ./fxtk_sim       中文演示(12 页)\n      ./fxtk_sim_en    英文演示\n依赖: 系统 OpenGL(X11) + 中文字体(缺失时自动回退)\n说明: 无第三方 .so 依赖; 完整文档见包内 README.md\n' "$VER" > "$OUT/linux/运行说明.txt"
 tar czf "$OUT/fxtk-$VER-linux-x86_64.tar.gz" -C "$OUT/linux" .
 
 echo "📦 Linux 动态库包"
@@ -39,7 +40,8 @@ fi
 echo "📦 Windows 单 exe"
 if [ -f demo-main/dist/win_sokol/fxtk_sokol.exe ]; then
     cp demo-main/dist/win_sokol/fxtk_sokol.exe "$OUT/win/"; cp README.md "$OUT/win/" 2>/dev/null || true
-    printf 'fxtk %s · Windows x86_64 (sokol 单 exe)\n\n双击 fxtk_sokol.exe 即可, 无需任何 DLL。\n' "$VER" > "$OUT/win/运行说明.txt"
+    [ -f demo-main/dist/win_sokol/fxtk_sokol_en.exe ] && cp demo-main/dist/win_sokol/fxtk_sokol_en.exe "$OUT/win/"
+    printf 'fxtk %s · Windows x86_64 (sokol 单 exe)\n\n双击 fxtk_sokol.exe(中文) 或 fxtk_sokol_en.exe(英文) 即可, 无需任何 DLL。\n' "$VER" > "$OUT/win/运行说明.txt"
     python3 -c "
 import zipfile,os,sys
 ver='$VER'; out='$OUT'; d=out+'/win'
