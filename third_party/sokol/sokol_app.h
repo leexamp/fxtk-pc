@@ -13751,6 +13751,11 @@ _SOKOL_PRIVATE void _sapp_x11_on_focusout(XEvent* event) {
     }
 }
 
+/* ===== 本项目本地修改: XIM(输入法)状态 —— 文件作用域(事件循环与按键处理共用), 无输入法时全为 0 ===== */
+static XIM _sapp_xim = 0;
+static XIC _sapp_xic = 0;
+static int _sapp_x11_im_tried = 0;
+
 _SOKOL_PRIVATE void _sapp_x11_on_keypress(XEvent* event) {
     int keycode = (int)event->xkey.keycode;
 
@@ -13766,17 +13771,22 @@ _SOKOL_PRIVATE void _sapp_x11_on_keypress(XEvent* event) {
      * 上游 sokol_app 从不创建输入上下文, 只用 XLookupString(仅 Latin-1), 所以 fcitx/ibus 无法组字。
      * 这里惰性创建 XIC(函数内 static)并改用 Xutf8LookupString: 组字结果是 UTF-8, 逐码点仍走原
      * CHAR 事件通道 —— 上层驱动无需改动。没有输入法时 XOpenIM 返回 NULL, 完全退回原路径。 */
-    static XIM _sapp_xim = 0;
-    static XIC _sapp_xic = 0;
-    static int _sapp_x11_im_tried = 0;
     if (!_sapp_x11_im_tried) {
         _sapp_x11_im_tried = 1;
+        /* XIM 的经典前提: 进程必须先 setlocale(LC_ALL, "") 并设置 locale modifiers ——
+         * 漏了这一步, XOpenIM 往往直接失败(而 XIM 服务明明在跑: xprop -root 有 XIM_SERVERS=@server=fcitx)。 */
+        extern char *setlocale(int, const char *);
+        extern char *XSetLocaleModifiers(const char *);
+        setlocale(6 /*LC_ALL*/, "");
+        XSetLocaleModifiers("@im=fcitx");
         _sapp_xim = XOpenIM((Display*)sapp_x11_get_display(), NULL, NULL, NULL);
+        fprintf(stderr, "[sokol][xim] XOpenIM=%s\n", _sapp_xim ? "ok" : "FAIL");
         if (_sapp_xim) {
             _sapp_xic = XCreateIC(_sapp_xim, XNInputStyle, XIMPreeditNothing | XIMStatusNothing,
                                   XNClientWindow, (Window)sapp_x11_get_window(),
                                   XNFocusWindow, (Window)sapp_x11_get_window(), NULL);
-            if (_sapp_xic) XSetICFocus(_sapp_xic);
+            if (_sapp_xic) { XSetICFocus(_sapp_xic); fprintf(stderr, "[sokol][xim] XIC=ok\n"); }
+            else fprintf(stderr, "[sokol][xim] XIC=FAIL\n");
         }
     }
     if (_sapp_xic) {
@@ -13883,6 +13893,7 @@ _SOKOL_PRIVATE void _sapp_x11_on_propertynotify(XEvent* event) {
         }
     }
 }
+
 
 _SOKOL_PRIVATE void _sapp_x11_on_selectionnotify(XEvent* event) {
     if (event->xselection.property == _sapp.x11.xdnd.XdndSelection) {
@@ -14332,6 +14343,12 @@ _SOKOL_PRIVATE void _sapp_linux_run(const sapp_desc* desc) {
         while (count--) {
             XEvent event;
             XNextEvent(_sapp.x11.display, &event);
+            /* 【本项目本地修改】输入法过滤: 组字期间的按键/预编辑事件由 XIM 消费, 必须在派发前拦掉。
+             * 上游 sokol_app 只在 selection/XDND 回调里调过 XFilterEvent, 按键路径完全没过滤 ——
+             * 所以即便 XIC 建好了, fcitx/ibus 的组字也进不来(XIC=ok 但中文仍是拉丁字符)。 */
+            if (_sapp_xic && XFilterEvent(&event, (Window)sapp_x11_get_window())) {
+                continue;
+            }
             _sapp_x11_process_event(&event);
         }
         _sapp_linux_frame();

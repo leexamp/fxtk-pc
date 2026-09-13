@@ -41,11 +41,10 @@
 
 ## 已知限制
 
-- **中文输入(输入法)在 sokol 版不可用**:`sokol_app` 的 X11 后端不实现 XIM(源码里没有 `XOpenIM`/`Xutf8LookupString`),
-  fcitx/ibus 无法组字。三个绕行:
-  ① 在别处复制中文 → 到输入框 `Ctrl+V`(剪贴板已实现, 支持中文);
-  ② 用遗留 SDL 版 `./build.sh --sdl`(SDL2 走 `SDL_TEXTINPUT`, 输入法正常);
-  ③ 界面文字本身一直是中文正常的, 受限的只是"用键盘直接打中文"。
+- ~~中文输入(输入法)在 sokol 版不可用~~ —— **v2.4.1 已解决**:给 vendored sokol_app 的 X11 后端补了
+  XIM 支持(惰性 `XOpenIM`/`XCreateIC` + `setlocale` + `XSetLocaleModifiers` + **事件循环里的 `XFilterEvent`** +
+  `Xutf8LookupString`),现在 fcitx5/ibus 等输入法在 sokol 版可正常组字。实测(本机 fcitx5 + rime):
+  输入框里打 `nihao` → 上屏"你好" ✓。
 - **控件层 SDF 抗锯齿默认关闭**(`s_widget_aa = 0`):它在"画布 + 文字 + quadwarp 混排"场景下有一个已知缺陷
   (实心填充退化成边界环),定位中。想试可 `fx_set_widget_aa(1)` 或 `FXTK_AA=1`。
 - **Windows 剪贴板仍是桩**:剪贴板实现目前走 X11 工具(xsel/xclip/wl-copy),Windows 需要另写

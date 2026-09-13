@@ -92,7 +92,24 @@
 - **SDF 着色器不能复用带纹理绑定的 shader desc**: 复用会让 SDF 管线要求 view/sampler 绑定,
   未绑定直接 `VALIDATE_ABND_EXPECTED_VIEW_BINDING` panic。改用独立 desc。
 
-### 修复（v2.4.1 止血：SDF 控件填充在混排场景下退化 → 默认关闭）
+### 修复（中文输入法在 sokol 版可用 —— 给 vendored sokol_app 补 XIM）
+- **现象**: sokol 版无法用输入法打中文(界面显示中文一直正常, 受限的只是键盘输入)。
+- **排查过程**(逐步收窄):
+  ① `xprop -root` 显示 `XIM_SERVERS=@server=fcitx`、locale 为 `zh_CN.UTF-8` → **服务与 locale 都没问题**, 是客户端没接;
+  ② 上游 sokol_app **从不创建输入上下文**(`XOpenIM`/`XCreateIC`/`XSetICFocus` 出现 0 次);
+  ③ 补上后日志显示 `XOpenIM=ok` / `XIC=ok`, 但打字仍是拉丁字符 → 继续查;
+  ④ 发现 sokol_app 里那处 `XFilterEvent` 在 **selection/XDND 回调**里, **按键路径根本没做输入法过滤** ← 这才是根因。
+- **修法**(全部在 `third_party/sokol/sokol_app.h` 的 X11 分支, 本项目裁剪范围内, 已在代码里标注"本项目本地修改"):
+  ① 惰性创建 XIC: `setlocale(LC_ALL,"")` + `XSetLocaleModifiers("@im=fcitx")` + `XOpenIM` + `XCreateIC`
+     (`XIMPreeditNothing|XIMStatusNothing`) + `XSetICFocus`;
+  ② **事件循环取到事件后立刻 `XFilterEvent`, 组字期间的事件直接 `continue`**(关键);
+  ③ 按键处理改用 `Xutf8LookupString`, 组字结果按 UTF-8 **逐码点**仍走原 CHAR 事件通道(上层驱动零改动);
+  ④ 没有输入法环境时 `XOpenIM` 返回 NULL → 完全退回原 `XLookupString` 路径, 行为不变。
+- **实测(端到端)**: 本机 fcitx5(带 rime)在跑 → 启动 sokol 版 → 点进输入框 → 注入 `ctrl+space` + `nihao` + `space`
+  → 截图显示输入框内容为 **`hello 你好你好`**(原默认文字 + 组字上屏的"你好")✓
+- 顺带: 之前 README「已知限制」里"中文输入不可用"那一条已改写成"已解决"。
+
+### 修复（v2.4.1 止血：SDF 控件填充在混排场景下退化 → 默认关闭）### 修复（v2.4.1 止血：SDF 控件填充在混排场景下退化 → 默认关闭）
 - **现象(用户反馈, 编译产物同样存在)**: 图形页"切换模式"按钮只画出一圈蓝色边界 + 中心一点,
   看着是"白底 + 蓝边 + 蓝字", 其余控件正常。
 - **量化**: 该按钮区域内的按钮色像素 **1635**(正常约 9095);中心点采样 (135,198,248) = 按钮蓝与底色的 50% 混合
