@@ -941,8 +941,55 @@ static void drv_set_clip_rect(int x1, int y1, int x2, int y2)
 {
     s_clip_x1 = x1; s_clip_y1 = y1; s_clip_x2 = x2; s_clip_y2 = y2;
 }
-static void drv_clip_set(const char *s) { (void)s; }
-static const char *drv_clip_get(void) { return ""; }
+/* v2.4.1: 剪贴板 —— sokol_app【没有】剪贴板 API, 之前这里是空桩, 复制/粘贴完全失效(用户反馈)。
+ * 方案: 优先调用系统工具(xsel / xclip / wl-copy|wl-paste), 让别的程序也能粘;
+ * 工具不存在时退化为【进程内缓冲】—— 至少保证应用内部复制/粘贴永远可用。
+ * 顺带: 这也给了中文一个绕行 —— 输入法用不了(见文件末尾说明)时, 可以复制中文再 Ctrl+V 粘进来。 */
+static char s_clip[8192];
+static int  s_clip_tool = -1;          /* -1 未探测; 0 无工具; 1 xsel; 2 xclip; 3 wl-copy/paste */
+static int clip_tool(void)
+{
+    if (s_clip_tool < 0) {
+        if (system("command -v xsel >/dev/null 2>&1") == 0)        s_clip_tool = 1;
+        else if (system("command -v xclip >/dev/null 2>&1") == 0)  s_clip_tool = 2;
+        else if (system("command -v wl-copy >/dev/null 2>&1") == 0 &&
+                 system("command -v wl-paste >/dev/null 2>&1") == 0) s_clip_tool = 3;
+        else s_clip_tool = 0;
+    }
+    return s_clip_tool;
+}
+static void drv_clip_set(const char *s)
+{
+    if (!s) s = "";
+    snprintf(s_clip, sizeof(s_clip), "%s", s);
+    const char *cmd = NULL;
+    switch (clip_tool()) {
+    case 1: cmd = "xsel --clipboard --input 2>/dev/null"; break;
+    case 2: cmd = "xclip -selection clipboard 2>/dev/null"; break;
+    case 3: cmd = "wl-copy 2>/dev/null"; break;
+    default: return;                    /* 无工具: 只用进程内缓冲 */
+    }
+    FILE *p = popen(cmd, "w");
+    if (p) { fputs(s_clip, p); pclose(p); }
+}
+static const char *drv_clip_get(void)
+{
+    const char *cmd = NULL;
+    switch (clip_tool()) {
+    case 1: cmd = "xsel --clipboard --output 2>/dev/null"; break;
+    case 2: cmd = "xclip -selection clipboard -o 2>/dev/null"; break;
+    case 3: cmd = "wl-paste --no-newline 2>/dev/null"; break;
+    default: return s_clip;             /* 无工具: 返回上次 set 的内容 */
+    }
+    FILE *p = popen(cmd, "r");
+    if (p) {
+        size_t n = fread(s_clip, 1, sizeof(s_clip) - 1, p);
+        pclose(p);
+        s_clip[n] = 0;
+        while (n && (s_clip[n-1] == '\n' || s_clip[n-1] == '\r')) s_clip[--n] = 0;
+    }
+    return s_clip;
+}
 /* v2.4 P4: 旋转贴图 —— 之前是空实现, 于是图形页那两张旋转图片在 sokol 后端整块消失
  * (与 SDL 版一眼可见的差别)。现在直接用 P4 的 GPU 真透视四边形: 旋转是仿射特例(权重恒 1),
  * 硬件自己做旋转 + 双线性。语义与 SDL 驱动严格对齐: 以 (cx,cy) 为中心、尺寸 dw x dh、角度取 -ang 度
@@ -1359,3 +1406,12 @@ void fxtk_sokol_handle_event(const sapp_event *e)
     default: break;
     }
 }
+
+/* ================= 已知限制: 中文输入 =================
+ * sokol_app 的 X11 后端【不实现 XIM】(源码里没有 XOpenIM/Xutf8LookupString/XSetICFocus),
+ * 所以 fcitx/ibus 之类输入法在 sokol 版里无法组字 —— 这不是本项目的 bug, 是 sokol_app 的固有限制。
+ * 三个绕行:
+ *   ① 用剪贴板: 在别处复制中文, 到输入框 Ctrl+V(剪贴板已在本驱动实现, 支持中文);
+ *   ② 用遗留 SDL 版: ./build.sh --sdl (SDL2 走 SDL_TEXTINPUT, 输入法正常);
+ *   ③ 界面文字本身一直是中文正常的(用的是内置字体), 只有"键盘打字输入中文"受限。
+ */
