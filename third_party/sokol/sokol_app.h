@@ -13405,6 +13405,21 @@ _SOKOL_PRIVATE bool _sapp_x11_window_visible(void) {
 
 _SOKOL_PRIVATE void _sapp_x11_show_window(void) {
     if (!_sapp_x11_window_visible()) {
+        /* ===== 本项目本地修改: 最小窗口尺寸 =====
+         * 不加限制时窗口可以被拖到很小, 设计空间 480x272 被压到 1:1 以下, 控件互相挤压、文字重叠,
+         * 观感很差(用户反馈"最小大小没限制")。这里给窗口管理器设最小尺寸提示:
+         * 不小于设计空间 480x272 —— 与框架的"设计分辨率"一致, 保证 UI 至少能完整放下。
+         * 注意: 只是 hint, 少数 WM 会忽略; 那属于窗口管理器行为, 不在本框架能控制的范围内。 */
+        if (_sapp.desc.width >= 480 && _sapp.desc.height >= 272) {
+            XSizeHints* hints = XAllocSizeHints();
+            if (hints) {
+                hints->flags = PMinSize;
+                hints->min_width = 480;
+                hints->min_height = 272;
+                XSetWMNormalHints(_sapp.x11.display, _sapp.x11.window, hints);
+                XFree(hints);
+            }
+        }
         XMapWindow(_sapp.x11.display, _sapp.x11.window);
         XEvent dummy;
         _sapp_x11_wait_for_event(VisibilityNotify, 0.1, &dummy);

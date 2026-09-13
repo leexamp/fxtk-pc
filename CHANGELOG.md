@@ -92,7 +92,13 @@
 - **SDF 着色器不能复用带纹理绑定的 shader desc**: 复用会让 SDF 管线要求 view/sampler 绑定,
   未绑定直接 `VALIDATE_ABND_EXPECTED_VIEW_BINDING` panic。改用独立 desc。
 
-### 修复（sokol 版字体看着偏小 → 与 SDL_ttf 的字号语义对齐）
+### 新增（最小窗口尺寸限制 —— 观感保护）
+- **现象(用户反馈)**: 窗口能被拖到很小, 设计空间 480x272 被压到 1:1 以下 —— 控件互相挤压、文字重叠, 观感很差。
+- **修法**: 在裁剪版 sokol_app 的 X11 建窗处设 WM 尺寸提示 `PMinSize = 480x272`(与框架设计分辨率一致)。
+- **实测**: `xprop -id <窗口> WM_NORMAL_HINTS` → `program specified minimum size: 480 by 272` ✓
+- 说明: 这只是 hint, 少数 WM 会忽略(属窗口管理器行为, 不在框架可控范围); 已加注释说明。
+
+### 修复（sokol 版字体看着偏小### 修复（sokol 版字体看着偏小 → 与 SDL_ttf 的字号语义对齐）
 - **根因**: 字号语义不同。SDL_ttf 的 size 是 **EM 大小**;而 stb 层用的是 `stbtt_ScaleForPixelHeight`,
   它让 **ascent+descent 等于 size** —— 而多数字体(尤其中文)的 ascent-descent 比 EM 大 ~15%,
   于是同样名义字号在 sokol 版渲染更小(用户反馈"换了 sokol 之后字体略小")。
