@@ -294,7 +294,9 @@ static void on_fs_view(fx_widget_t*w,void*ud){ (void)w;(void)ud;
     fx_canvas_clear(w,FX_RGB(250,250,250));
     for(int i=0;i<s_n;i++){ int y=TOP+(i*rh)-off; if(y+rh<TOP)continue; if(y>ch-1)break;
         int sel=(i==s_sel), hov=(i==s_hov);
-        fx_color_t c=s_ent[i].is_dir?FX_BTN_BLUE:FX_UI_FG;
+        /* v2.4.2(图九): 正文原来用 FX_UI_FG(近黑)压在 242 的浅底上, 对比过硬、看着发"黑压白"。
+         * 换成中间调 85,85,85: 依然清晰, 但不再刺眼(用户反馈"文本与背景差异略明显")。 */
+        fx_color_t c=s_ent[i].is_dir?FX_BTN_BLUE:FX_RGB(85,85,85);
         fx_set_color(sel?FX_BTN_BLUE:(hov?FX_RGB(210,230,250):FX_RGB(242,242,242))); fx_fill_rect(2,y,cw-2,y+rh-2);
         if(hov && !sel){ fx_set_color(FX_BTN_BLUE); fx_draw_rect(2,y,cw-2,y+rh-2); }
         char nm[64]; strncpy(nm,s_ent[i].name,63); nm[63]=0; if(fx_text_width(nm)>cw/2-14){ nm[cw/2/2-4]=0; strcat(nm,".."); }
