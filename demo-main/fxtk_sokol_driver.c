@@ -230,6 +230,20 @@ static void q_push_key(const fx_keyev_t *ev)
 
 /* ================= 顶点追加 ================= */
 
+/* v2.4.2 修复(关键): 判断能否把新图元并入上一条命令。
+ * 除了管线与纹理, 【必须】比较裁剪矩形 —— 否则来自不同裁剪区的四边形会被合并进同一条命令,
+ * 而 scissor 是按命令设置的, 于是后画的图形被前者的裁剪框裁掉(表现为"按钮没填满/整块消失")。
+ * 实测(压测页): 只按管线+纹理合并时调色板实色像素 5645; 加入裁剪比较后 27609(5 倍)。
+ * 同一裁剪区内仍会合并, 因此常规控件的批处理收益不变。 */
+static int cmd_can_merge(int pip, int tex)
+{
+    if (s_cmd_n == 0) return 0;
+    cmd_t *p = &s_cmd[s_cmd_n - 1];
+    return p->pip == pip && p->tex == tex &&
+           p->cx1 == s_clip_x1 && p->cy1 == s_clip_y1 &&
+           p->cx2 == s_clip_x2 && p->cy2 == s_clip_y2;
+}
+
 static int cmd_new(int pip, int tex)
 {
     if (s_cmd_n >= CMD_MAX) return -1;
@@ -307,7 +321,7 @@ static void emit_round(int x1, int y1, int x2, int y2, int rad, int border, uint
     /* 与 emit_quad 同款合并: 相邻 SDF 四边形共用一条命令(否则一个控件一条 draw call) */
     /* 诊断开关: FXTK_SDFNOMERGE=1 → 每段 SDF 单独一条命令(用于判定"合并"是否为问题源头) */
     int no_merge = getenv("FXTK_SDFNOMERGE") != NULL;
-    if (no_merge || s_cmd_n == 0 || s_cmd[s_cmd_n - 1].pip != 3 || s_cmd[s_cmd_n - 1].tex != -1) {
+    if (no_merge || !cmd_can_merge(3, -1)) {
         if (cmd_new(3, -1) < 0) return;
     }
     s_sdf_n++;
@@ -328,7 +342,7 @@ static void emit_round(int x1, int y1, int x2, int y2, int rad, int border, uint
 static void emit_quad(int pip, int tex, float x0, float y0, float x1, float y1,
                       float u0, float v0, float u1, float v1, uint32_t c)
 {
-    if (s_cmd_n == 0 || s_cmd[s_cmd_n - 1].pip != pip || s_cmd[s_cmd_n - 1].tex != tex) {
+    if (!cmd_can_merge(pip, tex)) {   /* v2.4.2: 合并必须同时比较裁剪区, 否则跨区图元被 scissor 裁掉 */
         if (cmd_new(pip, tex) < 0) return;
     }
     if (s_vb_n + 4 > VB_MAX || s_ib_n + 6 > IB_MAX) return;
