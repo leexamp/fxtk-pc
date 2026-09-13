@@ -142,3 +142,11 @@ esp32-smoke:
 package:
 	../tools/package_release.sh
 .PHONY: package
+
+# ---- 取证/调试构建: 探针编进二进制, 不依赖环境变量 ----
+fxtk_sim_dbg: $(SOKOL_CORE) fxtk_sokol_driver.c fxtk_font_stb.c main_sokol.c app.c app_desktop.c raymarch.c gpu_raymarch_stub.c
+	gcc -O0 -g -DFXTK_DEBUG_LOG=1 -DFXTK_DEBUG_LOG_DRV=1 $(INC) $(SOKOL_INC) $(SOKOL_CORE) \
+	    fxtk_sokol_driver.c fxtk_font_stb.c main_sokol.c app.c app_desktop.c raymarch.c \
+	    gpu_raymarch_stub.c -o $@ $(SOKOL_LIBS)
+
+.PHONY: dbg

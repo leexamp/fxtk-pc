@@ -453,6 +453,7 @@ static void px_flush(void)
 
 static int drv_init(void)
 {
+    { extern void fx_debug_log_selftest(void); fx_debug_log_selftest(); }   /* v2.4.2: 取证自检 */
     if (getenv("FXTK_NO_QUADGPU")) fx_sokol_driver.draw_image_quad = NULL;   /* A/B: 强制走 CPU 逆单应 */
     sg_desc desc = {0};
     /* 环境默认值与我们的管线保持一致: 2D UI 不需要深度缓冲。
@@ -728,6 +729,18 @@ static void drv_hold_end(void) {}
 static void drv_fill_rect(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint32_t c)
 {
     if (x0 > x1 || y0 > y1) return;
+    /* v2.4.2 驱动侧取证: 请求矩形 vs 实际发出的四边形 + 顶点/命令区间。
+     * 用于"合法参数却被画成横贯长条"的现象(用户实测: 拖角点出界后出现橙色横带)。 */
+    int dbg = getenv("FXTK_RECTDBG") ? 1 : 0;
+#if FXTK_DEBUG_LOG_DRV
+    dbg = 1;
+#endif
+    if (dbg) {
+        long w = (long)x1 - x0 + 1, h = (long)y1 - y0 + 1;
+        if (w > 400 || h > 400 || (w > 0 && h > 0 && (w / (h ? h : 1) > 20 || h / (w ? w : 1) > 20)))
+            fprintf(stderr, "[drvdbg] fill_rect 请求=(%u,%u)-(%u,%u) %ldx%ld color=%06x vb=%d ib=%d\n",
+                    x0, y0, x1, y1, w, h, c & 0xFFFFFF, s_vb_n, s_ib_n);
+    }
     emit_quad(0, -1, (float)x0, (float)y0, (float)(x1 + 1), (float)(y1 + 1),
               0, 0, 0, 0, 0xFF000000u | (c & 0xFFFFFFu));
 }

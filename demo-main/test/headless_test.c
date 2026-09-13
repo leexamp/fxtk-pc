@@ -461,6 +461,14 @@ int main(void) {
         fx_fill_rect(INT_MIN + 7, 100, INT_MIN - 7, 200);
         fx_draw_rect(INT_MAX, INT_MAX, INT_MIN, INT_MIN);
         fx_draw_line(INT_MIN, 0, INT_MAX, 0);
+        /* 精确回归: 矩形完全落在裁剪区左侧时, 必须【一笔都不画】。
+         * 曾因"裁剪夹取后未再判空区间", x2 保持负值传给驱动的 uint16_t → 65000+ → 横贯整屏的色带。 */
+        long b2 = s_fill_px;
+        fx_fill_rect(-348, 341, -334, 355);
+        fx_draw_rect(-348, 341, -334, 355);
+        long left_out = s_fill_px - b2;
+        if (left_out == 0) printf("  [ok]   裁剪区外的矩形一笔不画 (未发生无符号回绕)\n");
+        else { printf("  [FAIL] 裁剪区外仍画了 %ld 像素(无符号回绕?)\n", left_out); fails++; }
         long added = s_fill_px - before;
         long cap = (long)fx_width() * fx_height() * 3;
         if (added >= 0 && added <= cap) printf("  [ok]   极端坐标填充面积受限 (%ld <= %ld)\n", added, cap);
