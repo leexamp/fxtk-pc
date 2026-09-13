@@ -9,7 +9,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "esp_log.h"
 
 static const char *TAG = "fxtk";
 
@@ -98,7 +97,12 @@ static void ctx_draw_abs(void){ if(!s_ctxpop)return; int x1,y1,x2,y2; fx_widget_
   for(int i=0;i<5;i++){ if(i==s_ctx_hl){fx_set_color(FX_RGB(33,150,243));fx_fill_rect(x1+1,y1+1+i*rh,x2-1,y1+1+i*rh+rh-1);}
     fxtk_draw_text_size(14,x1+6,y1+3+i*rh,s_ctx_items[i], i==s_ctx_hl?FX_WHITE:FX_RGB(40,40,40), i==s_ctx_hl?FX_RGB(33,150,243):FX_WHITE); } }
 typedef struct { fx_widget_t *w; float off, tgt; int last; } fx_scroll_state_t;
-static fx_scroll_state_t s_scroll_pool[8];   /* v2.3.1: unlink_free/fx_init 也要清它, 故随 typedef 前移至此 */
+#ifndef FX_MAX_SCROLL_STATES
+/* v2.4.3: 并发滚动状态数。PC 上原先是硬编码 8 —— 多开几个带滚轮的列表就退化,
+ * 用户看到的是"这个列表滚不动了"。现在可配置, 默认放大到 32; 池满会明确告警(不再是静默失效)。 */
+#define FX_MAX_SCROLL_STATES 32
+#endif
+static fx_scroll_state_t s_scroll_pool[FX_MAX_SCROLL_STATES];   /* v2.3.1: unlink_free/fx_init 也要清它, 故随 typedef 前移至此 */
 static fx_scroll_state_t *scroll_state(fx_widget_t *w);
 static void scroll_drag_to(fx_widget_t *w, int y);
 static void te_sel_para(fx_widget_t*);
@@ -128,7 +132,7 @@ fx_widget_t *fxtk_alloc(void)
             return &s_pool[i];
         }
     }
-    ESP_LOGE(TAG, "widget pool full (%d)!", FX_MAX_WIDGETS);
+    fx_log(FX_LOG_ERROR, "控件池已满 (%d)! 加大 FX_MAX_WIDGETS 或复用控件", FX_MAX_WIDGETS);
     return NULL;
 }
 void fxtk_free(fx_widget_t *w)
@@ -380,7 +384,7 @@ static void layout_children(fx_widget_t *p)
              * 先子后父/名字打错 → 子件永远停在 (0,0,0,0) 且无任何提示) */
             if (!g && c->gname) {
                 g = c->grid_ref = fx_find(c->gname);
-                if (!g) ESP_LOGW(TAG, "grid '%s' not found (widget '%s')", c->gname, c->name);
+                if (!g) fx_log(FX_LOG_WARN, "grid '%s' 不存在(控件 '%s')", c->gname, c->name);
             }
             if (g && g->lines>0 && g->rows>0) {
                 int cw=(g->x2-g->x1+1)/g->rows, ch=(g->y2-g->y1+1)/g->lines;
@@ -672,7 +676,7 @@ void fx_init(const fx_driver_t *drv)
     memset(s_scroll_pool,0,sizeof(s_scroll_pool));
     fxtk_extra_reset();   /* v2.3.1: 清 list/drop 模块静态池与 s_pop 缓存指针 */
     fxtk_pool_reset_count();   /* v2.3: 池已 memset, 存活计数与分配游标同步归零 */
-    fx_layout(); ESP_LOGI(TAG,"fxtk ready: %dx%d",drv->width,drv->height);
+    fx_layout(); fx_log(FX_LOG_INFO, "fxtk ready: %dx%d, 控件 %d", drv->width, drv->height, fxtk_widget_count());
 }
 void fx_poll(void)
 {
@@ -1089,7 +1093,7 @@ static fx_scroll_state_t *scroll_state(fx_widget_t *w)
     for (int i = 0; i < 8; i++)
         if (!s_scroll_pool[i].w) { s_scroll_pool[i].w = w; return &s_scroll_pool[i]; }
     /* v2.3.1: 池满不再静默别名到 [0] (第 9 个控件会和第 1 个互踩), 由调用方退化处理 */
-    ESP_LOGW(TAG, "scroll pool full (>8 concurrent)");
+    fx_log(FX_LOG_WARN, "滚动状态池已满(%d 个并发): 加大 FX_MAX_SCROLL_STATES", FX_MAX_SCROLL_STATES);
     return NULL;
 }
 /* 更新滚动: 返回当前偏移(整数); 滚轮转多少内容滚多少(像素), 停后 25%/帧 收尾
