@@ -1158,6 +1158,8 @@ void fx_fill_quad(const float *xy8)
     }
 }
 
+static void quad_fallback(const fx_image_t *img, const float *xy8);   /* v2.4.2: GPU 路径的退化保护要用到 */
+
 /* 退化四边形回退: 用包围盒矩形映射 (并只告警一次, 不刷屏) */
 static void quad_fallback(const fx_image_t *img, const float *xy8)
 {
@@ -1177,6 +1179,16 @@ static void quad_fallback(const fx_image_t *img, const float *xy8)
 void fx_draw_image_quad(const fx_image_t *img, const float *xy8)
 {
     if (!img || !img->px || !xy8 || img->w <= 0 || img->h <= 0) return;
+
+    /* 【v2.4.2 修复】退化/自交四边形的保护必须放在 GPU 分支【之前】。
+     * 原来这段检查只存在于 CPU 路径: 而 GPU 分支在上面就 return 了 —— 于是自交(蝴蝶形)四边形
+     * 被直接送进顶点着色器, 透视权重(gl_Position.w)爆掉, 表现为"把角点拉出界后出现一条横贯屏幕的色带"
+     * (用户实测截图)。这里先用与 CPU 路径完全相同的判据检查一次: 退化则回退为包围盒矩形映射。 */
+    {
+        static const float u8[8] = { 0, 0, 1, 0, 1, 1, 0, 1 };
+        float Hc[9], Hic[9];
+        if (!fx_quad_homography(u8, xy8, Hc) || !fx_mat3_invert(Hc, Hic)) { quad_fallback(img, xy8); return; }
+    }
 
     /* GPU 路径 (P4: sokol 顶点着色器做透视校正插值) */
     if (!s_offing && s_drv && s_drv->draw_image_quad) {
