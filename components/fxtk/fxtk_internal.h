@@ -11,7 +11,16 @@
 
 /* v2.3.1: 允许 -DFX_MAX_WIDGETS=n 覆盖 (此前源内硬定义, 命令行 -D 会被它覆盖) */
 #ifndef FX_MAX_WIDGETS
-#define FX_MAX_WIDGETS 4096
+/* v2.4.3: 控件池上限。4096 是 ESP 视角的取值; 两端已分化 —— PC 上它是能被真实触发的上限
+ * (演示压测页会顶满, 之后新控件直接创建失败)。PC 放宽到 16384(单控件约 320B ≈ 5MB 静态池, 在 .bss 里),
+ * ESP32 保持 4096; 两端都可用 -DFX_MAX_WIDGETS=N 覆盖。 */
+#if !defined(FX_MAX_WIDGETS)
+#  if defined(ESP_PLATFORM)
+#    define FX_MAX_WIDGETS 4096
+#  else
+#    define FX_MAX_WIDGETS 16384
+#  endif
+#endif
 #endif
 
 #define FX_F_VISIBLE  0x01

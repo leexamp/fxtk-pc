@@ -98,9 +98,14 @@ static void ctx_draw_abs(void){ if(!s_ctxpop)return; int x1,y1,x2,y2; fx_widget_
     fxtk_draw_text_size(14,x1+6,y1+3+i*rh,s_ctx_items[i], i==s_ctx_hl?FX_WHITE:FX_RGB(40,40,40), i==s_ctx_hl?FX_RGB(33,150,243):FX_WHITE); } }
 typedef struct { fx_widget_t *w; float off, tgt; int last; } fx_scroll_state_t;
 #ifndef FX_MAX_SCROLL_STATES
-/* v2.4.3: 并发滚动状态数。PC 上原先是硬编码 8 —— 多开几个带滚轮的列表就退化,
- * 用户看到的是"这个列表滚不动了"。现在可配置, 默认放大到 32; 池满会明确告警(不再是静默失效)。 */
-#define FX_MAX_SCROLL_STATES 32
+/* v2.4.3: 并发滚动状态数。原先是硬编码 8(为 ESP32 省的), 但两端已分化 ——
+ * PC 不必迁就 ESP 的资源约束, 否则用户多开几个带滚轮的列表就会遇到"这个列表滚不动了"这种人为 bug。
+ * PC 默认 64(可用 -DFX_MAX_SCROLL_STATES=N 调), ESP32 仍保持 8; 池满会明确告警。 */
+#  if defined(ESP_PLATFORM)
+#    define FX_MAX_SCROLL_STATES 8
+#  else
+#    define FX_MAX_SCROLL_STATES 64
+#  endif
 #endif
 static fx_scroll_state_t s_scroll_pool[FX_MAX_SCROLL_STATES];   /* v2.3.1: unlink_free/fx_init 也要清它, 故随 typedef 前移至此 */
 static fx_scroll_state_t *scroll_state(fx_widget_t *w);

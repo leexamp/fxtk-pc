@@ -156,7 +156,7 @@ static void on_keys_view(fx_widget_t *w, void *ud) {
 
 /* ================= 页8: 压测 ================= */
 static int s_mv_clicks = 0;
-#define MV_DYN_MAX 4000      /* 对齐控件池余量 (FX_MAX_WIDGETS 4096) */
+#define MV_DYN_MAX 12000   /* v2.4.3: 指针缓存的数组界(PC 端控件池已放宽到 16384); 实际数量仍受画布容量限制 */
 static int s_mv_extra = 0;   /* 动态增加的按钮数 */
 static fx_widget_t *s_dyn[MV_DYN_MAX];   /* 指针缓存, 免每帧 fx_find 线性扫描 */
 static void on_mv_click(fx_widget_t *w, void *ud) {

@@ -20,8 +20,13 @@ static fx_color_t ex_darken(fx_color_t c)
 {   int r=(c>>16)&0xFF, g=(c>>8)&0xFF, b=c&0xFF;
     return (fx_color_t)(((r*3/4)<<16)|((g*3/4)<<8)|(b*3/4)); }
 #ifndef FX_MAX_EXTRA_WIDGETS
-/* v2.4.3: 列表/下拉这类"扩展控件"的并发槽位。原先硬编码 8, 超出后控件静默失效。 */
-#define FX_MAX_EXTRA_WIDGETS 32
+/* v2.4.3: 列表/下拉这类"扩展控件"的并发槽位。原先硬编码 8(ESP 视角)。两端已分化:
+ * PC 默认 64, ESP32 仍 8; 超出会明确告警而不是静默失效。 */
+#  if defined(ESP_PLATFORM)
+#    define FX_MAX_EXTRA_WIDGETS 8
+#  else
+#    define FX_MAX_EXTRA_WIDGETS 64
+#  endif
 #endif
 static ex_slot_t s_ex[FX_MAX_EXTRA_WIDGETS];
 #if FXTK_WIDGET_DROP
