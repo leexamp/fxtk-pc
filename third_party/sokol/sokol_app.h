@@ -13762,11 +13762,43 @@ _SOKOL_PRIVATE void _sapp_x11_on_keypress(XEvent* event) {
     if (key != SAPP_KEYCODE_INVALID) {
         _sapp_x11_key_event(SAPP_EVENTTYPE_KEY_DOWN, key, repeat, mods);
     }
-    KeySym keysym;
-    XLookupString(&event->xkey, NULL, 0, &keysym, NULL);
-    int32_t chr = _sapp_x11_keysym_to_unicode(keysym);
-    if (chr > 0) {
-        _sapp_x11_char_event((uint32_t)chr, repeat, mods);
+    /* ===== 本项目本地修改: X11 输入法(XIM)支持 =====
+     * 上游 sokol_app 从不创建输入上下文, 只用 XLookupString(仅 Latin-1), 所以 fcitx/ibus 无法组字。
+     * 这里惰性创建 XIC(函数内 static)并改用 Xutf8LookupString: 组字结果是 UTF-8, 逐码点仍走原
+     * CHAR 事件通道 —— 上层驱动无需改动。没有输入法时 XOpenIM 返回 NULL, 完全退回原路径。 */
+    static XIM _sapp_xim = 0;
+    static XIC _sapp_xic = 0;
+    static int _sapp_x11_im_tried = 0;
+    if (!_sapp_x11_im_tried) {
+        _sapp_x11_im_tried = 1;
+        _sapp_xim = XOpenIM((Display*)sapp_x11_get_display(), NULL, NULL, NULL);
+        if (_sapp_xim) {
+            _sapp_xic = XCreateIC(_sapp_xim, XNInputStyle, XIMPreeditNothing | XIMStatusNothing,
+                                  XNClientWindow, (Window)sapp_x11_get_window(),
+                                  XNFocusWindow, (Window)sapp_x11_get_window(), NULL);
+            if (_sapp_xic) XSetICFocus(_sapp_xic);
+        }
+    }
+    if (_sapp_xic) {
+        char ubuf[64]; Status st = 0; KeySym ks = 0;
+        int n = Xutf8LookupString(_sapp_xic, &event->xkey, ubuf, (int)sizeof(ubuf) - 1, &ks, &st);
+        if (n > 0 && (st == XLookupChars || st == XLookupBoth)) {
+            ubuf[n] = 0;
+            for (const char *q = ubuf; *q; ) {
+                int adv = 1; uint32_t cp = (uint8_t)*q;
+                if (cp >= 0xF0)      { cp &= 0x07; adv = 4; }
+                else if (cp >= 0xE0) { cp &= 0x0F; adv = 3; }
+                else if (cp >= 0xC0) { cp &= 0x1F; adv = 2; }
+                for (int i = 1; i < adv && q[i]; i++) cp = (cp << 6) | ((uint8_t)q[i] & 0x3F);
+                if (cp > 0) _sapp_x11_char_event(cp, repeat, mods);
+                q += adv;
+            }
+        }
+    } else {
+        KeySym keysym;
+        XLookupString(&event->xkey, NULL, 0, &keysym, NULL);
+        int32_t chr = _sapp_x11_keysym_to_unicode(keysym);
+        if (chr > 0) _sapp_x11_char_event((uint32_t)chr, repeat, mods);
     }
 }
 
