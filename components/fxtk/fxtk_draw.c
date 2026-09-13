@@ -540,8 +540,22 @@ void fx_draw_vline(int x, int y1, int y2)
 
 static void fx_draw_line_plain(int x1, int y1, int x2, int y2);
 
+/* v2.4.2 修复(用户实测"拖出屏幕后窗口布满黄线"): 图元入口统一钳制坐标。
+ * 起因: 调用者算出退化坐标(NaN/inf 转 int 会得到 INT_MIN/INT_MAX), 随后的 "x-7 / x+7" 发生整数溢出,
+ * 交换后变成 "从 INT_MIN 到 INT_MAX" 的巨大区间 → 钳到裁剪后就是横贯整屏的色带, 每个手柄一条、每帧重画。
+ * 在入口处把坐标夹到 ±32767, 之后所有算术都不可能溢出; 屏幕内的正常绘制完全不受影响。 */
+#define FX_COORD_LIMIT 32767
+static int fx_clamp_coord(int v)
+{
+    if (v < -FX_COORD_LIMIT) return -FX_COORD_LIMIT;
+    if (v >  FX_COORD_LIMIT) return  FX_COORD_LIMIT;
+    return v;
+}
+
 void fx_draw_line(int x1, int y1, int x2, int y2)
 {
+    x1 = fx_clamp_coord(x1); y1 = fx_clamp_coord(y1);
+    x2 = fx_clamp_coord(x2); y2 = fx_clamp_coord(y2);
     if (s_xf_active) {   /* v2.4: 变换端点后走原路径 */
         float ax, ay, bx, by;
         fx_canvas_transform_point((float)x1, (float)y1, &ax, &ay);
@@ -587,6 +601,8 @@ static void fx_draw_line_plain(int x1, int y1, int x2, int y2)
 
 void fx_draw_rect(int x1, int y1, int x2, int y2)
 {
+    x1 = fx_clamp_coord(x1); y1 = fx_clamp_coord(y1);
+    x2 = fx_clamp_coord(x2); y2 = fx_clamp_coord(y2);
     if (s_aa && s_offing) {   /* v2.2 抗锯齿: 四条边各用 AA 线段 */
         aa_line(x1, y1, x2, y1, s_color); aa_line(x1, y2, x2, y2, s_color);
         aa_line(x1, y1, x1, y2, s_color); aa_line(x2, y1, x2, y2, s_color);
@@ -600,6 +616,8 @@ int fxtk_drv_width(void) { return s_drv->width; }
 int fxtk_drv_height(void) { return s_drv->height; }
 void fx_fill_rect(int x1, int y1, int x2, int y2)
 {
+    x1 = fx_clamp_coord(x1); y1 = fx_clamp_coord(y1);
+    x2 = fx_clamp_coord(x2); y2 = fx_clamp_coord(y2);
     if (s_xf_active) {   /* v2.4: 变换生效 → 变实心四边形填充 (旋转/斜切矩形) */
         float xy8[8];
         xf_rect_corners(x1, y1, x2, y2, xy8);
@@ -687,6 +705,8 @@ void fx_fill_rect_gradient(int x1, int y1, int x2, int y2, fx_color_t c1, fx_col
 
 void fx_fill_rect_round(int x1, int y1, int x2, int y2, int r)
 {
+    x1 = fx_clamp_coord(x1); y1 = fx_clamp_coord(y1);
+    x2 = fx_clamp_coord(x2); y2 = fx_clamp_coord(y2);
     if (r <= 0) { fx_fill_rect(x1, y1, x2, y2); return; }
     int w = x2 - x1 + 1, h = y2 - y1 + 1;
     if (r * 2 > w) r = w / 2;
@@ -720,6 +740,8 @@ void fx_fill_rect_round(int x1, int y1, int x2, int y2, int r)
 
 void fx_draw_rect_round(int x1, int y1, int x2, int y2, int r)
 {
+    x1 = fx_clamp_coord(x1); y1 = fx_clamp_coord(y1);
+    x2 = fx_clamp_coord(x2); y2 = fx_clamp_coord(y2);
     if (r <= 0) { fx_draw_rect(x1, y1, x2, y2); return; }
     if (!s_offing && !s_xf_active && s_widget_aa >= 1 && s_drv && s_drv->stroke_rect_round) {
         flush_line();

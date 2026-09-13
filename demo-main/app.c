@@ -136,6 +136,14 @@ static void on_imgq(fx_widget_t *w, void *ud)
         float nx = (float)lx / (float)cw, ny = (float)ly / (float)ch;
         s_quad_n[s_quad_drag * 2]     = 0.5f + (nx - 0.5f) / (s_quad_scale > 0.01f ? s_quad_scale : 1.0f);
         s_quad_n[s_quad_drag * 2 + 1] = 0.5f + (ny - 0.5f) / (s_quad_scale > 0.01f ? s_quad_scale : 1.0f);
+        /* v2.4.2 修复: 拖出屏幕时归一化坐标会跑到很远处, 转像素后可能得到 NaN/inf→INT_MIN 之类的退化值,
+         * 后续 "hx±7" 整数溢出 → 钳到裁剪后变成横贯整屏的色带(用户实测"窗口布满黄线")。
+         * 这里把归一化坐标限制在 [-1.5, 2.5]: 手柄仍能被拖到画布外一段距离(够用), 但永远不会退化。 */
+        for (int c2 = 0; c2 < 2; c2++) {
+            float *v = &s_quad_n[s_quad_drag * 2 + c2];
+            if (*v < -1.5f) *v = -1.5f;
+            if (*v >  2.5f) *v =  2.5f;
+        }
     }
 
     /* 画四边形 (真透视) */

@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <math.h>
+#include <limits.h>   /* v2.4.2: INT_MIN/INT_MAX 极端坐标鲁棒性测试 */
 
 /* ---------- 假驱动 ---------- */
 static int s_hit_cb_ok = 0;          /* 命中回调用触发器 */
@@ -33,7 +34,12 @@ static void drv_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
 static void drv_push_pixels(const uint32_t *px, uint32_t n) {(void)px;(void)n;}
 static void drv_hold_begin(void) {}
 static void drv_hold_end(void) {}
-static void drv_fill_rect(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint32_t c) {(void)x0;(void)y0;(void)x1;(void)y1;(void)c;}
+static long s_fill_px = 0;   /* v2.4.2: 统计填充面积, 用于"极端坐标"鲁棒性测试 */
+static void drv_fill_rect(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint32_t c)
+{
+    (void)c;
+    if (x1 >= x0 && y1 >= y0) s_fill_px += (long)(x1 - x0 + 1) * (long)(y1 - y0 + 1);
+}
 static int  drv_touch_read(int *x, int *y, int *pressed) {(void)x;(void)y;(void)pressed; return 0;}
 static int  drv_key_read(fx_keyev_t *ev) {(void)ev; return 0;}
 static void drv_clip_set(const char *s) {(void)s;}
@@ -445,5 +451,22 @@ int main(void) {
         else { printf("  [FAIL] reset\n"); fails++; }
     }
 
-    printf("== done: %s (%d fail) ==\n", fails ? "FAIL" : "PASS", fails);    return fails ? 1 : 0;
+    /* [n] 极端坐标鲁棒性: 图元入口必须钳制坐标。
+     * 现实缺陷(用户实测): 拖动手柄出界 → 归一化坐标退化 → NaN/inf 转 int 得到 INT_MIN →
+     * 调用方那句 "x-7 / x+7" 整数溢出 → 钳到裁剪后变成横贯整屏的色带("窗口布满黄线")。
+     * 这里验证: 极端坐标下不发生溢出型灾难(面积受限、不崩), UBSan 变体会直接报溢出。 */
+    printf("[14] 极端坐标鲁棒性\n");
+    {
+        long before = s_fill_px;
+        fx_fill_rect(INT_MIN, INT_MIN, INT_MAX, INT_MAX);
+        fx_fill_rect(INT_MIN + 7, 100, INT_MIN - 7, 200);
+        fx_draw_rect(INT_MAX, INT_MAX, INT_MIN, INT_MIN);
+        fx_draw_line(INT_MIN, 0, INT_MAX, 0);
+        long added = s_fill_px - before;
+        long cap = (long)fx_width() * fx_height() * 3;      /* 三次填充最多覆盖三屏 */
+        if (added >= 0 && added <= cap) printf("  [ok]   极端坐标填充面积受限 (%ld <= %ld)\n", added, cap);
+        else { printf("  [FAIL] 极端坐标填充面积失控 %ld\n", added); fails++; }
+    }
+
+    return fails ? 1 : 0;
 }
