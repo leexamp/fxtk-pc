@@ -1362,6 +1362,11 @@ void fxtk_sokol_handle_event(const sapp_event *e)
             q_push_touch_edge(0, 0, 0);
         break;
     case SAPP_EVENTTYPE_CHAR: {
+        /* 【v2.4.1 修复】Ctrl 组合键不是文本。sokol_app 对 Ctrl+A 这类组合键【也会】发一个 CHAR 事件
+         * (char='a' 且 modifiers 里带 CTRL), 而框架把"无 mod 的字符"当普通输入插入 —— 于是
+         * Ctrl+A 先全选、紧接着被插入的 'a' 覆盖掉, 用户看到的就是"全选了结果全没了"。
+         * SDL 不会这样(SDL 不给 Ctrl 组合发 SDL_TEXTINPUT), 所以这里按 SDL 语义过滤掉。 */
+        if ((e->modifiers & SAPP_MODIFIER_CTRL) || e->char_code < 32) break;
         uint32_t cp = e->char_code;
         char *o = k.utf8;
         if (cp < 0x80) { o[0] = (char)cp; o[1] = 0; }
