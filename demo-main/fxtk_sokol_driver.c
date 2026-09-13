@@ -906,9 +906,14 @@ static void drv_draw_image_quad(const uint32_t *px, int w, int h, const float *x
     cm->count += 6;
 }
 
-/* v2.4.1: 输入法候选窗位置 → 交给裁剪版 sokol_app 更新 XIM 的 XNSpotLocation */
+/* v2.4.1: 输入法候选窗位置 → 交给裁剪版 sokol_app 更新 XIM 的 XNSpotLocation。
+ * Windows/D3D 侧没有 XIM, 做成空操作(否则会引用到不存在的 X11 符号, 交叉编译直接失败)。 */
+#if defined(_WIN32)
+static void drv_ime_pos(int x, int y) { (void)x; (void)y; }
+#else
 extern void sapp_x11_set_ime_spot(int x, int y);
 static void drv_ime_pos(int x, int y) { sapp_x11_set_ime_spot(x, y); }
+#endif
 
 static int drv_touch_read(int *x, int *y, int *pressed)
 {
