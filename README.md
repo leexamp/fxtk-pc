@@ -1,4 +1,4 @@
-# fxtk — 轻量GUI框架 (v2.3)
+# fxtk — 轻量GUI框架 (v2.4)
 
 <p>
   <img alt="version" src="https://img.shields.io/badge/version-v2.3-blue">
@@ -20,6 +20,24 @@
 
 完整演示（12 页）见下方 demo 截图：
 ![graph](graph.png) ![image](image.png) ![rending](rending.png) ![texting](texting.png)
+
+## v2.4 新增
+
+- **默认后端换成 sokol**(OpenGL), SDL2 降为遗留对照。因此 Windows 版是**单 exe、无第三方 DLL**;
+  SDL 代码保留只为"无头假驱动"给基准与金图回归用(CI 没有显示器)。
+- **GPU 真透视四边形形变** `fx_draw_image_quad()`:每角透视权重进 `gl_Position.w`, 单次 draw 即透视正确
+  —— 没有"两个三角形各做仿射"的对角缝。图片页可直接玩:导入 → 缩放 → 拖四角手柄 → 复位。
+- **伪 3D 演示**(图形页第 4 模式):地板/天花板、走廊砖墙、旋转纹理立方体、公告板精灵全部由四边形形变拼出,
+  HUD 显示四边形数 / fps / 走的哪条路径。
+- **GPU 实时光线步进** `fx_raymarch_available()` / `fx_draw_raymarch()`:片元着色器直接算, 不占 CPU 像素、不回读。
+- **设计令牌** `components/fxtk/fxtk_tokens.h`:控件颜色/圆角/留白集中一处, 改一处即可统一换肤。
+- **后端服务层** `fxtk_backends.h`:随机(PCG32 可复现)/时间/路径/文件/图片解码(PNG·JPEG·BMP·GIF·TGA·PNM)/
+  PNG 编码/剪贴板/文件对话框/偏好/能力协商;`-DFXTK_BACKEND_STUB` 提供确定性变体。
+- **canvas 变换栈** `fx_canvas_push_affine/pop_affine` + `fx_fill_quad`:push 后矩形填充变实心四边形、图片走透视。
+- **验证体系**:`make test`(双后端)/ `make golden`(金图, 进 CI)/ `make esp32-smoke`(进 CI)/ `make bench`;
+  截图 `fx_screenshot()` 走驱动的 `read_pixels`, 零外部依赖。
+- 注意:控件层 SDF 抗锯齿目前**默认关闭**(`s_widget_aa = 0`), 可用 `fx_set_widget_aa(1)` 或 `FXTK_AA=1` 开启
+  —— 它在"画布 + 文字 + quadwarp 混排"场景下有一个已知缺陷正在修(详见 CHANGELOG v2.4.1)。
 
 ## 特性
 
@@ -62,21 +80,26 @@ LICENSE            MIT 许可
 ## 快速开始 (Linux)
 
 ```bash
-# 必要依赖(v2.4 起): X11/Xcursor + GL (sokol 后端); SDL2 全家桶仅遗留版 fxtk_sim_sdl 需要
-sudo apt install libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev \
-                 libegl1-mesa-dev libgles2-mesa-dev libx11-dev
+# 必要依赖: X11/Xcursor + GL —— 默认后端是 sokol, 不依赖 SDL2
+sudo apt install libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev
 cd demo-main
-./build.sh                # 编译并运行完整演示 (12 个标签页)
+./build.sh                # 编译并运行完整演示 (12 个标签页, 默认 sokol)
+./build.sh --sdl          # 遗留 SDL 版(需要 SDL2 全家桶), 仅作对照
 ./build_ex.sh ex01_hello  # 运行独立示例
-./make_release.sh         # 打包正式版 fxtk-v2.3.tar.gz
+make package              # 打发布包(源码 + Linux/Win 产物) → dist/pkg/
 ```
 
 也可以用统一入口 `Makefile`（单一源清单）：
 
 ```bash
 cd demo-main
-make                       # 构建完整演示 fxtk_sim
-make test                  # 构建并运行无头单元测试 (无需 SDL/窗口/字体)
+make                       # 构建完整演示 fxtk_sim (sokol, 单文件)
+make fxtk_sim_en           # 英文版
+make test                  # 无头单元测试: 真实后端 + stub 后端各一遍
+make golden                # 金图逐像素回归(画布示例; CI 里跑的就是这个)
+make esp32-smoke           # ESP32 接口级编译冒烟(不需要 ESP-IDF 工具链)
+make bench                 # 渲染吞吐基准(无头, 无 vsync)
+make shared                # 打包成动态库(exe 只留 app 层, 体积更小)
 make ex01_hello            # 构建指定示例
 make clean
 ```
@@ -86,21 +109,26 @@ make clean
 - 无头单元测试 `demo-main/test/headless_test.c` 用一个假 `fx_driver_t` 直接驱动核心库，
   验证 **pixel/percent/grid 布局**、**press/release 命中回调**、**value 读写**、
   **控件计数** 与 **fx_find/fx_delete**，不初始化 SDL/窗口/字体。
-- CI (`.github/workflows/ci.yml`) 在 Linux 上构建 demo + 跑测试 + 构建示例，
-  并用 vendored `third_party/SDL2-win` 做 Windows 交叉编译。
+- 回归与冒烟:`tools/golden.sh`(金图逐像素)、`tools/esp32_smoke.sh`(ESP32 接口级)、
+  `tools/package_release.sh`(发布打包)、`tools/gallery.sh`(截图画廊)。
+- CI (`.github/workflows/ci.yml`) 三个 job:Linux(构建 + 单测 + 示例 + **画布金图**)、
+  `windows-cross`(交叉编译单 exe)、`esp32-smoke`(接口级冒烟)。
 
 ## 演示页速览
 
-波形(动画画布) / 图形(旋转贴图+矢量动效) / 控件(网格键盘) / 图片(缩放/切换) /
-3D(CPU 多线程光追, 超频+GPU 开关) / 输入(文本框全家桶) / 画板(鼠标作画) /
-键鼠(事件监视) / 压测(动态控件生长) / 滚动(长列表+滚动条) / 组件(文件浏览器/名字编辑器/可拖动组件/颜色选择器) / 粒子(万级图元)
+波形(动画画布) / 图形(矢量动效 + **第 4 模式: 伪 3D 场景**) / 控件(网格键盘 + **卡片容器**) /
+图片(**导入图片 + 缩放 + 四角手柄做真透视形变**) / 3D(**GPU 片元着色器光追**, HUD 显示走 GPU 还是 CPU) /
+输入(文本框全家套) / 画板(鼠标作画) / 键鼠(事件监视) / 压测(动态控件生长) /
+滚动(长列表+滚动条) / 组件(文件浏览器/名字编辑器/可拖动组件/颜色选择器) / 粒子(万级图元)
 
 ## 发布
 
 ```bash
-cd demo-main
-./make_release.sh      # → fxtk-v2.3.tar.gz           (源码包: 核心库+模拟器+全部示例+文档/许可/CI)
-./make_bin_release.sh  # → dist/fxtk-v2.3-bin-*.tar.gz/.zip (Linux demo + Windows 交叉二进制)
+cd demo-main && make package     # 或 ../tools/package_release.sh
+# → dist/pkg/fxtk-<版本>-src.tar.gz          纯源码(git archive, 无产物) → 传 GitHub
+#   dist/pkg/fxtk-<版本>-linux-x86_64.tar.gz 中英双语单文件 + 文档 + 展示图
+#   dist/pkg/fxtk-<版本>-win-x86_64.zip      中英双语单 exe(无第三方 DLL)
+#   dist/pkg/fxtk-<版本>-linux-shared.tar.gz exe + libfxtk.so + libfxtk_sokol.so
 ```
 
 ## 文档
