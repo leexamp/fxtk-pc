@@ -27,3 +27,6 @@ demo-main/fxtk_sim_sokol
 demo-main/.fuse_hidden*
 *.o
 *.ppm
+dist/pkg/
+dist/win_sokol/
+dist/shared/

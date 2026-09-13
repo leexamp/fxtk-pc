@@ -137,3 +137,8 @@ shared:
 esp32-smoke:
 	../tools/esp32_smoke.sh
 .PHONY: esp32-smoke
+
+# ---- 打发布包 ----
+package:
+	../tools/package_release.sh
+.PHONY: package
