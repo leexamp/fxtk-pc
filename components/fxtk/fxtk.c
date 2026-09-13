@@ -709,8 +709,23 @@ void fx_poll(void)
             /* v2.4.2 修复(用户反馈"悬停效果没了"): 原来只在指针【按住】时才调 fx_touch_move,
              * 而上下文菜单的悬停高亮就写在这个函数里 —— 于是"只把鼠标移上去"永远不会高亮。
              * 单纯移动也应当走这条路(拖拽类逻辑各自有 pressed 门闩, 不会误触发)。 */
+            /* v2.4.2: 分支顺序很关键 —— 释放必须排在"移动"之前判断,
+             * 否则释放事件会被移动分支吞掉, fx_touch_release 永远不执行, 点击就永远完不成
+             * (曾因此导致"标签页无法切换"的回归, 用户实测反馈)。 */
+            else if (!p && s_touch_prev) fx_touch_release(x,y);
             else if (s_touch_prev) fx_touch_move(x,y);
-            else if (!p && s_touch_prev) fx_touch_release(s_last_tx,s_last_ty);
+            else if (s_ctx_open && s_ctxpop) {
+                /* 未按下时的移动: 只做上下文菜单的悬停高亮(用户反馈"悬停效果没了")。
+                 * 单独放在这里而不是走 fx_touch_move, 避免干扰点击判定与各拖拽状态机。 */
+                int cx1,cy1,cx2,cy2; fx_widget_rect(s_ctxpop,&cx1,&cy1,&cx2,&cy2);
+                int hl=-1;
+                if (x>=cx1&&x<=cx2&&y>=cy1&&y<=cy2) {
+                    hl=(y-cy1)/((cy2-cy1)/5);
+                    if (hl<0) hl=0;
+                    if (hl>4) hl=4;
+                }
+                if (hl!=s_ctx_hl) { s_ctx_hl=hl; fx_repaint(); }
+            }
             s_touch_prev=p;
             /* 调试文本固定宽度, 仅内容变化才更新: 避免每帧生成新纹理挤爆缓存 */
             if (s_tdbg_on) {
