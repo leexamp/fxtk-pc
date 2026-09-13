@@ -1,6 +1,7 @@
 /* fxtk_extra.c — 列表/下拉 终版: 弹层对象池(零分配/零布局抖动) + 不越界+滚动 */
 #define _POSIX_C_SOURCE 200809L   /* 让 <string.h> 暴露 strdup (严格 -std 下会隐式声明) */
 #include "fxtk.h"
+#include "fxtk_tokens.h"
 #include "fxtk_internal.h"
 #include "fxtk_desktop.h"
 #include <stdlib.h>
@@ -30,8 +31,13 @@ if (!getenv("FXTK_COMPACT")&&rh>32)rh=32; return rh; }
 #if FXTK_WIDGET_LIST
 static void ex_draw_list(ex_slot_t *s, int cw, int ch)
 {
-    fx_set_color(s->w?s->w->bg:FX_WHITE); fx_fill_rect(0,0,cw-1,ch-1);
-    fx_set_color(FX_RGB(150,150,150)); fx_draw_rect(0,0,cw-1,ch-1);
+    /* P5 审美迭代 5/9(列表/下拉): 外框与行高亮原先都是硬直角, 且选中行从 x=1 铺到 cw-2
+     * (紧贴外框, 视觉上"顶格"); 与其它控件的圆角语言也不一致。改为圆角外框 + 内缩的圆角行高亮,
+     * 调用次数不变(填充/描边各 1 次, 只是换成圆角版本)。 */
+    int lr = FX_TOK_RADIUS_S;
+    { if (lr > ch/2) lr = ch/2; if (lr > cw/2) lr = cw/2; }
+    fx_set_color(s->w?s->w->bg:FX_WHITE); fx_fill_rect_round(0,0,cw-1,ch-1,lr);
+    fx_set_color(FX_TOK_LIST_EDGE);       fx_draw_rect_round(0,0,cw-1,ch-1,lr);
     int vis=(ch-2)/ex_rh(s);
     if (vis>s->n-s->scroll) vis=s->n-s->scroll;
     for(int i=0;i<vis;i++){
@@ -40,10 +46,18 @@ static void ex_draw_list(ex_slot_t *s, int cw, int ch)
         int mx,my,mp; fx_touch_state(&mx,&my,&mp);
         int hov=-1; { int lx=mx-s->w->x1, ly=my-s->w->y1;
         if (lx>=0&&lx<cw&&ly>=1&&ly<ch-1) hov=(ly-1)/ex_rh(s)+s->scroll; }
-        if(idx==s->sel){ fx_set_color(FX_RGB(33,150,243)); fx_fill_rect(1,y,cw-2,y+ex_rh(s)-1); }
-        else if(idx==hov){ fx_set_color(FX_RGB(200,220,245)); fx_fill_rect(1,y,cw-2,y+ex_rh(s)-1); }
-        fx_draw_text_c(4,y+3,s->items[idx], idx==s->sel?FX_WHITE:FX_RGB(40,40,40),
-                       idx==s->sel?FX_RGB(33,150,243):FX_WHITE);
+        /* 行高亮: 内缩 2px 的圆角胶囊, 不再顶格贴住外框(与标签页选中态同一套语言) */
+        int hy0 = y, hy1 = y + ex_rh(s) - 1;
+        int sel_or_hov = (idx==s->sel) ? 1 : (idx==hov ? 2 : 0);
+        if (sel_or_hov) {
+            int hr = FX_TOK_RADIUS_S; int hh = hy1 - hy0 + 1;
+            if (hr > hh/2 - 1) hr = hh/2 - 1; if (hr < 2) hr = 2;
+            fx_set_color(sel_or_hov==1 ? FX_TOK_PRIMARY : FX_TOK_LIST_HOVER);
+            fx_fill_rect_round(3, hy0 + 1, cw - 6, hy1 - 1, hr);
+        }
+        fx_draw_text_c(FX_TOK_TEXT_PAD_X, y+3, s->items[idx],
+                       idx==s->sel ? FX_TOK_ON_PRIMARY : FX_TOK_TEXT,
+                       idx==s->sel ? FX_TOK_PRIMARY   : (idx==hov ? FX_TOK_LIST_HOVER : (s->w?s->w->bg:FX_WHITE)));
     }
     { int mx,my,mp; fx_touch_state(&mx,&my,&mp); int hv=-1; int lx=mx-s->w->x1, ly=my-s->w->y1;
     if (lx>=0&&lx<cw&&ly>=1&&ly<ch-1) hv=(ly-1)/ex_rh(s)+s->scroll;
@@ -53,8 +67,8 @@ static void ex_draw_list(ex_slot_t *s, int cw, int ch)
         int th=(ch-2)*(ch-2)/total;
         if (th<12)th=12;
         int ty=1+(long)s->scroll*ex_rh(s)*(ch-2-th)/(total-(ch-2));
-        fx_set_color(FX_GRAY);  fx_fill_rect(cw-4,1,cw-2,ch-2);
-        fx_set_color(FX_LGRAY); fx_fill_rect(cw-4,ty,cw-2,ty+th);
+        fx_set_color(FX_TOK_SCROLL_TRACK); fx_fill_rect(cw-4,1,cw-2,ch-2);
+        fx_set_color(FX_TOK_SCROLL_THUMB); fx_fill_rect(cw-4,ty,cw-2,ty+th);
     }
 }
 static void ex_list_cb(fx_widget_t *w, void *ud)

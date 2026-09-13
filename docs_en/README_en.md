@@ -86,3 +86,21 @@ read/write, widget counting, `fx_find`/`fx_delete`, and the v2.2 canvas API.
 ## License
 
 MIT.
+
+## Backends (v2.4)
+
+**sokol (OpenGL) is the default and the only actively developed PC backend**; SDL2 is legacy.
+
+| Target | Backend | Purpose |
+|---|---|---|
+| `make` / `make fxtk_sim` | sokol | default demo |
+| `make fxtk_sim_en` | sokol | English demo |
+| `make fxtk_sim_sdl` / `_sdl_en` | SDL2 (legacy) | comparison only |
+
+SDL2 is still in the tree on purpose: `test/bench` and `tools/golden.sh` rely on
+`SDL_VIDEODRIVER=dummy` for deterministic headless rendering (CI has no display and
+sokol needs a real GL context). Shipping artifacts are always sokol — which is also
+what makes the single-file Windows build possible (system DLLs only).
+
+Measurements on this machine (headless, no vsync): stress page saturated at
+2819 widgets / 1920x1080 → **9.0–9.3 ms/frame ≈ 107–111 fps**; 1235 widgets / 1280x720 → 230 fps.

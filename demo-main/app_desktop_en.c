@@ -280,7 +280,7 @@ static void on_fs_view(fx_widget_t*w,void*ud){ (void)w;(void)ud;
         if(hov && !sel){ fx_set_color(FX_BTN_BLUE); fx_draw_rect(2,y,cw-2,y+rh-2); }
         char nm[64]; strncpy(nm,s_ent[i].name,63); nm[63]=0; if(fx_text_width(nm)>cw/2-14){ nm[cw/2/2-4]=0; strcat(nm,".."); }
         fxtk_draw_text_size(15,6,y,nm,sel?FX_WHITE:c,sel?FX_BTN_BLUE:FX_RGB(250,250,250));
-        char sz[32]; snprintf(sz,sizeof(sz),"%ld",s_ent[i].size); fxtk_draw_text_size(15,cw/2,y,sz,sel?FX_WHITE:c,sel?FX_BTN_BLUE:FX_RGB(250,250,250));
+        char sz[32]; snprintf(sz,sizeof(sz),"%lld",s_ent[i].size); fxtk_draw_text_size(15,cw/2,y,sz,sel?FX_WHITE:c,sel?FX_BTN_BLUE:FX_RGB(250,250,250));
         fxtk_draw_text_size(15,cw*3/4,y,s_ent[i].date,sel?FX_WHITE:c,sel?FX_BTN_BLUE:FX_RGB(250,250,250)); }
     /* scrollbar */
     if(maxsc>0){ fx_set_color(FX_RGB(224,224,224)); fx_fill_rect(tx,TOP,cw-2,ch-1);
@@ -291,7 +291,7 @@ static void on_fs_view(fx_widget_t*w,void*ud){ (void)w;(void)ud;
     fx_set_color(FX_GRAY); fx_draw_vline(cw/2,22,ch-1); fx_draw_vline(cw*3/4,22,ch-1); fx_draw_rect(0,0,cw-1,ch-1);
     /* hover tooltip (full name/size/date), drawn on top */
     if(s_hov>=0 && s_hov<s_n){
-        char tip[160]; snprintf(tip,sizeof(tip),"%s  |  %ld B  |  %s", s_ent[s_hov].name, s_ent[s_hov].size, s_ent[s_hov].date);
+        char tip[160]; snprintf(tip,sizeof(tip),"%s  |  %lld B  |  %s", s_ent[s_hov].name, s_ent[s_hov].size, s_ent[s_hov].date);
         int twd=(fx_text_width(tip)+12<cw-4)?(fx_text_width(tip)+12):(cw-4); int tX=lx+10; int tY=ly+12;
         if(tX+twd>cw)tX=cw-twd-2; if(tX<2)tX=2; if(tY+19>ch)tY=ch-19; if(tY<2)tY=2;   /* follow cursor, in-bounds */
         fx_set_color(FX_RGB(40,40,40)); fx_fill_rect(tX,tY,tX+twd-1,tY+19);

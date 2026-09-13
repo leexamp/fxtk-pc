@@ -10,16 +10,20 @@
  *   gcc -I. -I../components/fxtk \
  *       ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
  *       ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_effects.c \
- *       ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_fs.c \
+ *       ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c \
  *       test/headless_test.c -o test/headless_test -lm
  *   ./test/headless_test
+ * 另有一份 -DFXTK_BACKEND_STUB 变体 (make test 会一并运行)。
  */
 #include "fxtk.h"
 #include "fxtk_desktop.h"
 #include "fxtk_image.h"
+#include "fxtk_backends.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include <assert.h>
+#include <math.h>
 
 /* ---------- 假驱动 ---------- */
 static int s_hit_cb_ok = 0;          /* 命中回调用触发器 */
@@ -233,6 +237,213 @@ int main(void) {
         else printf("  [ok]   无回绕 (%d,%d,%d,%d)\n", a1,b1,a2,b2);
     }
 
-    printf("== done: %s (%d fail) ==\n", fails ? "FAIL" : "PASS", fails);
-    return fails ? 1 : 0;
+    /* 13. v2.4 后端服务层: 随机可复现 / 路径 / 文件 / 图片 / 偏好 / 时间 */
+    printf("[13] fx_backends 服务层 (%s)\n", fx_backend_name());
+    {
+        /* --- 随机: 同种子同序列 (测试与 demo 可复现的基石) --- */
+        uint32_t a[4], b[4];
+        fx_rand_seed(42); for (int i = 0; i < 4; i++) a[i] = fx_rand_u32();
+        fx_rand_seed(42); for (int i = 0; i < 4; i++) b[i] = fx_rand_u32();
+        if (a[0]==b[0] && a[1]==b[1] && a[2]==b[2] && a[3]==b[3]) printf("  [ok]   PCG32 同种子可复现\n");
+        else { printf("  [FAIL] 同种子序列不一致\n"); fails++; }
+        fx_rand_seed(43); uint32_t c0 = fx_rand_u32();
+        if (c0 != a[0]) printf("  [ok]   不同种子序列不同\n");
+        else { printf("  [FAIL] 换种子后首值相同\n"); fails++; }
+        int rng_ok = 1;
+        for (int i = 0; i < 2000; i++) { int v = fx_rand_range(5, 10); if (v < 5 || v > 10) rng_ok = 0; }
+        for (int i = 0; i < 2000; i++) { uint32_t v = fx_rand_below(7); if (v >= 7) rng_ok = 0; }
+        for (int i = 0; i < 1000; i++) { float f = fx_randf(); if (f < 0.0f || f >= 1.0f) rng_ok = 0; }
+        if (rng_ok) printf("  [ok]   rand_range/rand_below/randf 边界正确\n");
+        else { printf("  [FAIL] 随机范围越界\n"); fails++; }
+
+        /* --- 路径工具 --- */
+        char p[256];
+        int pok = 1;
+        fx_path_join(p, sizeof p, "/a/b", "c.txt");   if (strcmp(p, "/a/b/c.txt")) pok = 0;
+        fx_path_join(p, sizeof p, "/a/b/", "c.txt");  if (strcmp(p, "/a/b/c.txt")) pok = 0;
+        fx_path_join(p, sizeof p, "", "c.txt");       if (strcmp(p, "c.txt")) pok = 0;
+        if (strcmp(fx_path_basename("/a/b/c.png"), "c.png")) pok = 0;
+        if (strcmp(fx_path_ext("/a/b/c.png"), ".png")) pok = 0;
+        if (strcmp(fx_path_ext("/a/b/c"), "")) pok = 0;
+        fx_path_dir(p, sizeof p, "/a/b/c.png");       if (strcmp(p, "/a/b")) pok = 0;
+        if (pok) printf("  [ok]   路径工具 join/basename/ext/dir\n");
+        else { printf("  [FAIL] 路径工具\n"); fails++; }
+
+        /* --- 文件读写往返 + 追加 --- */
+        const char *td = getenv("FXTK_TEST_DIR");
+        if (!td || !td[0]) td = "/tmp";
+        char fp[320];
+        fx_path_join(fp, sizeof fp, td, "fxtk_backend_test.bin");
+        const char payload[] = "fxtk-backends-往返";
+        int wok = fx_file_write(fp, payload, (int)sizeof(payload), 0);
+        int sz = 0;
+        char *back = (char *)fx_file_read(fp, &sz);
+        int rok = back && sz == (int)sizeof(payload) && memcmp(back, payload, (size_t)sz) == 0;
+        fx_file_free(back);
+        if (wok && rok && fx_file_exists(fp)) printf("  [ok]   文件写读往返 (%d 字节)\n", sz);
+        else { printf("  [FAIL] 文件写读往返 (w=%d r=%d)\n", wok, rok); fails++; }
+        fx_file_write(fp, "++", 2, 1);
+        long long fsz = 0; fx_file_size(fp, &fsz);
+        if (fsz == (long long)sizeof(payload) + 2) printf("  [ok]   追加写与文件大小\n");
+        else { printf("  [FAIL] 追加/大小 (=%lld)\n", fsz); fails++; }
+
+        /* --- 图片: PNG 存/取往返 (走 vendored stb) --- */
+        unsigned char img[4 * 3 * 4];
+        for (int i = 0; i < 4 * 3; i++) {
+            img[i*4+0] = (unsigned char)(i * 20); img[i*4+1] = 128;
+            img[i*4+2] = (unsigned char)(255 - i * 20); img[i*4+3] = 255;
+        }
+        char ip[320];
+        fx_path_join(ip, sizeof ip, td, "fxtk_backend_test.png");
+        if (fx_img_save_png(ip, img, 4, 3, 4)) {
+            fx_img_t im;
+            int lok = fx_img_load_file(ip, &im);
+            if (lok && im.w == 4 && im.h == 3 && im.channels == 4 &&
+                im.pixels[0] == img[0] && im.pixels[1] == img[1] && im.pixels[2] == img[2]) {
+                printf("  [ok]   PNG 存/取往返 (4x3, %d 通道)\n", im.channels);
+            } else { printf("  [FAIL] PNG 往返 (load=%d)\n", lok); fails++; }
+            if (lok) fx_img_free(&im);
+            if (fx_img_has_file_ext(ip)) printf("  [ok]   图片后缀识别\n");
+            else { printf("  [FAIL] 后缀识别\n"); fails++; }
+            if (!fx_img_has_file_ext("x.txt")) printf("  [ok]   非图片后缀被拒\n");
+            else { printf("  [FAIL] 非图片后缀误判\n"); fails++; }
+        } else { printf("  [FAIL] PNG 写入\n"); fails++; }
+
+        /* --- 偏好往返与持久化 --- */
+        fx_prefs_set("theme", "dark");
+        char v[64];
+        if (fx_prefs_get("theme", v, sizeof v) == 4 && strcmp(v, "dark") == 0) printf("  [ok]   偏好读写\n");
+        else { printf("  [FAIL] 偏好读写\n"); fails++; }
+        if (fx_prefs_save()) {
+            fx_prefs_set("theme", "light");
+            fx_prefs_load();
+            fx_prefs_get("theme", v, sizeof v);
+            if (strcmp(v, "dark") == 0) printf("  [ok]   偏好持久化往返\n");
+            else { printf("  [FAIL] 偏好持久化 (=%s)\n", v); fails++; }
+        } else printf("  [note] 偏好落盘跳过 (目录不可写)\n");
+
+        /* --- 能力协商 / 系统 / 时间 --- */
+        fx_caps_t caps = fx_backend_caps();
+        if (caps.platform && caps.max_texture > 0) {
+            printf("  [ok]   能力: %s gpu=%d aa=%d quad=%d clip=%d maxtex=%d\n",
+                   caps.platform, caps.has_gpu, caps.gpu_aa, caps.quad_warp, caps.clipboard, caps.max_texture);
+        } else { printf("  [FAIL] 能力查询\n"); fails++; }
+        if (fx_cpu_count() >= 1) printf("  [ok]   cpu_count=%d\n", fx_cpu_count());
+        else { printf("  [FAIL] cpu_count\n"); fails++; }
+        uint64_t t0 = fx_time_ms();
+        fx_sleep_ms(2);
+        uint64_t t1 = fx_time_ms();
+        if (t1 >= t0) printf("  [ok]   时间单调 (%llu → %llu ms)\n", (unsigned long long)t0, (unsigned long long)t1);
+        else { printf("  [FAIL] 时间非单调\n"); fails++; }
+
+        /* --- 截图: 无 read_pixels 钩子的驱动必须优雅失败, 不得崩溃 --- */
+        int sc = fx_screenshot("/tmp/fxtk_should_not_exist.png");
+        if (sc == 0) printf("  [ok]   无 read_pixels 钩子时 fx_screenshot 优雅返回 0\n");
+        else { printf("  [FAIL] 假驱动不该能截图\n"); fails++; }
+        if (fx_file_exists("/tmp/fxtk_should_not_exist.png")) { printf("  [FAIL] 失败路径却写了文件\n"); fails++; }
+    }
+
+    /* 14. v2.4 四边形形变: 单应矩阵与逆矩阵 (数学层, 不依赖像素) */
+    printf("[14] 四边形形变 (单应)\n");
+    {
+        const float unit[8] = { 0, 0, 1, 0, 1, 1, 0, 1 };
+        float quad[8] = { 120.0f, 40.0f, 360.0f, 40.0f, 440.0f, 200.0f, 40.0f, 200.0f };  /* 梯形 */
+        float H[9];
+        if (!fx_quad_homography(unit, quad, H)) { printf("  [FAIL] 单应求解失败\n"); fails++; }
+        else {
+            int ok = 1;
+            for (int i = 0; i < 4; i++) {
+                float x = unit[i * 2], y = unit[i * 2 + 1];
+                float w = H[6] * x + H[7] * y + H[8];
+                float dx = (H[0] * x + H[1] * y + H[2]) / w;
+                float dy = (H[3] * x + H[4] * y + H[5]) / w;
+                if (fabsf(dx - quad[i * 2]) > 0.01f || fabsf(dy - quad[i * 2 + 1]) > 0.01f) ok = 0;
+            }
+            if (ok) printf("  [ok]   四角精确映射 (误差 < 0.01px)\n");
+            else { printf("  [FAIL] 角点映射不准\n"); fails++; }
+            float Hi[9];
+            if (fx_mat3_invert(H, Hi)) {
+                int ok2 = 1;
+                for (int i = 0; i < 4; i++) {
+                    float px = quad[i * 2], py = quad[i * 2 + 1];
+                    float w = Hi[6] * px + Hi[7] * py + Hi[8];
+                    float u = (Hi[0] * px + Hi[1] * py + Hi[2]) / w;
+                    float v = (Hi[3] * px + Hi[4] * py + Hi[5]) / w;
+                    if (fabsf(u - unit[i * 2]) > 0.01f || fabsf(v - unit[i * 2 + 1]) > 0.01f) ok2 = 0;
+                }
+                if (ok2) printf("  [ok]   逆单应回代 (四边形 → 单位方)\n");
+                else { printf("  [FAIL] 逆单应不准\n"); fails++; }
+            } else { printf("  [FAIL] 3x3 求逆失败\n"); fails++; }
+        }
+        float degen[8] = { 10, 10, 20, 10, 30, 10, 40, 10 };   /* 共线 = 零面积 */
+        float Hd[9];
+        if (!fx_quad_homography(unit, degen, Hd)) printf("  [ok]   退化四边形被拒绝\n");
+        else { printf("  [FAIL] 退化四边形竟求解成功\n"); fails++; }
+        /* 14b. v2.4 P4: 四角透视权重 (GPU 真透视用) */
+        {
+            float rect[8] = { 0, 0, 100, 0, 100, 60, 0, 60 };          /* 无透视: 权重应全为 1 */
+            float rect_w[4];
+            int ok = fx_quad_corner_weights(rect, rect_w);
+            int all1 = ok && fabsf(rect_w[0]-1)<1e-4f && fabsf(rect_w[1]-1)<1e-4f &&
+                              fabsf(rect_w[2]-1)<1e-4f && fabsf(rect_w[3]-1)<1e-4f;
+            printf("  [%s] 矩形(无透视)权重恒为 1\n", all1 ? "ok" : "FAIL"); if (!all1) fails++;
+
+            /* 梯形(上边收窄 → 有透视): 权重须使【透视插值】与 CPU 单应结果一致。
+             * 取四边形四角坐标平均点 C(屏幕空间), CPU 用 H⁻¹ 求 uv; 另用四角权重做
+             * 透视校正插值(uv = Σλ·uv_i/d_i ÷ Σλ/d_i, λ=1/4) —— 两者应吻合。 */
+            float trap[8] = { 25, 0, 75, 0, 100, 60, 0, 60 };
+            float w4[4]; float H2[9], Hi2[9];
+            int ok2 = fx_quad_corner_weights(trap, w4) && fx_quad_homography(unit, trap, H2) && fx_mat3_invert(H2, Hi2);
+            float cx = (trap[0]+trap[2]+trap[4]+trap[6])*0.25f;
+            float cy = (trap[1]+trap[3]+trap[5]+trap[7])*0.25f;
+            float uu = Hi2[0]*cx + Hi2[1]*cy + Hi2[2];
+            float vv = Hi2[3]*cx + Hi2[4]*cy + Hi2[5];
+            float ww = Hi2[6]*cx + Hi2[7]*cy + Hi2[8];
+            uu /= ww; vv /= ww;
+            const float cu[4] = { 0, 1, 1, 0 }, cv[4] = { 0, 0, 1, 1 };
+            float su = 0, sv = 0, sw = 0;
+            for (int i = 0; i < 4; i++) { float l = 0.25f / w4[i]; su += l*cu[i]; sv += l*cv[i]; sw += l; }
+            su /= sw; sv /= sw;
+            int near_ok = ok2 && fabsf(su-uu) < 2e-3f && fabsf(sv-vv) < 2e-3f;
+            printf("  [%s] 梯形透视权重: 插值 uv=(%.4f,%.4f) vs 单应 uv=(%.4f,%.4f)\n",
+                   near_ok ? "ok" : "FAIL", su, sv, uu, vv);
+            if (!near_ok) fails++;
+        }
+    }
+
+    /* 15. v2.4 canvas 变换栈 (2D 仿射) */
+    printf("[15] canvas 变换栈\n");
+    {
+        float x = 0, y = 0;
+        fx_canvas_transform_point(10, 20, &x, &y);
+        if (x == 10 && y == 20) printf("  [ok]   栈空 = 恒等\n");
+        else { printf("  [FAIL] 空栈应恒等 (%g,%g)\n", x, y); fails++; }
+        fx_canvas_push_affine(1, 0, 0, 1, 5, 7);          /* 平移 (5,7) */
+        fx_canvas_transform_point(10, 20, &x, &y);
+        if (x == 15 && y == 27) printf("  [ok]   平移 (10,20)→(15,27)\n");
+        else { printf("  [FAIL] 平移 (%g,%g)\n", x, y); fails++; }
+        fx_canvas_push_affine(2, 0, 0, 2, 0, 0);          /* 后 push 在外层: 先平移后缩放 */
+        fx_canvas_transform_point(10, 20, &x, &y);
+        if (x == 30 && y == 54) printf("  [ok]   复合语义 (后 push 在外层): (10,20)→(30,54)\n");
+        else { printf("  [FAIL] 复合 (%g,%g)\n", x, y); fails++; }
+        if (fx_transform_depth() == 2) printf("  [ok]   栈深 = 2\n");
+        else { printf("  [FAIL] 栈深 %d\n", fx_transform_depth()); fails++; }
+        fx_canvas_pop_affine(); fx_canvas_pop_affine();
+        if (fx_transform_depth() == 0 && (fx_canvas_transform_point(3, 4, &x, &y), x == 3 && y == 4))
+            printf("  [ok]   pop 到底后恢复恒等\n");
+        else { printf("  [FAIL] pop\n"); fails++; }
+        fx_canvas_push_affine(0, 1, -1, 0, 0, 0);         /* 旋转 90°: (1,0)→(0,1) */
+        fx_canvas_transform_point(1, 0, &x, &y);
+        if (fabsf(x) < 0.001f && fabsf(y - 1) < 0.001f) printf("  [ok]   旋转 90°\n");
+        else { printf("  [FAIL] 旋转 (%g,%g)\n", x, y); fails++; }
+        fx_canvas_pop_affine();
+        for (int i = 0; i < 12; i++) fx_canvas_push_affine(1, 0, 0, 1, 1, 1);   /* 溢出保护 */
+        if (fx_transform_depth() == 8) printf("  [ok]   栈满封顶 8 (覆盖栈顶不崩)\n");
+        else { printf("  [FAIL] 溢出后栈深 %d\n", fx_transform_depth()); fails++; }
+        fx_transform_reset();
+        if (fx_transform_depth() == 0) printf("  [ok]   reset\n");
+        else { printf("  [FAIL] reset\n"); fails++; }
+    }
+
+    printf("== done: %s (%d fail) ==\n", fails ? "FAIL" : "PASS", fails);    return fails ? 1 : 0;
 }

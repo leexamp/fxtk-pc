@@ -1,6 +1,6 @@
 #!/bin/bash
-# fxtk v2.2 源码发布: 打包核心库 + PC 模拟器 + 全部示例(含画布/抗锯齿) + 无头测试 + 文档/许可/CI
-VER=v2.3
+# fxtk v2.4 源码发布: 打包核心库 + PC 模拟器 + 全部示例(含画布/抗锯齿) + 无头测试 + 文档/许可/CI
+VER=v2.4
 OUT=fxtk-$VER
 rm -rf $OUT fxtk-$VER.tar.gz
 mkdir -p $OUT/demo-main/test $OUT/examples/canvas $OUT/docs $OUT/docs_en $OUT/tools $OUT/.github/workflows

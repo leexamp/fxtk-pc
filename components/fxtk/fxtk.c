@@ -3,7 +3,9 @@
  * 直接整文件覆盖, 不要再打补丁!
  */
 #include "fxtk_internal.h"
+#include "fxtk_tokens.h"
 #include "fxtk_desktop.h"
+#include "fxtk_backends.h"   /* v2.4: 截图走 backends 的 PNG 编码 */
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +31,8 @@ static fx_colorx_t s_global_bg = { FX_WINDOW_BG, FX_WINDOW_DARK };
 #define FX_DIRTY_MAX 8
 static int s_dirty[FX_DIRTY_MAX][4];
 static int s_dirty_n = 0;
+/* 绘制重入计数 (声明必须早于使用点: 立即重绘要用它防回调递归爆栈) */
+static int s_draw_depth = 0;
 static int s_tdbg_on = 0;
 static char s_tdbg_str[48] = "touch: -";
 
@@ -111,26 +115,56 @@ static int widget_in_active_page(fx_widget_t *w)
 }
 
 /* ================= 控件池 ================= */
+static int s_alloc_hint = 0;    /* v2.3: 分配游标 —— 旧实现每次都从 0 扫, 压测页每帧建控件时是 O(n²) */
+static int s_widget_live = 0;   /* v2.3: 存活计数 —— 旧 fxtk_widget_count 每次扫 4096 项 (~40μs/次) */
 fx_widget_t *fxtk_alloc(void)
 {
-    for (int i = 0; i < FX_MAX_WIDGETS; i++)
+    for (int k = 0; k < FX_MAX_WIDGETS; k++) {
+        int i = (s_alloc_hint + k) % FX_MAX_WIDGETS;
         if (s_pool[i].type == FX_W_NONE) {
             memset(&s_pool[i], 0, sizeof(s_pool[i]));
+            s_alloc_hint = i;
+            s_widget_live++;
             return &s_pool[i];
         }
+    }
     ESP_LOGE(TAG, "widget pool full (%d)!", FX_MAX_WIDGETS);
     return NULL;
 }
-void fxtk_free(fx_widget_t *w) { if (!w || w == &s_root) return; w->type = FX_W_NONE; }
+void fxtk_free(fx_widget_t *w)
+{
+    if (!w || w == &s_root || w->type == FX_W_NONE) return;
+    s_widget_live--;
+    w->type = FX_W_NONE;
+}
 void fxtk_link(fx_widget_t *parent, fx_widget_t *child)
 { child->parent = parent; child->sibling = parent->child; parent->child = child; }
 void fx_parent(fx_widget_t *p) { s_parent = p; }
-int fxtk_widget_count(void)
+int fxtk_widget_count(void) { return s_widget_live; }
+void fxtk_pool_reset_count(void) { s_widget_live = 0; s_alloc_hint = 0; }   /* fx_init 清池后同步 */
+
+/* v2.4: 截图 —— 驱动回读当前帧, 统一走 backends 的 PNG 编码 (stb, 零额外依赖) */
+int fx_screenshot(const char *path)
 {
-    int n = 0;
-    for (int i = 0; i < FX_MAX_WIDGETS; i++)
-        if (s_pool[i].type != FX_W_NONE) n++;
-    return n;
+    if (!path || !path[0] || !s_drv || !s_drv->read_pixels) return 0;
+    int w = (int)s_drv->width, h = (int)s_drv->height;
+    if (w <= 0 || h <= 0) return 0;
+    uint32_t *px = (uint32_t *)malloc((size_t)w * h * 4);
+    if (!px) return 0;
+    if (!s_drv->read_pixels(px, w, h)) { free(px); return 0; }
+    unsigned char *rgba = (unsigned char *)malloc((size_t)w * h * 4);
+    if (!rgba) { free(px); return 0; }
+    for (int i = 0; i < w * h; i++) {
+        uint32_t c = px[i];
+        rgba[i * 4 + 0] = (unsigned char)((c >> 16) & 0xFF);
+        rgba[i * 4 + 1] = (unsigned char)((c >> 8) & 0xFF);
+        rgba[i * 4 + 2] = (unsigned char)(c & 0xFF);
+        rgba[i * 4 + 3] = 255;
+    }
+    int ok = fx_img_save_png(path, rgba, w, h, 4);
+    free(px);
+    free(rgba);
+    return ok;
 }
 
 /* ================= 属性构造器 ================= */
@@ -183,11 +217,11 @@ fx_widget_t *fx_widget_new_impl(int type, fx_attr_t attrs[])
     case FX_W_CHECKBOX: w->bg = FX_BLACK; break;
     case FX_W_IMAGE: w->bg = FX_BLACK; break;                            /* 图片透明底 */
     case FX_W_GRID: case FX_W_PANEL: case FX_W_TAB: case FX_W_SCROLL: w->bg = FX_RGB(245, 245, 245); w->fg = FX_LGRAY; break;  /* 浅底+浅网格线 */
-    case FX_W_SLIDER: w->bg = FX_RGB(76, 175, 80); w->fg = FX_LGRAY; break;   /* 绿色填充, 浅灰轨道 */
-    case FX_W_PROGRESS: w->bg = FX_RGB(76, 175, 80); w->fg = FX_LGRAY; break;
-    case FX_W_TEXTEDIT: w->bg = FX_BLACK; w->fg = FX_RGB(40, 40, 40); break;  /* 哨兵→绘制时白底黑字 */
-    case FX_W_BUTTON: w->bg = FX_RGB(33, 150, 243); w->fg = FX_WHITE; break;  /* 蓝底白字 */
-    default: w->bg = FX_RGB(33, 150, 243); w->fg = FX_WHITE; break;
+    case FX_W_SLIDER: w->bg = FX_TOK_SUCCESS; w->fg = FX_TOK_MUTED; break;   /* 绿色填充, 浅灰轨道 */
+    case FX_W_PROGRESS: w->bg = FX_TOK_SUCCESS; w->fg = FX_TOK_MUTED; break;
+    case FX_W_TEXTEDIT: w->bg = FX_BLACK; w->fg = FX_TOK_TEXT; break;  /* 哨兵→绘制时白底黑字 */
+    case FX_W_BUTTON: w->bg = FX_TOK_PRIMARY; w->fg = FX_TOK_ON_PRIMARY; break;  /* 蓝底白字 */
+    default: w->bg = FX_TOK_PRIMARY; w->fg = FX_TOK_ON_PRIMARY; break;
     }
     for (int i = 0; attrs[i].tag != FX_A_NONE; i++) {
         switch (attrs[i].tag) {
@@ -482,6 +516,8 @@ redraw_widget_now(te); return; }
     }
 }
 
+static void redraw_region(int x1,int y1,int x2,int y2);   /* 定义在后面: 立即重绘复用它擦背景 */
+
 static void redraw_widget_now(fx_widget_t *w)
 {
     if (!w || !(w->flags & FX_F_VISIBLE)) return;
@@ -489,23 +525,16 @@ static void redraw_widget_now(fx_widget_t *w)
     switch (w->type) {
 #if FXTK_WIDGET_BUTTON || FXTK_WIDGET_SLIDER || FXTK_WIDGET_PROGRESS || FXTK_WIDGET_CHECKBOX
     case FX_W_BUTTON: case FX_W_SLIDER: case FX_W_PROGRESS: case FX_W_CHECKBOX:
-        fx_set_clip(w->x1,w->y1,w->x2,w->y2);
-        switch (w->type) {
-#if FXTK_WIDGET_BUTTON
-        case FX_W_BUTTON: fxtk_draw_button(w); break;
-#endif
-#if FXTK_WIDGET_SLIDER
-        case FX_W_SLIDER: fxtk_draw_slider(w); break;
-#endif
-#if FXTK_WIDGET_PROGRESS
-        case FX_W_PROGRESS: fxtk_draw_progress(w); break;
-#endif
-#if FXTK_WIDGET_CHECKBOX
-        case FX_W_CHECKBOX: fxtk_draw_checkbox(w); break;
-#endif
-        default: break;
+        /* 【v2.4 修复】立即重绘过去是"只设裁剪、直接画", 完全不擦旧像素 —— 于是拖动滑杆
+         * 会沿路留下一串滑块残影(用户报的"脏区未清除"就是这个; 文本光标/进度条同理)。
+         * 现在与脏区路径 redraw_region 完全同语义: 先用窗口背景铺满该矩形, 再重画所有与之
+         * 相交的控件(容器自己会铺自己的底色), 所以放在彩色卡片上的控件也不会被凿出洞。 */
+        if (s_draw_depth > 0) {                 /* 正在绘制 → 只标脏, 防回调递归爆栈 */
+            fx_repaint_rect(w->x1, w->y1, w->x2, w->y2);
+            return;
         }
-        fx_reset_clip(); return;
+        redraw_region(w->x1, w->y1, w->x2, w->y2);
+        return;
 #endif
 #if FXTK_WIDGET_CANVAS
     case FX_W_CANVAS:
@@ -520,7 +549,17 @@ static void redraw_widget_now(fx_widget_t *w)
 }
 
 /* ================= 绘制 ================= */
+/* 重入计数: 绘制期间若控件回调又要求"立即重绘", 只标脏交给本帧统一重绘 ——
+ * 否则会形成 draw_widget → redraw_region → redraw_widget_now → 控件回调(fx_set_value) → draw_widget
+ * 的无限递归, 直接压爆线程栈(压测页 1280x720 实测必崩, Wine 下报的就是 stack overflow)。 */
+static void draw_widget_inner(fx_widget_t *w, int cx1, int cy1, int cx2, int cy2);
 static void draw_widget(fx_widget_t *w, int cx1, int cy1, int cx2, int cy2)
+{
+    s_draw_depth++;
+    draw_widget_inner(w, cx1, cy1, cx2, cy2);
+    s_draw_depth--;
+}
+static void draw_widget_inner(fx_widget_t *w, int cx1, int cy1, int cx2, int cy2)
 {
     if (!(w->flags & FX_F_VISIBLE)) return;
     int x1=w->x1>cx1?w->x1:cx1, y1=w->y1>cy1?w->y1:cy1, x2=w->x2<cx2?w->x2:cx2, y2=w->y2<cy2?w->y2:cy2;
@@ -632,6 +671,7 @@ void fx_init(const fx_driver_t *drv)
     s_ctxpop=NULL; s_ctx_te=NULL; s_ctx_open=0; s_ctx_hl=-1; s_sel_mode=0;
     memset(s_scroll_pool,0,sizeof(s_scroll_pool));
     fxtk_extra_reset();   /* v2.3.1: 清 list/drop 模块静态池与 s_pop 缓存指针 */
+    fxtk_pool_reset_count();   /* v2.3: 池已 memset, 存活计数与分配游标同步归零 */
     fx_layout(); ESP_LOGI(TAG,"fxtk ready: %dx%d",drv->width,drv->height);
 }
 void fx_poll(void)

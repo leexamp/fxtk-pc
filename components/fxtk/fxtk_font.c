@@ -19,6 +19,7 @@ extern void fxtk_put_px(int x, int y, uint32_t c);   /* v2.3.1: 旧声明是 uin
 typedef struct {
     TTF_Font *font;
     char *key;
+    uint32_t hash;   /* v2.3: 键哈希, 命中先比哈希再比字符串 (旧: 每次最多 64 次 strcmp) */
     int w, h;
     SDL_Texture *tex;
     uint32_t age;
@@ -26,14 +27,32 @@ typedef struct {
 static tc_entry_t s_tc[TEXT_CACHE_SIZE];
 static uint32_t s_tc_clock = 0;
 
+/* ---- 字符串/键哈希 (FNV-1a) ---- */
+static uint32_t str_hash(const char *s, uint32_t h)
+{ while (*s) { h ^= (unsigned char)*s++; h *= 16777619u; } return h; }
+static uint32_t tc_keyhash(TTF_Font *f, const char *s, fx_color_t fg, fx_color_t bg)
+{
+    uint32_t h = 2166136261u;
+    h = str_hash(s, h);
+    h = (h ^ (uint32_t)fg) * 16777619u;
+    h = (h ^ (uint32_t)bg) * 16777619u;
+    h = (h ^ (uint32_t)(uintptr_t)f) * 16777619u;
+    return h;
+}
+
 static tc_entry_t *tc_lookup(TTF_Font *font, const char *s, fx_color_t fg, fx_color_t bg)
 {
-    char key[256];
-    snprintf(key, sizeof(key), "%s|%06x|%06x", s, (unsigned)fg, (unsigned)bg);
+    /* v2.3 性能: 先比 32bit 哈希, 只在哈希相同时才构造键串做 strcmp。
+     * 旧实现每次 lookup 都 snprintf + 最多 64 次 strcmp —— 压测下每帧 1276 次文本绘制。 */
+    uint32_t h = tc_keyhash(font, s, fg, bg);
     for (int i = 0; i < TEXT_CACHE_SIZE; i++) {
-        if (s_tc[i].key && s_tc[i].font == font && strcmp(s_tc[i].key, key) == 0) {
-            s_tc[i].age = ++s_tc_clock;
-            return &s_tc[i];
+        if (s_tc[i].key && s_tc[i].hash == h && s_tc[i].font == font) {
+            char key[256];
+            snprintf(key, sizeof(key), "%s|%06x|%06x", s, (unsigned)fg, (unsigned)bg);
+            if (strcmp(s_tc[i].key, key) == 0) {
+                s_tc[i].age = ++s_tc_clock;
+                return &s_tc[i];
+            }
         }
     }
     return NULL;
@@ -86,11 +105,50 @@ void fxtk_font_init(const char *unused_path, int size)
     printf("[font] ALL FAILED!\n");
 }
 
+/* ---- 文本宽度缓存 (v2.3) ----
+ * 旧实现 fx_text_width/fxtk_text_width_size 每次都调 TTF_SizeUTF8; 而按钮/标签每帧都要量文字宽度
+ * (2816 控件压测下每帧 1276 次), 该耗时在 libSDL2_ttf 内部, gprof 看不到却是大头。
+ * 开放寻址哈希表, 查找 ~50ns, 对比 TTF 的微秒级。 */
+#define WC_SIZE 1024
+typedef struct { TTF_Font *f; char *key; uint32_t hash; int w; } wc_entry_t;
+static wc_entry_t s_wc[WC_SIZE];
+static int s_wc_n = 0;
+static void wc_clear(void)
+{ for (int i = 0; i < WC_SIZE; i++) { free(s_wc[i].key); s_wc[i].key = NULL; } s_wc_n = 0; }
+static int wc_get(TTF_Font *f, const char *s, int *w)
+{
+    uint32_t h = str_hash(s, 2166136261u ^ (uint32_t)(uintptr_t)f);
+    for (int i = 0; i < WC_SIZE; i++) {
+        int k = (int)((h + (uint32_t)i) & (WC_SIZE - 1));
+        if (!s_wc[k].key) return 0;
+        if (s_wc[k].hash == h && s_wc[k].f == f && strcmp(s_wc[k].key, s) == 0) { *w = s_wc[k].w; return 1; }
+    }
+    return 0;
+}
+static void wc_put(TTF_Font *f, const char *s, int w)
+{
+    if (s_wc_n * 4 >= WC_SIZE * 3) wc_clear();   /* 负载 >75%: 整体重建 (字符串集通常很小) */
+    uint32_t h = str_hash(s, 2166136261u ^ (uint32_t)(uintptr_t)f);
+    for (int i = 0; i < WC_SIZE; i++) {
+        int k = (int)((h + (uint32_t)i) & (WC_SIZE - 1));
+        if (!s_wc[k].key) {
+            s_wc[k].key = strdup(s);
+            if (!s_wc[k].key) return;
+            s_wc[k].f = f; s_wc[k].hash = h; s_wc[k].w = w; s_wc_n++;
+            return;
+        }
+        if (s_wc[k].hash == h && s_wc[k].f == f && strcmp(s_wc[k].key, s) == 0) { s_wc[k].w = w; return; }
+    }
+}
+
 int fx_text_width(const char *s)
 {
     if (!g_font || !s) return 0;
-    int w, h;
+    int w;
+    if (wc_get(g_font, s, &w)) return w;
+    int h;
     TTF_SizeUTF8(g_font, s, &w, &h);
+    wc_put(g_font, s, w);
     return w;
 }
 
@@ -172,6 +230,7 @@ void fx_draw_text_c(int x, int y, const char *s, fx_color_t fg, fx_color_t bg)
         snprintf(key, sizeof(key), "%s|%06x|%06x", s, (unsigned)fg, (unsigned)bg);
         slot->font = g_font;
         slot->key = strdup(key);
+        slot->hash = tc_keyhash(g_font, s, fg, bg);   /* v2.3: 与 lookup 同步维护 */
         slot->w = w; slot->h = h;
         slot->tex = tex;
         slot->age = ++s_tc_clock;
@@ -188,11 +247,12 @@ void fx_draw_text(int x, int y, const char *s)
 int fx_text_width_n(const char *s, int n)
 {
     if (!s || n <= 0) return 0;
-    char *t = (char *)malloc((size_t)n + 1);
-    if (!t) return 0;   /* v2.3.1: OOM 防护 (ESP32 现实场景) */
+    char sbuf[80];
+    char *t = (n < (int)sizeof(sbuf)) ? sbuf : (char *)malloc((size_t)n + 1);   /* v2.3: 短串免 malloc (逐字符测量路径调用极频繁) */
+    if (!t) return 0;
     memcpy(t, s, (size_t)n); t[n] = 0;
     int w = fx_text_width(t);
-    free(t);
+    if (t != sbuf) free(t);
     return w;
 }
 void fx_draw_text_c_n(int x, int y, const char *s, int n, fx_color_t fg, fx_color_t bg)
@@ -209,7 +269,8 @@ void fx_draw_text_c_n(int x, int y, const char *s, int n, fx_color_t fg, fx_colo
 static struct { int size; TTF_Font *f; } s_fc[FC_N];
 static void tc_drop_font(TTF_Font *ft)
 { for(int i=0;i<TEXT_CACHE_SIZE;i++) if(s_tc[i].font==ft){ if(s_tc[i].tex)SDL_DestroyTexture(s_tc[i].tex);
-if (s_tc[i].key)free(s_tc[i].key); s_tc[i].tex=NULL;s_tc[i].key=NULL;s_tc[i].font=NULL;s_tc[i].age=0; } }
+if (s_tc[i].key)free(s_tc[i].key); s_tc[i].tex=NULL;s_tc[i].key=NULL;s_tc[i].font=NULL;s_tc[i].age=0;s_tc[i].hash=0; }
+  wc_clear();   /* v2.3: 宽度缓存按字体指针索引, 字体销毁后必须失效 (防指针复用读到旧宽度) */ }
 void fxtk_font_set_size(int size)
 {
     TTF_Font *f = (TTF_Font *)fxtk_font_size(size);
@@ -236,7 +297,9 @@ int fxtk_text_width_size(int size, const char *t)
     TTF_Font *f = (TTF_Font *)fxtk_font_size(size);
     int w, h;
     if (!f || !t) return 0;
+    if (wc_get(f, t, &w)) return w;   /* v2.3: 宽度缓存 (旧: 每帧每控件一次 TTF_SizeUTF8) */
     TTF_SizeUTF8(f, t, &w, &h);
+    wc_put(f, t, w);
     return w;
 }
 void fxtk_draw_text_size(int size, int x, int y, const char *t, fx_color_t fg, fx_color_t bg)

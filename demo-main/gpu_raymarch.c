@@ -3,6 +3,7 @@
  * 【v2】拒绝 llvmpipe/softpipe; 默认显示失败时枚举 EGL 硬件设备;
  *      FPS 标签显示真实后端, 不再撒谎。
  */
+#define _GNU_SOURCE   /* v2.3: pthread_timedjoin_np */
 #include "gpu_raymarch.h"
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -10,6 +11,8 @@
 #include <X11/Xlib.h>
 #include <pthread.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <time.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -317,6 +320,11 @@ const char *gpu_raymarch_renderer(void) {
 
 void gpu_raymarch_start(void)
 {
+    /* v2.4: 该通道是"独立 EGL 上下文 + 独立线程"的实验性实现, 在某些 NVIDIA 驱动上
+     * EGL 设备枚举/初始化会直接崩在驱动内部 (libnvidia-glsi/libEGL_nvidia, 实测 SIGSEGV,
+     * 无法在用户态捕获)。v2.4 的 sokol 后端会把光追改成同一上下文的 render pass 从而
+     * 彻底移除本通道; 在那之前默认【关闭】, 需要时用 FXTK_GPU=1 显式开启。 */
+    if (!getenv("FXTK_GPU")) return;
     if (!g_started) {
         g_started = 1;
         atexit(gpu_raymarch_shutdown);   /* v2.3.1: 退出时唤醒 GPU 线程, 不再仅靠 exit(0) 硬杀 */
@@ -325,10 +333,27 @@ void gpu_raymarch_start(void)
 }
 void gpu_raymarch_shutdown(void)
 {
+    static int s_joined = 0;
+    if (s_joined || !g_started) return;
+    s_joined = 1;
     pthread_mutex_lock(&g_mtx);
     g_quit = 1;
     pthread_cond_broadcast(&g_creq);
     pthread_mutex_unlock(&g_mtx);
+    /* v2.3 关键修复: 必须【等】GPU 线程真正退出 EGL 后再让进程继续拆 SDL/驱动。
+     * 旧实现只置 g_quit 就返回 —— 本 atexit 处理器在 SDL_Quit 之前运行(LIFO), 于是
+     * 主线程拆 SDL/GL 的同时 GPU 线程还在驱动内部用 EGL, 驱动的小块堆被破坏, 表现为退出时
+     * glibc 报 "corrupted size vs. prev_size in fastbins"(约 25% 概率, 随负载升高)。
+     * 该损坏在驱动库内部, ASan/TSan 均不可见; gdb 拖慢时序也会掩盖它。 */
+    if (!pthread_equal(g_th, pthread_self())) {
+        /* 限时 join: 正常情况 GPU 线程毫秒级退出; 万一卡在驱动内部, 最多等 2s 就走,
+         * 绝不把关窗口变成挂死。 */
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec += 2;
+        if (pthread_timedjoin_np(g_th, NULL, &ts) != 0)
+            fprintf(stderr, "[gpu] shutdown: join timeout (驱动内部卡住?), 直接退出\n");
+    }
 }
 void gpu_raymarch_render(uint32_t *px, int w, int h, float time)
 {

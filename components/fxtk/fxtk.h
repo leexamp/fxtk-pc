@@ -5,7 +5,7 @@
 #define FXTK_H
 
 /* 框架版本 (发布标记) */
-#define FXTK_VERSION "2.3"
+#define FXTK_VERSION "2.4"   /* 窗口标题/文档统一取此值, 避免各处手写版本号漂移 */
 
 #include <stdint.h>
 #include <stddef.h>
@@ -207,7 +207,18 @@ void fx_fill_arc(int cx, int cy, int r, int a1, int a2);
 void fx_draw_triangle(int x1, int y1, int x2, int y2, int x3, int y3);
 void fx_fill_triangle(int x1, int y1, int x2, int y2, int x3, int y3);
 void fx_draw_polygon(const int16_t *pts, int n);
-void fx_set_aa(int on);   /* 抗锯齿开关 (默认关): 开时 line/circle/rect 等矢量图元在离屏/帧缓冲路径上做边缘平滑 */
+void fx_set_aa(int level);
+/* ================= v2.4 抗锯齿分两层, 互不牵连 =================
+ *  ① 画布 CPU AA (s_aa): 开时 line/circle/rect 等矢量图元在【离屏画布】上做边缘混合。
+ *     代价大(强制离屏 + 逐像素混合, v2.2 实测 ~10ms/帧级), 因此默认仍关; fx_set_aa(level≥1) 打开。
+ *  ② 控件/图元 GPU AA (s_widget_aa): 圆角矩形/描边由驱动的 SDF 钩子一次画完, 片元按到边界距离
+ *     求覆盖度 → 边缘天然平滑, 且比逐行填充更快。默认档 1(有钩子时开)。
+ *  档位: 0=关, 1=SDF(默认), 2=1+图元羽化(线段/圆/弧)。掉帧时由驱动调 fx_aa_autodegrade() 降档。
+ *  fx_set_aa(level) 同时设置两层(保持 v2.2 兼容); 只想动 GPU 层用 fx_set_widget_aa()。 */
+void fx_set_widget_aa(int level);   /* 只设 GPU 控件层档位 0/1/2 */
+int  fx_widget_aa_level(void);
+int  fx_aa_autodegrade(void);       /* 供驱动在掉帧时调用: 降一档并返回新档位(已到 0 则返回 0) */
+int  fxtk_aa(void);                 /* 画布 CPU AA 当前开关 */
 int  fxtk_aa(void);
 void fx_fill_polygon(const int16_t *pts, int n);
 void fx_draw_text(int x, int y, const char *s);
@@ -218,6 +229,28 @@ void fx_canvas_end(void);
 int  fx_canvas_enable_buf(fx_widget_t *cv);
 void fx_canvas_size(fx_widget_t *cv, int *w, int *h);   /* 画布本地宽高 (canvas 回调内取 cw/ch) */
 void fx_canvas_clear(fx_widget_t *cv, fx_color_t color); /* 一键清空画布到 color (省去重复铺底样板) */
+
+/* ================= v2.4 canvas 变换栈 (2D 仿射) =================
+ * push 后, 立即模式图元的坐标会经过变换:
+ *   像素/线段 → 端点变换; 矩形填充 → 实心四边形(可旋转/斜切); 图片 → 透视四边形。
+ * 语义: p' = M·p, M 为 [[a,c,e],[b,d,f],[0,0,1]]; 连续 push 会与栈顶复合(新变换后应用)。
+ * 栈深 8(满则覆盖栈顶); 每帧自动复位, 但成对 push/pop 仍是好习惯。
+ * 例: 旋转 θ → fx_canvas_push_affine(cos,-sin 等); 平铺 → 多次 push 平移后画图再 pop。 */
+void fx_canvas_push_affine(float a, float b, float c, float d, float e, float f);
+void fx_canvas_pop_affine(void);
+void fx_transform_reset(void);
+int  fx_transform_depth(void);
+/* 把点过一遍当前变换 (栈空则原样返回) */
+void fx_canvas_transform_point(float x, float y, float *ox, float *oy);
+/* 实心四边形填充 (四角顺时针 xy8), 与 fx_draw_image_quad 同一套单应机制 */
+void fx_fill_quad(const float *xy8);
+
+/* ================= v2.4 GPU 实时光线步进 =================
+ * 有 GPU 且后端提供 raymarch 钩子时, 直接在指定矩形里由片元着色器算光线步进 ——
+ * 不占 CPU 像素缓冲、不做回读。无该能力时返回 0, 调用方回退到 CPU 光追。 */
+int  fx_raymarch_available(void);
+int  fx_quad_warp_gpu(void);   /* v2.4: 四边形形变是否由驱动的 GPU 钩子接管 (HUD 显示用) */
+void fx_draw_raymarch(float time, int x, int y, int w, int h);
 
 /* 桌面扩展: 键盘事件 */
 typedef struct { char utf8[64]; int key; int down; int mod; } fx_keyev_t;
@@ -245,6 +278,14 @@ typedef struct {
     void (*draw_line)(int x1,int y1,int x2,int y2,uint32_t c); /* GPU折线 */
     void (*blit_tex)(void *tex,int sx,int sy,int sw,int sh,int dx,int dy); /* GPU文字blit(src+dst) */
     void (*blit_img_rot)(const uint32_t *px,int w,int h,int cx,int cy,int dw,int dh,double ang); /* GPU旋转blit */
+    int  (*read_pixels)(uint32_t *dst,int w,int h);   /* v2.4 可选: 回读当前帧 (截图/金图回归); dst 填 0xRRGGBB 或 0xAARRGGBB */
+    void (*draw_image_quad)(const uint32_t *px,int w,int h,const float *xy8,int bilinear); /* v2.4 可选: GPU 真透视四边形 (无则走 CPU 逆单应) */
+    void (*raymarch)(float time,int x1,int y1,int x2,int y2); /* v2.4 可选: GPU 实时光线步进到指定矩形 (sokol) */
+    /* v2.4 可选: GPU SDF 圆角矩形填充/描边 (片元按到边界距离羽化 → 边缘抗锯齿, 每控件一次 draw) */
+    void (*fill_rect_round)(int x1,int y1,int x2,int y2,int r,uint32_t c);
+    void (*stroke_rect_round)(int x1,int y1,int x2,int y2,int r,int bw,uint32_t c);
+    /* v2.4 可选: GPU 羽化线段 (宽度 w, 片元按到线心距离羽化; 无则回退双三角硬边) */
+    void (*draw_line_aa)(int x1,int y1,int x2,int y2,int w,uint32_t c);
 } fx_driver_t;
 
 void fx_init(const fx_driver_t *drv);
@@ -264,6 +305,9 @@ int fxtk_grid_lines_on(void);  /* 运行时改窗口标题 */
 void fxtk_set_fps_debug(int on); /* 左下角 FPS 调试信息 (默认关) */
 int fxtk_widget_count(void);   /* 当前存活的控件总数 */
 int fxtk_fps(void);            /* 驱动刷新率 (帧/秒) */
+/* v2.4: 回读当前帧并存为 PNG (依赖驱动的 read_pixels 钩子; 无该钩子返回 0)。
+ * 用途: 截图画廊 / CI 金图回归 / 用户级截图按钮。 */
+int fx_screenshot(const char *path);
 void fx_widget_fix(fx_widget_t *w, int x1, int y1);  /* 固定坐标模式: 防布局重算, 记录基准 */
 fx_color_t fx_get_bg(void);
 
