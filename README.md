@@ -1,7 +1,7 @@
 # fxtk — 轻量GUI框架 (v2.4)
 
 <p>
-  <img alt="version" src="https://img.shields.io/badge/version-v2.3-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-v2.4-blue">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green">
   <img alt="c" src="https://img.shields.io/badge/language-C99-9cf">
   <img alt="platform" src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20ESP32-lightgrey">
