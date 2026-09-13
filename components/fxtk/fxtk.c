@@ -706,7 +706,10 @@ void fx_poll(void)
         if (s_drv->touch_read(&x,&y,&p)) {
             s_last_tx=x; s_last_ty=y;   /* 悬停(未按)也更新坐标 */
             if (p && !s_touch_prev) fx_touch_press(x,y);
-            else if (p && s_touch_prev) fx_touch_move(x,y);
+            /* v2.4.2 修复(用户反馈"悬停效果没了"): 原来只在指针【按住】时才调 fx_touch_move,
+             * 而上下文菜单的悬停高亮就写在这个函数里 —— 于是"只把鼠标移上去"永远不会高亮。
+             * 单纯移动也应当走这条路(拖拽类逻辑各自有 pressed 门闩, 不会误触发)。 */
+            else if (s_touch_prev) fx_touch_move(x,y);
             else if (!p && s_touch_prev) fx_touch_release(s_last_tx,s_last_ty);
             s_touch_prev=p;
             /* 调试文本固定宽度, 仅内容变化才更新: 避免每帧生成新纹理挤爆缓存 */
