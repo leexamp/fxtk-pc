@@ -912,7 +912,7 @@ static void drv_draw_image_quad(const uint32_t *px, int w, int h, const float *x
 static void drv_ime_pos(int x, int y) { (void)x; (void)y; }
 #else
 extern void sapp_x11_set_ime_spot(int x, int y);
-static void drv_ime_pos(int x, int y) { sapp_x11_set_ime_spot(x, y); }
+static void drv_ime_pos(int x, int y) { if (getenv("FXTK_IMEDBG")) fprintf(stderr, "[ime] spot=(%d,%d)\n", x, y); sapp_x11_set_ime_spot(x, y); }
 #endif
 
 static int drv_touch_read(int *x, int *y, int *pressed)

@@ -406,7 +406,10 @@ void fxtk_draw_textedit(fx_widget_t *w)
         int cy = ty0 + Lc * lh;
         fx_set_color(fg);
         fx_fill_rect(cx, cy - 1, cx + 1, cy + 20);   /* 2px 光标: 与文字完整高度对齐(含descender), 右缘对齐字符边界 */
-        fx_set_ime_pos(w->x1 + cx, w->y1 + cy + 20);  /* v2.4.1: 让输入法候选窗贴到光标下方 */
+        /* v2.4.1: 让输入法候选窗贴到光标下方。
+         * 注意 cx/cy 已经是【屏幕绝对坐标】—— tx = w->x1 + PAD、ty0 = w->y1 + 5 - scroll
+         * 都已含文本框原点; 早先这里又加了 w->x1/w->y1, 原点多算一遍 → 候选窗整体偏下一个框高。 */
+        fx_set_ime_pos(cx, cy + 20);
     }
 /* TE-SCROLLBAR */
 if (total_h > vis_h) {
