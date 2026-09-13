@@ -117,8 +117,14 @@ static void aa_circle(int cx, int cy, int r, uint32_t c)
         int y = cy + dy;
         float rad = (float)(r * r - dy * dy);
         if (rad < 0) continue;
-        int gx = (int)sqrtf(rad);
-        for (int dd = gx - 1; dd <= gx + 1; dd++) {
+        /* v2.4.3 修复: 原来只在"该行圆环水平极值 ±1"处上色 —— 圆的顶部/底部曲线接近水平,
+         * 相邻多行会落到同一个 x, 于是呈现为断线/虚线(用户看图时发现圆"缺了一段")。
+         * 改为覆盖该行与"圆环带宽 |d-r|<1"相交的完整区间。 */
+        float lo2 = (float)((r - 1) * (r - 1) - dy * dy); if (lo2 < 0) lo2 = 0;
+        float hi2 = (float)((r + 1) * (r + 1) - dy * dy); if (hi2 < 0) continue;
+        int dlo = (int)sqrtf(lo2), dhi = (int)sqrtf(hi2);
+        if (dlo < 0) dlo = 0;
+        for (int dd = dlo; dd <= dhi; dd++) {
             float d = sqrtf((float)(dd * dd + dy * dy));
             float cov = 1.0f - (float)fabs(d - (float)r);
             if (cov <= 0) continue;
