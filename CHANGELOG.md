@@ -92,7 +92,16 @@
 - **SDF 着色器不能复用带纹理绑定的 shader desc**: 复用会让 SDF 管线要求 view/sampler 绑定,
   未绑定直接 `VALIDATE_ABND_EXPECTED_VIEW_BINDING` panic。改用独立 desc。
 
-### 修复（输入法候选窗位置 —— 跟随光标, 已由用户实测确认）
+### 修复（sokol 版字体看着偏小 → 与 SDL_ttf 的字号语义对齐）
+- **根因**: 字号语义不同。SDL_ttf 的 size 是 **EM 大小**;而 stb 层用的是 `stbtt_ScaleForPixelHeight`,
+  它让 **ascent+descent 等于 size** —— 而多数字体(尤其中文)的 ascent-descent 比 EM 大 ~15%,
+  于是同样名义字号在 sokol 版渲染更小(用户反馈"换了 sokol 之后字体略小")。
+- **修法**: 改用 `stbtt_ScaleForMappingEmToPixels`(EM 映射), 与 SDL_ttf 语义一致。
+- **实测(同尺寸对拍)**: 同一页同一段提示文字, SDL 版(bench @1280x720)墨迹 282 像素 vs
+  sokol 版(改后)287 像素 → **差 1.8%**(改前约小 15%)。
+- 字体尺寸变化影响所有页面 → 已 `make golden-update` 更新 20 张金图基线。
+
+### 修复（输入法候选窗位置### 修复（输入法候选窗位置 —— 跟随光标, 已由用户实测确认）
 - **现象**: 输入法能用后, 候选/预编辑窗**位置不对**(不在光标处)。
 - **根因**: IC 建的是 `XIMPreeditNothing` 样式 —— 输入法只能自己猜位置, 客户端没告诉它光标在哪。
 - **修法(完整版, 四段链路)**:
