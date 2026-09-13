@@ -117,8 +117,15 @@ static void on_move(fx_widget_t *w, void *ud) {
     int cap = cols * rows;
     if (fxtk_fps() >= 30 && s_mv_extra < cap && s_mv_extra < MV_DYN_MAX) {
         fx_parent(fx_find("move_cv"));   /* 挂到画布下, 随画布裁剪 */
+        /* v2.4.2(图七 压测页观赏性): 原来所有动态控件都是同一种紫(156,39,176), 铺满后像一坨噪点、观赏性差。
+         * 改成【按行取色的色阶】: 同一行同色、逐行轮转, 于是整片控件形成有秩序的色带(新控件加入时色带还会随之下移)。 */
+        static const uint32_t s_mv_pal[6] = {
+            FX_RGB(33, 150, 243), FX_RGB(0, 172, 193), FX_RGB(76, 175, 80),
+            FX_RGB(255, 179, 0),  FX_RGB(244, 81, 30),  FX_RGB(126, 87, 194)
+        };
+        int row = (cols > 0) ? (s_mv_extra / cols) : 0;
         fx_widget_t *nb = fx_button_new(pixel("0,0", "0,0"), title("动态"),
-                                        line(9), color(FX_RGB(156, 39, 176)), call(on_mv_extra_click));
+                                        line(9), color(s_mv_pal[row % 6]), call(on_mv_extra_click));
         fx_parent(fx_find("tab"));
         if (nb) {
             int nx = 8 + (s_mv_extra % cols) * 24, ny = 30 + (s_mv_extra / cols) * 20;
