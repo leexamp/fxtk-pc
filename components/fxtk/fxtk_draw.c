@@ -1265,11 +1265,6 @@ static int quad_setup(const float *xy8, int *bx1, int *by1, int *bx2, int *by2, 
     if (y1 < s_clip_y1) y1 = s_clip_y1;
     if (x2 > s_clip_x2) x2 = s_clip_x2;
     if (y2 > s_clip_y2) y2 = s_clip_y2;
-    /* 【v2.4.2 关键修复】裁剪夹取之后必须再判一次空区间。
-     * 否则: 矩形完全在裁剪区左侧时, x1 被抬到 clip_x1、而 x2 仍是负值 → x2 < x1;
-     * 这个负值传给驱动的 uint16_t 参数会变成 65000+ → 画出一条横贯整屏的色带
-     * (用户实测"拖角点出界后窗口布满橙色横带", 定向探针抓到 原始=(-348,341)-(-334,355) → 请求=(41,493)-(1279,507))。 */
-    if (x2 < x1 || y2 < y1) return;
     if (x1 > x2 || y1 > y2) return 0;
     *bx1 = x1; *by1 = y1; *bx2 = x2; *by2 = y2;
     return 1;
