@@ -44,7 +44,10 @@
 #define FX_TOK_RADIUS_S       4     /* 小圆角: 进度条/小按钮 */
 #define FX_TOK_RADIUS_M       6     /* 中圆角: 常规按钮 */
 #define FX_TOK_RADIUS_L       8     /* 大圆角: 卡片/面板 */
-#define FX_TOK_RADIUS_BTN     7     /* 按钮圆角: 比通用中号略圆, 触摸目标更"软" */
+/* 按钮圆角: **保持保守(4)**。V2.4 试过加到 7 —— 单看一个按钮更"软", 但演示的键盘/网格是
+ * 紧密相邻的格子, 每个格子四角一露就露出底色, 整片网格看着像"崩了"(用户实测反馈)。
+ * 按钮常被成组紧密排列, 圆角必须保守; 需要更圆的场景(卡片/胶囊标签)另有令牌。 */
+#define FX_TOK_RADIUS_BTN     4
 #define FX_TOK_RADIUS_KNOB_DIV 3   /* 滑块圆角 = 宽度的 1/3(越大越"胶囊") */
 #define FX_TOK_BTN_EDGE_MIX   25    /* 按钮描边加深比例(%): 提高与背景的分离度, 不增加绘制调用 */
 #define FX_TOK_TRACK_H_MIN    6     /* 滑杆轨道厚度下限 */
