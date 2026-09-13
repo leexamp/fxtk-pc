@@ -42,7 +42,12 @@ static int s_aa = FX_AA_DEFAULT;
 int fxtk_aa(void) { return s_aa; }
 /* v2.4: GPU 控件层抗锯齿档位。与画布 CPU AA(上面那个 s_aa)解耦 ——
  * 后者会把画布强制离屏并逐像素混合(开销大, 默认关), 前者是驱动的 SDF 钩子(默认开)。 */
-static int s_widget_aa = 1;
+/* 【v2.4.1 止血】默认改为 0(关): SDF 控件填充在"图形页/画布 + 文字 + quadwarp 图元混排"的场景下
+ * 会把四边形的半宽/半高参数丢掉, 实心填充退化成"一圈边界 + 中心 50% 混合"(用户实测截图)。
+ * 已确认: 同一按钮在 AA=0(逐行填充)下完全正常(蓝像素 1635 → 9095), 且与圆角、伪 3D 无关。
+ * 根因未定位前先默认关闭, 保证默认观感正确; 想用 SDF 可显式 fx_set_widget_aa(1) 或 FXTK_AA=1。
+ * TODO(v2.4.2): 定位 emit_round 的参数丢失(疑与 pip==4 quadwarp 混排有关)后改回默认 1。 */
+static int s_widget_aa = 0;
 int  fx_widget_aa_level(void) { return s_widget_aa; }
 void fx_set_widget_aa(int level)
 {
