@@ -58,7 +58,7 @@ fx_canvas_new(pixel("6,32","444,236"), anim(1), call(on_draw));
 - Change text `fx_set_title`; change rect `fx_widget_set_rect`;
 - Find a widget `fx_find("name")`; switch parent `fx_parent(...)`;
 - Read touch `fx_touch_state`; read key `fx_last_key`;
-- For dynamic widgets, fix coordinates with `fx_widget_fix`; the count cap is set by the widget pool (4096).
+- For dynamic widgets, fix coordinates with `fx_widget_fix`; the count cap is set by the widget pool (`FX_MAX_WIDGETS`: 16384 on PC / 4096 on ESP32).
 
 ## Fullscreen Stress Test
 

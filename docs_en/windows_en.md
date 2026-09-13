@@ -1,28 +1,48 @@
-# Windows Build Guide
+# Windows (cross-compiled, single sokol exe)
 
-## Route A: WSL2 + WSLg (recommended, zero changes)
-Win11's WSLg natively supports Linux GUI:
-```powershell
-wsl --install            # admin PowerShell, then reboot
-```
+> Since v2.4 the recommended Windows path is the **sokol single exe with no third-party DLLs**.
+> The legacy SDL cross-build is kept only as a fallback (see the end).
+
+## 1. Toolchain
+
 ```bash
-sudo apt install libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev
-cd /media/.../demo-main && ./build.sh   # the window appears on the Windows desktop
+# MSYS2: only a compiler is needed - no SDL packages at all
+pacman -S mingw-w64-x86_64-gcc
+# or on Linux:
+sudo apt install gcc-mingw-w64-x86-64
 ```
-The window can go fullscreen (maximize via the title bar), and the UI scales proportionally.
+`demo-main/setup_win_cross.sh` prepares the cross toolchain in one step.
 
-## Route B: MSYS2 native exe
-1. Install [MSYS2](https://www.msys2.org), open a **MINGW64** terminal;
-2. `pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-SDL2 mingw-w64-x86_64-SDL2_ttf mingw-w64-x86_64-SDL2_image mingw-w64-x86_64-python`
-3. `./build_win.sh` → `fxtk_win.exe` (can be distributed independently of MSYS2, needs the SDL2 dll).
+## 2. Build
 
-Difference notes:
-- **Font**: the driver automatically tries `C:/Windows/Fonts/msyh.ttc` (YaHei, includes Chinese).
-- **GPU ray tracing**: EGL pbuffer is Linux-only; on Windows `gpu_stub_win.c` automatically substitutes, and the "3D" page runs CPU multi-threaded ray tracing (winpthreads provides pthread).
-- **Clipboard/Wheel/IME**: SDL2 natively supports these on Windows; behavior is consistent.
+```bash
+cd demo-main
+./build_win_sokol.sh            # Chinese  -> dist/win_sokol/fxtk_sokol.exe
+./build_win_sokol.sh app_en     # English  -> dist/win_sokol/fxtk_sokol_en.exe
+```
+About **433KB / 430KB**, statically linked (`-static -static-libgcc`, `-mwindows`).
 
-## Route C: MSVC + vcpkg (feasible)
-`vcpkg install sdl2 sdl2-ttf sdl2-image pthreads`, using CMake or a hand-built project; the source-file list is the same as `build_win.sh`; use vcpkg's pthreads package for pthread.
+## 3. Verify there are no third-party DLLs
 
-## Cross compile (Linux produces a Windows exe)
-`./setup_win_cross.sh` installs the toolchain, `./build_win_cross.sh app` → `dist/win/fxtk_win.exe`; the artifact lands directly in the shared folder — double-click it in the VM to run.
+```bash
+x86_64-w64-mingw32-objdump -p dist/win_sokol/fxtk_sokol.exe | grep 'DLL Name'
+```
+Only system DLLs should appear (`KERNEL32`, `USER32`, `GDI32`, `OPENGL32`, `SHELL32`, `ole32`, `dwmapi`, ...) —
+no `SDL2.dll`, no `libwinpthread-1.dll`, no `libgcc_s_seh-1.dll`.
+
+## 4. Known Windows limitations (stated honestly)
+
+| Item | Status |
+|---|---|
+| Image import / PNG screenshot | works (stb codecs, no external deps) |
+| Keyboard / mouse / wheel | works |
+| GPU warp / two-tier AA / raymarch | works (OpenGL) |
+| **Clipboard** | **not implemented** (the current implementation uses X11 tools; Windows needs `OpenClipboard`) |
+| **CJK input method** | **not supported** (XIM is X11-only; Windows would need IMM32) |
+| CJK text *display* | works (built-in font, unrelated to input methods) |
+
+If you need clipboard or an IME on Windows, the legacy SDL cross-build still supports both natively:
+
+```bash
+./build_win_cross.sh    # legacy: needs mingw-w64 SDL2 packages; produces an exe that ships SDL2 dlls
+```

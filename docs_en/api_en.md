@@ -229,3 +229,64 @@ Defaults that apply when you don't specify a color:
 - `int fx_fs_list(const char *dir, fx_fs_entry_t *out, int max);` — list a folder's contents (Win32 `FindFirstFileW` / POSIX `opendir+stat`); returns count (or -1). `fx_fs_entry_t` = `{char name[256]; int is_dir; long size; char date[32];}`.
 
 The demo's **Components** page uses it for a file browser: folder contents as a table (name/size/date) with a smooth, draggable scrollbar (hover-grows), hover tooltip, row select; a `fx_grid_map(dense())` name editor; and a two-group RGB color picker (button bg / text color).
+
+---
+
+# v2.4 API additions (quick reference)
+
+> New surface added in v2.4. Existing APIs are unchanged (backward compatible).
+
+## Anti-aliasing (two tiers, on by default)
+```c
+void fx_set_widget_aa(int level);   /* 0=off, 1=widget SDF (default), 2=+ feathered primitives */
+int  fx_widget_aa_level(void);
+int  fx_aa_autodegrade(void);       /* driver calls this on frame drops: steps one tier down */
+```
+Runtime override without recompiling: `FXTK_AA=0|1|2`. Backends without the hooks fall back automatically.
+
+## Canvas transform stack
+```c
+void fx_canvas_push_affine(float a,float b,float c,float d,float e,float f);
+void fx_canvas_pop_affine(void);
+void fx_transform_reset(void);        /* auto-reset every frame */
+int  fx_transform_depth(void);        /* max depth 8 */
+void fx_canvas_transform_point(float x,float y,float *ox,float *oy);
+void fx_fill_quad(const float *xy8);
+```
+
+## Quad warp (true perspective)
+```c
+void fx_draw_image_quad(const fx_image_t *img, const float *xy8);
+int  fx_quad_warp_gpu(void);
+int  fx_quad_homography(const float *src8,const float *dst8,float m[9]);
+int  fx_mat3_invert(const float *m, float out[9]);
+int  fx_quad_corner_weights(const float *xy8, float d4[4]);   /* write into gl_Position.w */
+```
+Single draw, hardware perspective-correct interpolation (no diagonal seam). Degenerate/self-intersecting
+quads fall back to a bounding-box mapping on **both** the GPU and CPU paths.
+
+## GPU raymarch / screenshot / images / IME / logging
+```c
+int  fx_raymarch_available(void);
+void fx_draw_raymarch(float time,int x,int y,int w,int h);
+int  fx_screenshot(const char *path);
+int  fx_img_load_file(const char *path, fx_img_t *out);   /* PNG/JPEG/BMP/GIF/TGA/PNM */
+void fx_set_ime_pos(int x, int y);                        /* X11 IME candidate window placement */
+void fx_log(fx_log_level_t lv, const char *fmt, ...);     /* single logging entry (forwards to esp_log_write on ESP32) */
+```
+
+## Config macros
+| Macro | Meaning | PC default | ESP32 default |
+|---|---|---|---|
+| `FX_MAX_WIDGETS` | widget pool | **16384** | 4096 |
+| `FX_MAX_SCROLL_STATES` | concurrent scroll states | **64** | 8 |
+| `FX_MAX_EXTRA_WIDGETS` | list/dropdown slots | **64** | 8 |
+| `FXTK_WIDGET_*` | compile-time widget trimming | all on | trim as needed |
+| `FXTK_BACKEND_STUB` | deterministic backend | off | — |
+
+The two targets have diverged: PC is not constrained by ESP32 limits; both keep the same API/syntax and
+the same rendered result (see the README).
+
+## Debug switches
+`FXTK_AA`, `FXTK_RECTDBG`, `FXTK_SDFNOMERGE`, `FXTK_IMEDBG`, `FXTK_IMPORT`, `FXTK_NOVSYNC`,
+plus `./build_dbg.sh` / `make fxtk_sim_dbg` for a build with the probes compiled in.

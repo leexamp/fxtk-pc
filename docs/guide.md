@@ -608,7 +608,8 @@ if (fxtk_fps() >= 30 && n < cap) {
 ```
 
 - `fx_widget_fix(w, x, y)`：切到**固定坐标模式**（`FX_POS_FIXED`），后续 `fx_layout()`（resize/新建控件触发）不会用 ox/oy 复位它，同时记录移动基准点。
-- 控件池默认 **4096** 槽（`FX_MAX_WIDGETS`），`fxtk_widget_count()` 查当前存活数。
+- 控件池上限由 `FX_MAX_WIDGETS` 决定：**PC 端默认 16384**、ESP32 端默认 4096（两端已分化，见 README「两个目标端」）；
+  `fxtk_widget_count()` 查当前存活数。用 `-DFX_MAX_WIDGETS=N` 可覆盖。
 - 动态控件建议用指针数组缓存，避免每帧 `fx_find` 线性扫描。
 
 ### 10.3 删除控件
@@ -712,7 +713,7 @@ int w = fxtk_text_width_size(16, "大字号");   /* 测宽 */
 1. **静态内容**不要 `anim(1)`；变化时手动 `fx_repaint_rect`。
 2. **动画内容**用 `anim(1)` canvas，内部避免每帧 `fx_find`（缓存指针）。
 3. **大量粒子/图元**：画到小离屏图再 `fx_draw_image` 放大（GPU blit），如粒子页 2x 缩小缓冲。
-4. **动态加控件**：控件池 4096 上限，帧率富余（≥30fps）再加，防止失控。
+4. **动态加控件**：受 `FX_MAX_WIDGETS` 限制（PC 默认 16384），帧率富余（≥30fps）再加，防止失控。
 5. **文字**：相同文本/颜色会自动走纹理缓存，避免拼接易变字符串为键。
 
 ---
@@ -798,7 +799,7 @@ void app_init(void) { build_wave_page(); }
 4. **改矩形用 `fx_widget_set_rect`**：直接改 `w->x1`（结构体不透明）不会触发重绘。
 5. **控件名全局唯一**：`fx_find` 线性扫描全池，重复名返回第一个。
 6. **动态创建控件会被布局复位**：创建后必须 `fx_widget_fix(w,x,y)` 固定坐标，否则下一次 `fx_layout()` 会把它拉回设计坐标原点。
-7. **每帧 `fx_find` 是 O(4096)**：热点循环里用指针缓存（如压测页 `s_dyn[]`）。
+7. **每帧 `fx_find` 是 O(池大小)**：热点循环里用指针缓存（如压测页 `s_dyn[]`）。
 8. **字号用 `line()`/`fx_set_fontsize`**：自绘文字用 `fxtk_draw_text_size`，不要手写缩放字号。
 9. **颜色是 24bit RGB**：`0xRRGGBB`，直接用 `FX_RGB(r,g,b)` 或十六进制字面量（如 `0xFF0000` 红）。
 10. **窗口关闭/退出**：SDL 收到 QUIT 事件自动 `exit(0)`，无需处理。
@@ -997,3 +998,47 @@ make bench         # 渲染吞吐基准(无头, 无 vsync)
 | v2.3 同机同命令对照（2816 控件 @1080P） | 9.40~9.95 ms | 100~106 fps |
 
 图形窗口下即使关掉应用侧 vsync 也仍是 60fps —— **桌面合成器**把窗口统一限在 60Hz。
+
+---
+
+# v2.4.3 补充（输入 / 剪贴板 / 取证 / 两端分化）
+
+## 1. Linux 中文输入法（XIM）—— 已打通
+
+sokol 版默认支持 fcitx/ibus 等输入法组字。原理（都在 vendored `third_party/sokol/sokol_app.h` 的 X11 分支，代码里标注了"本项目本地修改"）：
+1. 惰性创建输入上下文：`setlocale(LC_ALL,"")` + `XSetLocaleModifiers("@im=fcitx")` + `XOpenIM` + `XCreateIC`（`XIMPreeditPosition`，不支持时回退 `PreeditNothing`）+ `XSetICFocus`；
+2. **事件循环取到事件后立刻 `XFilterEvent`** —— 组字期间的事件必须被消费掉（缺这步前面全白做）；
+3. 按键改用 `Xutf8LookupString`，组字结果按 UTF-8 **逐码点**走原有 CHAR 事件通道（上层零改动）；
+4. 候选窗位置：框架在 textedit 画光标时调 `fx_set_ime_pos(x,y)` → 驱动 `ime_pos` 钩子 → `sapp_x11_set_ime_spot()` 更新 `XNSpotLocation`。
+   调试：`FXTK_IMEDBG=1` 会打印上报坐标。
+5. 没有输入法环境时 `XOpenIM` 返回 NULL，完全退回原路径，行为不变。
+
+## 2. 剪贴板（sokol 版）
+
+sokol_app 没有剪贴板 API，驱动现在这样实现：优先调用系统工具（`xsel` / `xclip` / `wl-copy|wl-paste`），
+找不到时退化为**进程内缓冲**（保证应用内复制/粘贴始终可用）。
+
+> 已知限制：**Windows 剪贴板尚未实现**（需要另写 `OpenClipboard` 版本）。
+
+## 3. 图元参数取证（排"参数合法但画面错"的问题）
+
+| 开关 | 用途 |
+|---|---|
+| `FXTK_RECTDBG=1` | 图元拿到越界坐标 / 异常面积 / 异常半径 / 异常图片角点时，打印**参数 + 当时裁剪区 + 颜色** |
+| `./build_dbg.sh`、`make fxtk_sim_dbg` | **取证版**：探针编进二进制（不依赖环境变量）；启动打一行自检，证明链路可通 |
+| `FXTK_SDFNOMERGE=1` | 每段 SDF 独立成命令（A/B 判定"命令合并"因素） |
+
+> 这套工具是排"拖角点出界 → 橙色横带"时建立的：框架探针零输出 ⇒ 排除参数问题；驱动探针抓到
+> `请求=(41,493)-(1279,507) 1239x15` ⇒ 定位到"裁剪夹取后未判空区间，负 x2 经 `uint16_t` 回绕"。
+
+## 4. 两个目标端已分化（重要）
+
+PC 端**不再迁就 ESP32 的资源约束**，只保证 **API/语法一致 + 渲染效果一致**：
+`FX_MAX_WIDGETS` / `FX_MAX_SCROLL_STATES` / `FX_MAX_EXTRA_WIDGETS` 在 PC 上分别是 **16384 / 64 / 64**，
+在 ESP32 上仍是 **4096 / 8 / 8**，两端都可用 `-D` 覆盖；池满会**明确告警**并提示改哪个宏。
+
+## 5. 其它 v2.4.3 修复
+
+- 字号与 SDL_ttf 对齐（`stbtt_ScaleForMappingEmToPixels`）：同名义字号两端视觉一致（实测墨迹差 1.8%）。
+- 控件层 SDF 抗锯齿**默认开启**（`FXTK_AA=0` 可关）；同控件数 A/B 实测开销约 1.6%。
+- Windows 交叉构建：单 exe、无第三方 DLL；`fxtk_sokol_en.exe` 英文版同款。

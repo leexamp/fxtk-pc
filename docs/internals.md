@@ -26,7 +26,7 @@
 - `lines`(字号) / `rows`(对齐) / `value` / `page`
 - 计算后矩形 `x1..y2`；父子/兄弟指针
 
-**控件池**：静态数组 `s_pool[FX_MAX_WIDGETS]`，`FX_MAX_WIDGETS = 4096`（约 940KB BSS）。`fxtk_alloc()` 线性找空槽，`fxtk_free()` 标记 `FX_W_NONE`。
+**控件池**：静态数组 `s_pool[FX_MAX_WIDGETS]`，`FX_MAX_WIDGETS`（**PC 默认 16384 ≈ 5MB BSS / ESP32 默认 4096 ≈ 1.3MB**）。`fxtk_alloc()` 线性找空槽，`fxtk_free()` 标记 `FX_W_NONE`。
 
 ## 布局与缩放
 
