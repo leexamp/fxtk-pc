@@ -13755,6 +13755,21 @@ _SOKOL_PRIVATE void _sapp_x11_on_focusout(XEvent* event) {
 static XIM _sapp_xim = 0;
 static XIC _sapp_xic = 0;
 static int _sapp_x11_im_tried = 0;
+static XFontSet _sapp_xim_fontset = 0;
+static XPoint    _sapp_xim_spot = { 0, 0 };
+
+/* 本项目本地修改: 让上层(fxtk)把文本框光标位置报进来 —— 输入法据此摆放候选窗。
+ * 不是 sokol 官方 API, 故不写进 SOKOL_APP_API_DECL; 用到的 TU 自行 extern 声明即可。 */
+void sapp_x11_set_ime_spot(int x, int y)
+{
+    if (!_sapp_xic) return;
+    _sapp_xim_spot.x = (short)x; _sapp_xim_spot.y = (short)y;
+    XVaNestedList pre = _sapp_xim_fontset
+        ? XVaCreateNestedList(0, XNSpotLocation, &_sapp_xim_spot, XNFontSet, _sapp_xim_fontset, NULL)
+        : XVaCreateNestedList(0, XNSpotLocation, &_sapp_xim_spot, NULL);
+    XSetICValues(_sapp_xic, XNPreeditAttributes, pre, NULL);
+    XFree(pre);
+}
 
 _SOKOL_PRIVATE void _sapp_x11_on_keypress(XEvent* event) {
     int keycode = (int)event->xkey.keycode;
@@ -13782,9 +13797,25 @@ _SOKOL_PRIVATE void _sapp_x11_on_keypress(XEvent* event) {
         _sapp_xim = XOpenIM((Display*)sapp_x11_get_display(), NULL, NULL, NULL);
         fprintf(stderr, "[sokol][xim] XOpenIM=%s\n", _sapp_xim ? "ok" : "FAIL");
         if (_sapp_xim) {
-            _sapp_xic = XCreateIC(_sapp_xim, XNInputStyle, XIMPreeditNothing | XIMStatusNothing,
+            /* 用 XIMPreeditPosition 而不是 PreeditNothing: 后者输入法只能自己猜位置(候选窗乱放),
+             * 前者配合 XNSpotLocation 就能把候选窗精确贴到我们上报的光标处(本项目本地修改)。 */
+            char **miss = NULL; int nmiss = 0;
+            _sapp_xim_fontset = XCreateFontSet((Display*)sapp_x11_get_display(),
+                                               "-*-*-*-*-*-*-*-*-*-*-*-*-*-*", &miss, &nmiss, NULL);
+            if (miss) XFreeStringList(miss);
+            XVaNestedList pre = _sapp_xim_fontset
+                ? XVaCreateNestedList(0, XNSpotLocation, &_sapp_xim_spot, XNFontSet, _sapp_xim_fontset, NULL)
+                : XVaCreateNestedList(0, XNSpotLocation, &_sapp_xim_spot, NULL);
+            _sapp_xic = XCreateIC(_sapp_xim, XNInputStyle, XIMPreeditPosition | XIMStatusNothing,
                                   XNClientWindow, (Window)sapp_x11_get_window(),
-                                  XNFocusWindow, (Window)sapp_x11_get_window(), NULL);
+                                  XNFocusWindow, (Window)sapp_x11_get_window(),
+                                  XNPreeditAttributes, pre, NULL);
+            if (pre) XFree(pre);
+            if (!_sapp_xic) {   /* 有的 IM 不支持 position 样式 → 退回 nothing, 至少能用 */
+                _sapp_xic = XCreateIC(_sapp_xim, XNInputStyle, XIMPreeditNothing | XIMStatusNothing,
+                                      XNClientWindow, (Window)sapp_x11_get_window(),
+                                      XNFocusWindow, (Window)sapp_x11_get_window(), NULL);
+            }
             if (_sapp_xic) { XSetICFocus(_sapp_xic); fprintf(stderr, "[sokol][xim] XIC=ok\n"); }
             else fprintf(stderr, "[sokol][xim] XIC=FAIL\n");
         }

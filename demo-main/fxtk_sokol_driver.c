@@ -906,6 +906,10 @@ static void drv_draw_image_quad(const uint32_t *px, int w, int h, const float *x
     cm->count += 6;
 }
 
+/* v2.4.1: 输入法候选窗位置 → 交给裁剪版 sokol_app 更新 XIM 的 XNSpotLocation */
+extern void sapp_x11_set_ime_spot(int x, int y);
+static void drv_ime_pos(int x, int y) { sapp_x11_set_ime_spot(x, y); }
+
 static int drv_touch_read(int *x, int *y, int *pressed)
 {
     if (s_qt_h == s_qt_t) return 0;
@@ -1132,6 +1136,7 @@ fx_driver_t fx_sokol_driver = {
     .fill_rect_round = drv_fill_rect_round,     /* v2.4: GPU SDF 圆角矩形 (抗锯齿) */
     .stroke_rect_round = drv_stroke_rect_round, /* v2.4: GPU SDF 圆角描边 (抗锯齿) */
     .draw_line_aa = drv_draw_line_aa,           /* v2.4 档位 2: GPU 羽化线段 */
+    .ime_pos = drv_ime_pos,                   /* v2.4.1: 输入法候选窗跟随光标 */
     .draw_image_quad = drv_draw_image_quad,     /* v2.4 P4: GPU 真透视四边形形变 */
 };
 

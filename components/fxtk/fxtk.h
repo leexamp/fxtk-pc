@@ -216,6 +216,10 @@ void fx_set_aa(int level);
  *  档位: 0=关, 1=SDF(默认), 2=1+图元羽化(线段/圆/弧)。掉帧时由驱动调 fx_aa_autodegrade() 降档。
  *  fx_set_aa(level) 同时设置两层(保持 v2.2 兼容); 只想动 GPU 层用 fx_set_widget_aa()。 */
 void fx_set_widget_aa(int level);   /* 只设 GPU 控件层档位 0/1/2 */
+/* v2.4.1: 把输入法候选窗要贴的位置(文本框光标, 屏幕坐标)告诉后端。
+ * 驱动实现 ime_pos 钩子即可(SDL 版走 SDL_SetTextInputRect, sokol 版走 XIM 的 XNSpotLocation);
+ * 无该钩子/无输入法时空转, 不影响其它平台。 */
+void fx_set_ime_pos(int x, int y);
 int  fx_widget_aa_level(void);
 int  fx_aa_autodegrade(void);       /* 供驱动在掉帧时调用: 降一档并返回新档位(已到 0 则返回 0) */
 int  fxtk_aa(void);                 /* 画布 CPU AA 当前开关 */
@@ -286,6 +290,7 @@ typedef struct {
     void (*stroke_rect_round)(int x1,int y1,int x2,int y2,int r,int bw,uint32_t c);
     /* v2.4 可选: GPU 羽化线段 (宽度 w, 片元按到线心距离羽化; 无则回退双三角硬边) */
     void (*draw_line_aa)(int x1,int y1,int x2,int y2,int w,uint32_t c);
+    void (*ime_pos)(int x,int y);   /* v2.4.1 可选: 输入法候选窗位置(留给后端) */
 } fx_driver_t;
 
 void fx_init(const fx_driver_t *drv);

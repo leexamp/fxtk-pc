@@ -406,6 +406,7 @@ void fxtk_draw_textedit(fx_widget_t *w)
         int cy = ty0 + Lc * lh;
         fx_set_color(fg);
         fx_fill_rect(cx, cy - 1, cx + 1, cy + 20);   /* 2px 光标: 与文字完整高度对齐(含descender), 右缘对齐字符边界 */
+        fx_set_ime_pos(w->x1 + cx, w->y1 + cy + 20);  /* v2.4.1: 让输入法候选窗贴到光标下方 */
     }
 /* TE-SCROLLBAR */
 if (total_h > vis_h) {
