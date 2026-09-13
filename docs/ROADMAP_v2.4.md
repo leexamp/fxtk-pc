@@ -201,6 +201,12 @@ void fx_image_quad_set_corners(fx_widget_t *w, const float *xy8);   /* 编辑器
   改用 ①图元羽化 ②掉帧自动降档 两项替代。若要 4x MSAA, 按"启动时 `FXTK_MSAA=4` 申请 +
   离屏画布 pass 多重采样 + resolve"的形式补, 不影响现有档位。
 
+### 用户裁决（第 40 轮后确认, 两项收官）
+1. **Windows 体积**: 采用"改口径" —— 单 exe(sokol)按 **~450KB** 计, 保持能力完整与零第三方 DLL 依赖;
+   不去掉图片解码/PNG 编码。理由: 250KB 是 SDL 时代标准(那时 exe 182KB 却要带 SDL2.dll + SDL2_ttf.dll, 后者单个 66MB)。
+2. **双语文档**: **不做全量翻译**。英文 README/quickstart 已同步 v2.4 事实, 其余英文档标注"对应 v2.3"边界;
+   中文 `docs/guide.md` 已补全 v2.4 新增能力(含可直接抄的用法与实测数据)。
+
 ### 第 39 轮最终验收快照（全部实测, 可复跑）
 ```
 make test              -> 2/2 PASS   (真实后端 + stub 后端)

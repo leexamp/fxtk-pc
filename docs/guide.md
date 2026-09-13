@@ -881,3 +881,119 @@ const char *r = gpu_raymarch_renderer();       /* 返回渲染器名 */
 `gpu_raymarch_ok()` 返回 0 时自动退回 CPU（无硬件 GL 的 VM/CI 环境）；Windows 下由 `gpu_stub_win.c` 提供空实现。场景含解析地面/球 + 步进圆环 + 软阴影 + 雾。
 
 > 若需了解控件绘制、布局、重绘的源码细节，见 `docs/internals.md`。
+
+---
+
+# v2.4 新增能力（都已在本次开发中实测通过）
+
+> 这一节只讲"怎么用"。想要每项的验证证据与踩坑记录，见 `docs/ROADMAP_v2.4.md` 与 `CHANGELOG.md`。
+
+## 1. 默认后端换成 sokol（SDL2 降为遗留）
+
+```bash
+cd demo-main
+./build.sh              # 构建并运行默认(sokol)演示
+./build.sh --no-run     # 只构建
+./build.sh --sdl        # 遗留 SDL 版(对照用)
+./build.sh --shared     # 打包成动态库: exe 只留 app 层
+./build.sh --win        # 交叉编译 Windows 单 exe
+```
+
+Release 产物一律走 sokol，因此 Windows 版是**单文件、无第三方 DLL**。
+SDL 代码仍保留，但只当"无头假驱动"给 `test/bench` 与金图回归用（CI 没显示器，sokol 需要真 GL 上下文）。
+
+## 2. 全局抗锯齿：两层，默认已开
+
+```c
+fx_set_widget_aa(1);     /* 默认: 控件层 SDF —— 圆角矩形/描边一次 draw 完成, 边缘按距离羽化 */
+fx_set_widget_aa(2);     /* 再加图元层: 线段羽化(任意角度斜线不再有阶梯) */
+fx_set_widget_aa(0);     /* 关 */
+```
+
+- 想在不改代码的情况下对比：启动时给环境变量 `FXTK_AA=0|1|2`。
+- 掉帧时驱动会调用 `fx_aa_autodegrade()` 自动降一档并打印一次日志。
+- 无该钩子的平台（SDL/ESP32）自动回退到原来的逐行/硬边路径，**API 不变**。
+
+## 3. 设计令牌：改一处即可统一换肤
+
+所有控件的颜色、圆角、留白都集中在 `components/fxtk/fxtk_tokens.h`：
+
+```c
+#define FX_TOK_PRIMARY        FX_RGB(33, 150, 243)
+#define FX_TOK_RADIUS_BTN     7      /* 按钮圆角 */
+#define FX_TOK_RADIUS_S       4      /* 输入框/列表/色块标签 */
+#define FX_TOK_TEXT_PAD_X     6      /* 控件内文字左右留白 */
+...
+```
+
+控件代码里**不再写字面量**（v2.4 把 18 处历史字面量全部收拢）。想换风格只改这个文件。
+
+## 4. 图片四边形形变（真透视，GPU 单次 draw）
+
+```c
+/* 把整张图映射到任意凸四边形(四角顺时针, 从左上开始) */
+void fx_draw_image_quad(fx_image_t *img, const float *xy8);
+
+/* 给需要自己写 GPU 管线的后端: 每角透视权重(直接写进 gl_Position.w 即可) */
+int  fx_quad_corner_weights(const float *xy8, float d4[4]);
+```
+
+- **GPU 路径**：每角权重进 `gl_Position.w`，硬件做透视校正插值 —— 单次 draw，**没有"两个三角形各做仿射"的对角缝**。
+- **无 GPU 平台**（ESP32/离屏画布）自动回退 CPU 逆单应逐像素路径。
+- 退化/自交四边形自动回退成包围盒映射并告警。
+- 演示里可直接玩：**图片页** → `导入图片…`（或设 `FXTK_IMPORT=<路径>` 免对话框）→ 缩放滑杆 → 拖四个角手柄 → `复位`。若系统对话框不可用，Linux 侧会依次尝试 `zenity`/`kdialog`。
+
+## 5. canvas 变换栈
+
+```c
+fx_canvas_push_affine(a, b, c, d, e, f);   /* 2D 仿射；深度 8，每帧自动复位，后 push 的在外层 */
+fx_canvas_pop_affine();
+fx_fill_quad(const float *xy8);            /* 实心四边形填充(可旋转/斜切) */
+```
+
+push 之后：像素/线段按端点过变换，**矩形填充变实心四边形**，**图片走透视四边形**。
+
+## 6. GPU 实时光线步进
+
+```c
+if (fx_raymarch_available())
+    fx_draw_raymarch(time, x, y, w, h);    /* 片元着色器直接算, 不占 CPU 像素、不回读 */
+```
+
+演示的 **3D 页**用它：满分辨率、带阴影反射，HUD 显示走的是 `GPU 着色器` 还是 `CPU`。
+
+## 7. 后端服务层（跨平台一次性收口）
+
+`components/fxtk/fxtk_backends.h`：PCG32 随机（同种子可复现）、单调时间、路径工具、文件读写、
+`fx_img_load_file`（**PNG / JPEG / BMP / GIF / TGA / PNM**；HDR/PSD/PIC 为省体积已裁掉）、
+裁剪色彩量化、剪贴板、文件/目录对话框、偏好持久化、能力协商 `fx_backend_caps()`。
+
+用 `-DFXTK_BACKEND_STUB` 可得到**确定性变体**（固定时钟 + 定种子随机 + 内存文件系统），
+所以 `make test` 会同时跑"真实后端"与"stub 后端"两遍，结果不依赖宿主机环境。
+
+## 8. 截图与回归验证（都能无头跑）
+
+```c
+int fx_screenshot(const char *path);   /* 驱动 read_pixels 回读当前帧 → PNG(stb), 零外部依赖 */
+```
+
+```bash
+make test          # 无头单元测试, 真实 + stub 双跑
+make golden        # 金图逐像素回归(画布示例; CI 里跑这个)
+make golden-update # 刻意改了观感之后更新基线(要在提交信息里说明改了哪一点)
+make esp32-smoke   # ESP32 接口级编译冒烟(不需要 ESP-IDF 工具链)
+make bench         # 渲染吞吐基准(无头, 无 vsync)
+```
+
+踩坑提醒：**做同源对比前先 `make -B test/bench`** —— `make` 只构建 `fxtk_sim`，不会重建 bench；
+否则你拿旧二进制比，会得到"完全一致"的假结论（这次开发里真踩过）。
+
+## 9. 实测性能（本机无头、无 vsync）
+
+| 场景 | 帧时间 | 帧率 |
+|---|---|---|
+| 压测页 2819 控件 @1920x1080（饱和） | 9.0~9.3 ms | 107~111 fps |
+| 压测页 1235 控件 @1280x720 | 4.34 ms | 230 fps |
+| v2.3 同机同命令对照（2816 控件 @1080P） | 9.40~9.95 ms | 100~106 fps |
+
+图形窗口下即使关掉应用侧 vsync 也仍是 60fps —— **桌面合成器**把窗口统一限在 60Hz。
