@@ -544,6 +544,24 @@ static void fx_draw_line_plain(int x1, int y1, int x2, int y2);
  * 起因: 调用者算出退化坐标(NaN/inf 转 int 会得到 INT_MIN/INT_MAX), 随后的 "x-7 / x+7" 发生整数溢出,
  * 交换后变成 "从 INT_MIN 到 INT_MAX" 的巨大区间 → 钳到裁剪后就是横贯整屏的色带, 每个手柄一条、每帧重画。
  * 在入口处把坐标夹到 ±32767, 之后所有算术都不可能溢出; 屏幕内的正常绘制完全不受影响。 */
+/* v2.4.2 现场取证: 只要图元拿到越界坐标就打印参数+裁剪区+调用签名。
+ * 用途: 用户报告"拖角点出界后出现橙色大矩形", 但合成事件无法复现 —— 用它在真实操作里取证,
+ * 一次日志就能判定是"调用方算错"还是"框架/驱动放大"。开关: FXTK_RECTDBG=1 */
+static void fx_rect_dbg(const char *who, int x1, int y1, int x2, int y2)
+{
+    static char seen[64][48];
+    static int nseen = 0;
+    if (!getenv("FXTK_RECTDBG")) return;
+    if (x1 > -2000 && x1 < 4000 && y1 > -2000 && y1 < 4000 &&
+        x2 > -2000 && x2 < 4000 && y2 > -2000 && y2 < 4000) return;
+    char sig[48];
+    snprintf(sig, sizeof(sig), "%s:%d,%d,%d,%d", who, x1, y1, x2, y2);
+    for (int i = 0; i < nseen; i++) if (!strcmp(seen[i], sig)) return;
+    if (nseen < 64) snprintf(seen[nseen++], sizeof(seen[0]), "%s", sig);
+    fprintf(stderr, "[rectdbg] %s(%d,%d,%d,%d) clip=(%d,%d,%d,%d) color=%08x\n",
+            who, x1, y1, x2, y2, s_clip_x1, s_clip_y1, s_clip_x2, s_clip_y2, s_color);
+}
+
 #define FX_COORD_LIMIT 32767
 static int fx_clamp_coord(int v)
 {
@@ -554,6 +572,7 @@ static int fx_clamp_coord(int v)
 
 void fx_draw_line(int x1, int y1, int x2, int y2)
 {
+    fx_rect_dbg("fx_draw_line", x1, y1, x2, y2);
     x1 = fx_clamp_coord(x1); y1 = fx_clamp_coord(y1);
     x2 = fx_clamp_coord(x2); y2 = fx_clamp_coord(y2);
     if (s_xf_active) {   /* v2.4: 变换端点后走原路径 */
@@ -601,6 +620,7 @@ static void fx_draw_line_plain(int x1, int y1, int x2, int y2)
 
 void fx_draw_rect(int x1, int y1, int x2, int y2)
 {
+    fx_rect_dbg("fx_draw_rect", x1, y1, x2, y2);
     x1 = fx_clamp_coord(x1); y1 = fx_clamp_coord(y1);
     x2 = fx_clamp_coord(x2); y2 = fx_clamp_coord(y2);
     if (s_aa && s_offing) {   /* v2.2 抗锯齿: 四条边各用 AA 线段 */
@@ -616,6 +636,7 @@ int fxtk_drv_width(void) { return s_drv->width; }
 int fxtk_drv_height(void) { return s_drv->height; }
 void fx_fill_rect(int x1, int y1, int x2, int y2)
 {
+    fx_rect_dbg("fx_fill_rect", x1, y1, x2, y2);
     x1 = fx_clamp_coord(x1); y1 = fx_clamp_coord(y1);
     x2 = fx_clamp_coord(x2); y2 = fx_clamp_coord(y2);
     if (s_xf_active) {   /* v2.4: 变换生效 → 变实心四边形填充 (旋转/斜切矩形) */
@@ -705,6 +726,7 @@ void fx_fill_rect_gradient(int x1, int y1, int x2, int y2, fx_color_t c1, fx_col
 
 void fx_fill_rect_round(int x1, int y1, int x2, int y2, int r)
 {
+    fx_rect_dbg("fx_fill_rect_round", x1, y1, x2, y2);
     x1 = fx_clamp_coord(x1); y1 = fx_clamp_coord(y1);
     x2 = fx_clamp_coord(x2); y2 = fx_clamp_coord(y2);
     if (r <= 0) { fx_fill_rect(x1, y1, x2, y2); return; }
@@ -740,6 +762,7 @@ void fx_fill_rect_round(int x1, int y1, int x2, int y2, int r)
 
 void fx_draw_rect_round(int x1, int y1, int x2, int y2, int r)
 {
+    fx_rect_dbg("fx_draw_rect_round", x1, y1, x2, y2);
     x1 = fx_clamp_coord(x1); y1 = fx_clamp_coord(y1);
     x2 = fx_clamp_coord(x2); y2 = fx_clamp_coord(y2);
     if (r <= 0) { fx_draw_rect(x1, y1, x2, y2); return; }
