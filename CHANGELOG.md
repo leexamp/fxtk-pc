@@ -92,7 +92,19 @@
 - **SDF 着色器不能复用带纹理绑定的 shader desc**: 复用会让 SDF 管线要求 view/sampler 绑定,
   未绑定直接 `VALIDATE_ABND_EXPECTED_VIEW_BINDING` panic。改用独立 desc。
 
-### 修复（中文输入法在 sokol 版可用 —— 给 vendored sokol_app 补 XIM）
+### 修复（输入法候选窗位置 —— 跟随光标, 已由用户实测确认）
+- **现象**: 输入法能用后, 候选/预编辑窗**位置不对**(不在光标处)。
+- **根因**: IC 建的是 `XIMPreeditNothing` 样式 —— 输入法只能自己猜位置, 客户端没告诉它光标在哪。
+- **修法(完整版, 四段链路)**:
+  ① 框架新增 `fx_set_ime_pos(x,y)` 与驱动可选钩子 `ime_pos`, textedit 画光标时上报**屏幕坐标**;
+  ② sokol 驱动 `drv_ime_pos` → `sapp_x11_set_ime_spot()`;
+  ③ 裁剪版 sokol_app 把 IC 换成 **`XIMPreeditPosition`**(带 `XNSpotLocation` + `XFontSet`;IM 不支持时回退 `PreeditNothing`),
+     并导出 `sapp_x11_set_ime_spot()` 实时更新 spot;
+  ④ 无输入法/无钩子时整条链路空转, 不影响其它后端。
+- **实测确认(用户截图)**: 第二个输入框内键入 `nihao`, 预编辑串 `ni hao` 与候选列表
+  (`1 你好 2 你好 3 逆号 4 你 …`)**正好贴在输入框光标下方** ✓
+
+### 修复（中文输入法在 sokol 版可用### 修复（中文输入法在 sokol 版可用 —— 给 vendored sokol_app 补 XIM）
 - **现象**: sokol 版无法用输入法打中文(界面显示中文一直正常, 受限的只是键盘输入)。
 - **排查过程**(逐步收窄):
   ① `xprop -root` 显示 `XIM_SERVERS=@server=fcitx`、locale 为 `zh_CN.UTF-8` → **服务与 locale 都没问题**, 是客户端没接;
