@@ -31,3 +31,12 @@ dist/pkg/
 dist/win_sokol/
 dist/shared/
 dist/fxtk-2.3-src/
+demo-main/fxtk_sim_dbg
+demo-main/fxtk_sim_sdl
+demo-main/fxtk_sim
+demo-main/fxtk_sim_en
+demo-main/test/headless_test
+demo-main/test/headless_test_stub
+demo-main/test/bench
+demo-main/test/rt_resize
+demo-main/test/render_canvas
