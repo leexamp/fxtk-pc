@@ -941,5 +941,6 @@ int main(void) {
         else { printf("  [FAIL] 极端坐标填充面积失控 %ld\n", added); fails++; }
     }
 
+    printf("== done: %s (%d fail) ==\n", fails ? "FAIL" : "PASS", fails);
     return fails ? 1 : 0;
 }
