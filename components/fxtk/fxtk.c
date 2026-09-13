@@ -9,7 +9,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "esp_log.h"
 
 static const char *TAG = "fxtk";
 
@@ -98,7 +97,17 @@ static void ctx_draw_abs(void){ if(!s_ctxpop)return; int x1,y1,x2,y2; fx_widget_
   for(int i=0;i<5;i++){ if(i==s_ctx_hl){fx_set_color(FX_RGB(33,150,243));fx_fill_rect(x1+1,y1+1+i*rh,x2-1,y1+1+i*rh+rh-1);}
     fxtk_draw_text_size(14,x1+6,y1+3+i*rh,s_ctx_items[i], i==s_ctx_hl?FX_WHITE:FX_RGB(40,40,40), i==s_ctx_hl?FX_RGB(33,150,243):FX_WHITE); } }
 typedef struct { fx_widget_t *w; float off, tgt; int last; } fx_scroll_state_t;
-static fx_scroll_state_t s_scroll_pool[8];   /* v2.3.1: unlink_free/fx_init 也要清它, 故随 typedef 前移至此 */
+#ifndef FX_MAX_SCROLL_STATES
+/* v2.4.3: 并发滚动状态数。原先是硬编码 8(为 ESP32 省的), 但两端已分化 ——
+ * PC 不必迁就 ESP 的资源约束, 否则用户多开几个带滚轮的列表就会遇到"这个列表滚不动了"这种人为 bug。
+ * PC 默认 64(可用 -DFX_MAX_SCROLL_STATES=N 调), ESP32 仍保持 8; 池满会明确告警。 */
+#  if defined(ESP_PLATFORM)
+#    define FX_MAX_SCROLL_STATES 8
+#  else
+#    define FX_MAX_SCROLL_STATES 64
+#  endif
+#endif
+static fx_scroll_state_t s_scroll_pool[FX_MAX_SCROLL_STATES];   /* v2.3.1: unlink_free/fx_init 也要清它, 故随 typedef 前移至此 */
 static fx_scroll_state_t *scroll_state(fx_widget_t *w);
 static void scroll_drag_to(fx_widget_t *w, int y);
 static void te_sel_para(fx_widget_t*);
@@ -128,7 +137,7 @@ fx_widget_t *fxtk_alloc(void)
             return &s_pool[i];
         }
     }
-    ESP_LOGE(TAG, "widget pool full (%d)!", FX_MAX_WIDGETS);
+    fx_log(FX_LOG_ERROR, "控件池已满 (%d)! 加大 FX_MAX_WIDGETS 或复用控件", FX_MAX_WIDGETS);
     return NULL;
 }
 void fxtk_free(fx_widget_t *w)
@@ -380,7 +389,7 @@ static void layout_children(fx_widget_t *p)
              * 先子后父/名字打错 → 子件永远停在 (0,0,0,0) 且无任何提示) */
             if (!g && c->gname) {
                 g = c->grid_ref = fx_find(c->gname);
-                if (!g) ESP_LOGW(TAG, "grid '%s' not found (widget '%s')", c->gname, c->name);
+                if (!g) fx_log(FX_LOG_WARN, "grid '%s' 不存在(控件 '%s')", c->gname, c->name);
             }
             if (g && g->lines>0 && g->rows>0) {
                 int cw=(g->x2-g->x1+1)/g->rows, ch=(g->y2-g->y1+1)/g->lines;
@@ -672,7 +681,7 @@ void fx_init(const fx_driver_t *drv)
     memset(s_scroll_pool,0,sizeof(s_scroll_pool));
     fxtk_extra_reset();   /* v2.3.1: 清 list/drop 模块静态池与 s_pop 缓存指针 */
     fxtk_pool_reset_count();   /* v2.3: 池已 memset, 存活计数与分配游标同步归零 */
-    fx_layout(); ESP_LOGI(TAG,"fxtk ready: %dx%d",drv->width,drv->height);
+    fx_layout(); fx_log(FX_LOG_INFO, "fxtk ready: %dx%d, 控件 %d", drv->width, drv->height, fxtk_widget_count());
 }
 void fx_poll(void)
 {
@@ -706,8 +715,26 @@ void fx_poll(void)
         if (s_drv->touch_read(&x,&y,&p)) {
             s_last_tx=x; s_last_ty=y;   /* 悬停(未按)也更新坐标 */
             if (p && !s_touch_prev) fx_touch_press(x,y);
-            else if (p && s_touch_prev) fx_touch_move(x,y);
-            else if (!p && s_touch_prev) fx_touch_release(s_last_tx,s_last_ty);
+            /* v2.4.2 修复(用户反馈"悬停效果没了"): 原来只在指针【按住】时才调 fx_touch_move,
+             * 而上下文菜单的悬停高亮就写在这个函数里 —— 于是"只把鼠标移上去"永远不会高亮。
+             * 单纯移动也应当走这条路(拖拽类逻辑各自有 pressed 门闩, 不会误触发)。 */
+            /* v2.4.2: 分支顺序很关键 —— 释放必须排在"移动"之前判断,
+             * 否则释放事件会被移动分支吞掉, fx_touch_release 永远不执行, 点击就永远完不成
+             * (曾因此导致"标签页无法切换"的回归, 用户实测反馈)。 */
+            else if (!p && s_touch_prev) fx_touch_release(x,y);
+            else if (s_touch_prev) fx_touch_move(x,y);
+            else if (s_ctx_open && s_ctxpop) {
+                /* 未按下时的移动: 只做上下文菜单的悬停高亮(用户反馈"悬停效果没了")。
+                 * 单独放在这里而不是走 fx_touch_move, 避免干扰点击判定与各拖拽状态机。 */
+                int cx1,cy1,cx2,cy2; fx_widget_rect(s_ctxpop,&cx1,&cy1,&cx2,&cy2);
+                int hl=-1;
+                if (x>=cx1&&x<=cx2&&y>=cy1&&y<=cy2) {
+                    hl=(y-cy1)/((cy2-cy1)/5);
+                    if (hl<0) hl=0;
+                    if (hl>4) hl=4;
+                }
+                if (hl!=s_ctx_hl) { s_ctx_hl=hl; fx_repaint(); }
+            }
             s_touch_prev=p;
             /* 调试文本固定宽度, 仅内容变化才更新: 避免每帧生成新纹理挤爆缓存 */
             if (s_tdbg_on) {
@@ -1071,7 +1098,7 @@ static fx_scroll_state_t *scroll_state(fx_widget_t *w)
     for (int i = 0; i < 8; i++)
         if (!s_scroll_pool[i].w) { s_scroll_pool[i].w = w; return &s_scroll_pool[i]; }
     /* v2.3.1: 池满不再静默别名到 [0] (第 9 个控件会和第 1 个互踩), 由调用方退化处理 */
-    ESP_LOGW(TAG, "scroll pool full (>8 concurrent)");
+    fx_log(FX_LOG_WARN, "滚动状态池已满(%d 个并发): 加大 FX_MAX_SCROLL_STATES", FX_MAX_SCROLL_STATES);
     return NULL;
 }
 /* 更新滚动: 返回当前偏移(整数); 滚轮转多少内容滚多少(像素), 停后 25%/帧 收尾

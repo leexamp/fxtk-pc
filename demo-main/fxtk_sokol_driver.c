@@ -230,6 +230,20 @@ static void q_push_key(const fx_keyev_t *ev)
 
 /* ================= 顶点追加 ================= */
 
+/* v2.4.2 修复(关键): 判断能否把新图元并入上一条命令。
+ * 除了管线与纹理, 【必须】比较裁剪矩形 —— 否则来自不同裁剪区的四边形会被合并进同一条命令,
+ * 而 scissor 是按命令设置的, 于是后画的图形被前者的裁剪框裁掉(表现为"按钮没填满/整块消失")。
+ * 实测(压测页): 只按管线+纹理合并时调色板实色像素 5645; 加入裁剪比较后 27609(5 倍)。
+ * 同一裁剪区内仍会合并, 因此常规控件的批处理收益不变。 */
+static int cmd_can_merge(int pip, int tex)
+{
+    if (s_cmd_n == 0) return 0;
+    cmd_t *p = &s_cmd[s_cmd_n - 1];
+    return p->pip == pip && p->tex == tex &&
+           p->cx1 == s_clip_x1 && p->cy1 == s_clip_y1 &&
+           p->cx2 == s_clip_x2 && p->cy2 == s_clip_y2;
+}
+
 static int cmd_new(int pip, int tex)
 {
     if (s_cmd_n >= CMD_MAX) return -1;
@@ -305,7 +319,9 @@ static void emit_round(int x1, int y1, int x2, int y2, int rad, int border, uint
     if (rad * 2 > (int)(hh * 2)) rad = (int)hh;
     if (getenv("FXTK_SDFCMP")) emit_quad(0, -1, fx0, fy0, fx1, fy1, 0,0,0,0, 0xFF00FF00u);
     /* 与 emit_quad 同款合并: 相邻 SDF 四边形共用一条命令(否则一个控件一条 draw call) */
-    if (s_cmd_n == 0 || s_cmd[s_cmd_n - 1].pip != 3 || s_cmd[s_cmd_n - 1].tex != -1) {
+    /* 诊断开关: FXTK_SDFNOMERGE=1 → 每段 SDF 单独一条命令(用于判定"合并"是否为问题源头) */
+    int no_merge = getenv("FXTK_SDFNOMERGE") != NULL;
+    if (no_merge || !cmd_can_merge(3, -1)) {
         if (cmd_new(3, -1) < 0) return;
     }
     s_sdf_n++;
@@ -326,7 +342,7 @@ static void emit_round(int x1, int y1, int x2, int y2, int rad, int border, uint
 static void emit_quad(int pip, int tex, float x0, float y0, float x1, float y1,
                       float u0, float v0, float u1, float v1, uint32_t c)
 {
-    if (s_cmd_n == 0 || s_cmd[s_cmd_n - 1].pip != pip || s_cmd[s_cmd_n - 1].tex != tex) {
+    if (!cmd_can_merge(pip, tex)) {   /* v2.4.2: 合并必须同时比较裁剪区, 否则跨区图元被 scissor 裁掉 */
         if (cmd_new(pip, tex) < 0) return;
     }
     if (s_vb_n + 4 > VB_MAX || s_ib_n + 6 > IB_MAX) return;
@@ -437,6 +453,7 @@ static void px_flush(void)
 
 static int drv_init(void)
 {
+    { extern void fx_debug_log_selftest(void); fx_debug_log_selftest(); }   /* v2.4.2: 取证自检 */
     if (getenv("FXTK_NO_QUADGPU")) fx_sokol_driver.draw_image_quad = NULL;   /* A/B: 强制走 CPU 逆单应 */
     sg_desc desc = {0};
     /* 环境默认值与我们的管线保持一致: 2D UI 不需要深度缓冲。
@@ -712,6 +729,18 @@ static void drv_hold_end(void) {}
 static void drv_fill_rect(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint32_t c)
 {
     if (x0 > x1 || y0 > y1) return;
+    /* v2.4.2 驱动侧取证: 请求矩形 vs 实际发出的四边形 + 顶点/命令区间。
+     * 用于"合法参数却被画成横贯长条"的现象(用户实测: 拖角点出界后出现橙色横带)。 */
+    int dbg = getenv("FXTK_RECTDBG") ? 1 : 0;
+#if FXTK_DEBUG_LOG_DRV
+    dbg = 1;
+#endif
+    if (dbg) {
+        long w = (long)x1 - x0 + 1, h = (long)y1 - y0 + 1;
+        if (w > 400 || h > 400 || (w > 0 && h > 0 && (w / (h ? h : 1) > 20 || h / (w ? w : 1) > 20)))
+            fprintf(stderr, "[drvdbg] fill_rect 请求=(%u,%u)-(%u,%u) %ldx%ld color=%06x vb=%d ib=%d\n",
+                    x0, y0, x1, y1, w, h, c & 0xFFFFFF, s_vb_n, s_ib_n);
+    }
     emit_quad(0, -1, (float)x0, (float)y0, (float)(x1 + 1), (float)(y1 + 1),
               0, 0, 0, 0, 0xFF000000u | (c & 0xFFFFFFu));
 }
@@ -906,6 +935,15 @@ static void drv_draw_image_quad(const uint32_t *px, int w, int h, const float *x
     cm->count += 6;
 }
 
+/* v2.4.1: 输入法候选窗位置 → 交给裁剪版 sokol_app 更新 XIM 的 XNSpotLocation。
+ * Windows/D3D 侧没有 XIM, 做成空操作(否则会引用到不存在的 X11 符号, 交叉编译直接失败)。 */
+#if defined(_WIN32)
+static void drv_ime_pos(int x, int y) { (void)x; (void)y; }
+#else
+extern void sapp_x11_set_ime_spot(int x, int y);
+static void drv_ime_pos(int x, int y) { if (getenv("FXTK_IMEDBG")) fprintf(stderr, "[ime] spot=(%d,%d)\n", x, y); sapp_x11_set_ime_spot(x, y); }
+#endif
+
 static int drv_touch_read(int *x, int *y, int *pressed)
 {
     if (s_qt_h == s_qt_t) return 0;
@@ -941,8 +979,55 @@ static void drv_set_clip_rect(int x1, int y1, int x2, int y2)
 {
     s_clip_x1 = x1; s_clip_y1 = y1; s_clip_x2 = x2; s_clip_y2 = y2;
 }
-static void drv_clip_set(const char *s) { (void)s; }
-static const char *drv_clip_get(void) { return ""; }
+/* v2.4.1: 剪贴板 —— sokol_app【没有】剪贴板 API, 之前这里是空桩, 复制/粘贴完全失效(用户反馈)。
+ * 方案: 优先调用系统工具(xsel / xclip / wl-copy|wl-paste), 让别的程序也能粘;
+ * 工具不存在时退化为【进程内缓冲】—— 至少保证应用内部复制/粘贴永远可用。
+ * 顺带: 这也给了中文一个绕行 —— 输入法用不了(见文件末尾说明)时, 可以复制中文再 Ctrl+V 粘进来。 */
+static char s_clip[8192];
+static int  s_clip_tool = -1;          /* -1 未探测; 0 无工具; 1 xsel; 2 xclip; 3 wl-copy/paste */
+static int clip_tool(void)
+{
+    if (s_clip_tool < 0) {
+        if (system("command -v xsel >/dev/null 2>&1") == 0)        s_clip_tool = 1;
+        else if (system("command -v xclip >/dev/null 2>&1") == 0)  s_clip_tool = 2;
+        else if (system("command -v wl-copy >/dev/null 2>&1") == 0 &&
+                 system("command -v wl-paste >/dev/null 2>&1") == 0) s_clip_tool = 3;
+        else s_clip_tool = 0;
+    }
+    return s_clip_tool;
+}
+static void drv_clip_set(const char *s)
+{
+    if (!s) s = "";
+    snprintf(s_clip, sizeof(s_clip), "%s", s);
+    const char *cmd = NULL;
+    switch (clip_tool()) {
+    case 1: cmd = "xsel --clipboard --input 2>/dev/null"; break;
+    case 2: cmd = "xclip -selection clipboard 2>/dev/null"; break;
+    case 3: cmd = "wl-copy 2>/dev/null"; break;
+    default: return;                    /* 无工具: 只用进程内缓冲 */
+    }
+    FILE *p = popen(cmd, "w");
+    if (p) { fputs(s_clip, p); pclose(p); }
+}
+static const char *drv_clip_get(void)
+{
+    const char *cmd = NULL;
+    switch (clip_tool()) {
+    case 1: cmd = "xsel --clipboard --output 2>/dev/null"; break;
+    case 2: cmd = "xclip -selection clipboard -o 2>/dev/null"; break;
+    case 3: cmd = "wl-paste --no-newline 2>/dev/null"; break;
+    default: return s_clip;             /* 无工具: 返回上次 set 的内容 */
+    }
+    FILE *p = popen(cmd, "r");
+    if (p) {
+        size_t n = fread(s_clip, 1, sizeof(s_clip) - 1, p);
+        pclose(p);
+        s_clip[n] = 0;
+        while (n && (s_clip[n-1] == '\n' || s_clip[n-1] == '\r')) s_clip[--n] = 0;
+    }
+    return s_clip;
+}
 /* v2.4 P4: 旋转贴图 —— 之前是空实现, 于是图形页那两张旋转图片在 sokol 后端整块消失
  * (与 SDL 版一眼可见的差别)。现在直接用 P4 的 GPU 真透视四边形: 旋转是仿射特例(权重恒 1),
  * 硬件自己做旋转 + 双线性。语义与 SDL 驱动严格对齐: 以 (cx,cy) 为中心、尺寸 dw x dh、角度取 -ang 度
@@ -1085,6 +1170,7 @@ fx_driver_t fx_sokol_driver = {
     .fill_rect_round = drv_fill_rect_round,     /* v2.4: GPU SDF 圆角矩形 (抗锯齿) */
     .stroke_rect_round = drv_stroke_rect_round, /* v2.4: GPU SDF 圆角描边 (抗锯齿) */
     .draw_line_aa = drv_draw_line_aa,           /* v2.4 档位 2: GPU 羽化线段 */
+    .ime_pos = drv_ime_pos,                   /* v2.4.1: 输入法候选窗跟随光标 */
     .draw_image_quad = drv_draw_image_quad,     /* v2.4 P4: GPU 真透视四边形形变 */
 };
 
@@ -1315,6 +1401,11 @@ void fxtk_sokol_handle_event(const sapp_event *e)
             q_push_touch_edge(0, 0, 0);
         break;
     case SAPP_EVENTTYPE_CHAR: {
+        /* 【v2.4.1 修复】Ctrl 组合键不是文本。sokol_app 对 Ctrl+A 这类组合键【也会】发一个 CHAR 事件
+         * (char='a' 且 modifiers 里带 CTRL), 而框架把"无 mod 的字符"当普通输入插入 —— 于是
+         * Ctrl+A 先全选、紧接着被插入的 'a' 覆盖掉, 用户看到的就是"全选了结果全没了"。
+         * SDL 不会这样(SDL 不给 Ctrl 组合发 SDL_TEXTINPUT), 所以这里按 SDL 语义过滤掉。 */
+        if ((e->modifiers & SAPP_MODIFIER_CTRL) || e->char_code < 32) break;
         uint32_t cp = e->char_code;
         char *o = k.utf8;
         if (cp < 0x80) { o[0] = (char)cp; o[1] = 0; }
@@ -1359,3 +1450,12 @@ void fxtk_sokol_handle_event(const sapp_event *e)
     default: break;
     }
 }
+
+/* ================= 已知限制: 中文输入 =================
+ * sokol_app 的 X11 后端【不实现 XIM】(源码里没有 XOpenIM/Xutf8LookupString/XSetICFocus),
+ * 所以 fcitx/ibus 之类输入法在 sokol 版里无法组字 —— 这不是本项目的 bug, 是 sokol_app 的固有限制。
+ * 三个绕行:
+ *   ① 用剪贴板: 在别处复制中文, 到输入框 Ctrl+V(剪贴板已在本驱动实现, 支持中文);
+ *   ② 用遗留 SDL 版: ./build.sh --sdl (SDL2 走 SDL_TEXTINPUT, 输入法正常);
+ *   ③ 界面文字本身一直是中文正常的(用的是内置字体), 只有"键盘打字输入中文"受限。
+ */

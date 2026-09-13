@@ -136,6 +136,14 @@ static void on_imgq(fx_widget_t *w, void *ud)
         float nx = (float)lx / (float)cw, ny = (float)ly / (float)ch;
         s_quad_n[s_quad_drag * 2]     = 0.5f + (nx - 0.5f) / (s_quad_scale > 0.01f ? s_quad_scale : 1.0f);
         s_quad_n[s_quad_drag * 2 + 1] = 0.5f + (ny - 0.5f) / (s_quad_scale > 0.01f ? s_quad_scale : 1.0f);
+        /* v2.4.2 修复: 拖出屏幕时归一化坐标会跑到很远处, 转像素后可能得到 NaN/inf→INT_MIN 之类的退化值,
+         * 后续 "hx±7" 整数溢出 → 钳到裁剪后变成横贯整屏的色带(用户实测"窗口布满黄线")。
+         * 这里把归一化坐标限制在 [-1.5, 2.5]: 手柄仍能被拖到画布外一段距离(够用), 但永远不会退化。 */
+        for (int c2 = 0; c2 < 2; c2++) {
+            float *v = &s_quad_n[s_quad_drag * 2 + c2];
+            if (*v < -1.5f) *v = -1.5f;
+            if (*v >  2.5f) *v =  2.5f;
+        }
     }
 
     /* 画四边形 (真透视) */
@@ -502,22 +510,22 @@ static void build_ui(void) {
         fx_set_cb(b, on_key, (void *)(intptr_t)i);
     }
     /* 颜色选择器 (右侧): 两套 RGB 改示例按钮底色/字色, 干净排布 */
-    fx_label_new(pixel("262,36","470,50"), page(2), title("颜色选择器"), fgcolor(FX_RGB(51,51,51)));
-    fx_label_new(pixel("262,56","306,70"), page(2), title("背景"), fgcolor(FX_RGB(120,120,120)));
-    fx_textedit_new(pixel("262,72","330,90"), name("cp_br"), page(2), title("255"), call(cp_cb));
-    fx_textedit_new(pixel("334,72","402,90"), name("cp_bg"), page(2), title("90"), call(cp_cb));
-    fx_textedit_new(pixel("406,72","470,90"), name("cp_bb"), page(2), title("0"), call(cp_cb));
-    fx_label_new(pixel("262,96","306,110"), page(2), title("文字"), fgcolor(FX_RGB(120,120,120)));
-    fx_textedit_new(pixel("262,112","330,130"), name("cp_tr"), page(2), title("40"), call(cp_cb));
-    fx_textedit_new(pixel("334,112","402,130"), name("cp_tg"), page(2), title("40"), call(cp_cb));
-    fx_textedit_new(pixel("406,112","470,130"), name("cp_tb"), page(2), title("40"), call(cp_cb));
-    fx_button_new(pixel("262,142","470,164"), page(2), title("示例按钮"), name("cp_btn"), color(FX_RGB(255,90,0)), call(cp_cb));
-    fx_label_new(pixel("262,172","470,192"), page(2), name("cp_sw"), title("颜色显示区"), fgcolor(FX_WHITE), color(FX_RGB(255,90,0)));
-    fx_button_new(pixel("262,200","352,220"), page(2), title("重置"), color(FX_RGB(244, 67, 54)), call(on_reset));
-fx_label_new(pixel("262,224","470,236"), name("info"), page(2), title("点击数字键试试"), fgcolor(FX_RGB(51, 51, 51)));
+    fx_label_new(pixel("260,36","462,50"), page(2), title("颜色选择器"), fgcolor(FX_RGB(51,51,51)));
+    fx_label_new(pixel("260,56","304,70"), page(2), title("背景"), fgcolor(FX_RGB(120,120,120)));
+    fx_textedit_new(pixel("260,72","328,90"), name("cp_br"), page(2), title("255"), call(cp_cb));
+    fx_textedit_new(pixel("332,72","398,90"), name("cp_bg"), page(2), title("90"), call(cp_cb));
+    fx_textedit_new(pixel("406,72","462,90"), name("cp_bb"), page(2), title("0"), call(cp_cb));
+    fx_label_new(pixel("260,96","304,110"), page(2), title("文字"), fgcolor(FX_RGB(120,120,120)));
+    fx_textedit_new(pixel("260,112","328,130"), name("cp_tr"), page(2), title("40"), call(cp_cb));
+    fx_textedit_new(pixel("332,112","398,130"), name("cp_tg"), page(2), title("40"), call(cp_cb));
+    fx_textedit_new(pixel("406,112","462,130"), name("cp_tb"), page(2), title("40"), call(cp_cb));
+    fx_button_new(pixel("260,142","462,164"), page(2), title("示例按钮"), name("cp_btn"), color(FX_RGB(255,90,0)), call(cp_cb));
+    fx_label_new(pixel("260,172","462,192"), page(2), name("cp_sw"), title("颜色显示区"), fgcolor(FX_WHITE), color(FX_RGB(255,90,0)));
+    fx_button_new(pixel("260,200","348,220"), page(2), title("重置"), color(FX_RGB(244, 67, 54)), call(on_reset));
+fx_label_new(pixel("260,224","462,236"), name("info"), page(2), title("点击数字键试试"), fgcolor(FX_RGB(51, 51, 51)));
     /* v2.4 P5: 卡片示范 —— 圆角 + 1px 描边的小面板, 托住整组"颜色选择器"。
      * 创建顺序有讲究: 同级新控件排在链表头、绘制时先画(等于最底层), 所以卡片必须【最后】创建。 */
-    fx_panel_new(pixel("256,28","470,240"), page(2), color(FX_RGB(250, 250, 250)), border(1));
+    fx_panel_new(pixel("254,26","466,242"), page(2), color(FX_RGB(250, 250, 250)), border(1));
 
     /* 页3 (v2.4): 图片 + 四边形形变编辑器 */
     fx_canvas_new(pixel("6,32", "280,220"), name("imgq"), page(3), anim(1), color(FX_RGB(245, 245, 245)), call(on_imgq));

@@ -222,3 +222,105 @@ fx_color_t fx_colorx_current(fx_colorx_t c);
 | slider / progress | 76,175,80 绿 | 浅灰轨道 |
 | canvas | 245,245,245 | — |
 | textedit | 白 | 黑 |
+
+---
+
+# v2.4 新增与变更 API 速查
+
+> 这一节是 v2.4 的新增面。旧 API 未变（向后兼容），改动的默认值/行为在条目里注明。
+
+## 抗锯齿（两层，默认已开）
+
+```c
+void fx_set_widget_aa(int level);   /* 0=关, 1=控件层 SDF 圆角/描边(默认), 2=再加图元羽化线 */
+int  fx_widget_aa_level(void);      /* 当前档位 */
+int  fx_aa_autodegrade(void);       /* 驱动在掉帧时调用: 降一档并返回新档位 */
+```
+- 免改代码对比:启动时设 `FXTK_AA=0|1|2`。
+- 无对应钩子的后端（SDL / ESP32 纯 CPU）自动回退到逐行填充，**API 不变**。
+
+## canvas 变换栈
+
+```c
+void fx_canvas_push_affine(float a,float b,float c,float d,float e,float f);
+void fx_canvas_pop_affine(void);
+void fx_transform_reset(void);      /* 每帧自动复位 */
+int  fx_transform_depth(void);      /* 深度上限 8, 满则覆盖栈顶 */
+void fx_canvas_transform_point(float x,float y,float *ox,float *oy);
+void fx_fill_quad(const float *xy8);/* 实心四边形(可旋转/斜切) */
+```
+push 之后:像素/线段按端点过变换，**矩形填充变实心四边形**，**图片走透视四边形**。
+
+## 图片四边形形变（真透视）
+
+```c
+void fx_draw_image_quad(const fx_image_t *img, const float *xy8);   /* 四角顺时针, 左上起 */
+int  fx_quad_warp_gpu(void);        /* 形变是否由驱动 GPU 钩子接管(供 HUD 显示) */
+/* 工具(想自建管线时用) */
+int  fx_quad_homography(const float *src8, const float *dst8, float m[9]);
+int  fx_mat3_invert(const float *m, float out[9]);
+int  fx_quad_corner_weights(const float *xy8, float d4[4]);  /* 每角透视权重: 写进 gl_Position.w */
+```
+- GPU 路径单次 draw、透视校正插值（**没有两个三角形各做仿射的对角缝**）。
+- 退化/自交四边形一律回退包围盒映射（**GPU/CPU 两条路径都有这道闸**）。
+
+## GPU 实时光线步进
+
+```c
+int  fx_raymarch_available(void);
+void fx_draw_raymarch(float time, int x, int y, int w, int h);
+```
+
+## 输入法（Linux/X11，v2.4.3）
+
+```c
+void fx_set_ime_pos(int x, int y);  /* 把文本框光标的屏幕坐标报给后端, 让候选窗贴上去 */
+```
+- 驱动侧可选钩子 `fx_driver_t::ime_pos`；框架在 textedit 画光标时自动上报。
+- sokol 版走 XIM（已给 vendored sokol_app 打补丁：`XOpenIM`/`XCreateIC`/事件循环 `XFilterEvent`/`Xutf8LookupString`）。
+
+## 截图与图片
+
+```c
+int fx_screenshot(const char *path);                 /* 驱动 read_pixels 回读当前帧 → PNG */
+int fx_img_load_file(const char *path, fx_img_t *out);/* PNG/JPEG/BMP/GIF/TGA/PNM */
+```
+
+## 日志与服务层
+
+```c
+void fx_log(fx_log_level_t lv, const char *fmt, ...);  /* 核心统一出口; ESP32 侧转发 esp_log_write */
+void fx_log_set_level(fx_log_level_t lv);
+fx_caps_t   fx_backend_caps(void);
+int fx_backend_pick_file(char *out,int cap,const char *title,const char *ext_csv);
+```
+**核心不再包含任何平台日志头**（v2.4.3 起；PC 端原先靠 demo 的 `esp_log.h` 垫片，已删除）。
+
+## 驱动接口（`fx_driver_t`）v2.4 新增的可选钩子
+
+`fill_rect_round` / `stroke_rect_round` / `draw_line_aa` / `read_pixels` / `draw_image_quad` /
+`raymarch` / `ime_pos` —— 全部可选，未实现即自动回退旧路径。
+
+## 配置宏（编译期）
+
+| 宏 | 作用 | PC 默认 | ESP32 默认 |
+|---|---|---|---|
+| `FX_MAX_WIDGETS` | 控件池 | **16384** | 4096 |
+| `FX_MAX_SCROLL_STATES` | 并发滚动状态 | **64** | 8 |
+| `FX_MAX_EXTRA_WIDGETS` | 列表/下拉等扩展控件槽 | **64** | 8 |
+| `FX_MAX_SCROLL_STATES` 之外 | 均可 `-D` 覆盖 | | |
+| `FXTK_WIDGET_*` | 按控件裁剪（v2.3）减体积 | 全开 | 按需关 |
+| `FXTK_BACKEND_STUB` | 确定性后端（固定时钟/定种子随机/内存文件） | 关 | — |
+| `FX_MAX_WIDGETS` 同族 | 池满时**明确告警**并提示改哪个宏 | | |
+
+## 调试/取证开关（环境变量 + 构建目标）
+
+| 开关 | 用途 |
+|---|---|
+| `FXTK_AA=0\|1\|2` | 覆盖抗锯齿档位 |
+| `FXTK_RECTDBG=1` | 图元参数取证：越界坐标 / 面积异常 / 半径异常 / 图片角点 → 打印参数与裁剪区 |
+| `FXTK_SDFNOMERGE=1` | 每段 SDF 独立成命令（A/B 判定"命令合并"因素） |
+| `FXTK_IMEDBG=1` | 打印上报给输入法的光标坐标 |
+| `FXTK_IMPORT=<路径>` | 免对话框导入图片（CI/无桌面环境） |
+| `FXTK_NOVSYNC=1` | 关垂直同步 |
+| `./build_dbg.sh` / `make fxtk_sim_dbg` | **取证版**：探针编进二进制，不依赖环境变量；启动会打一行自检 |

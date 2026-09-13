@@ -65,23 +65,98 @@ static void on_keys_view(fx_widget_t *w, void *ud) {
     (void)ud;
     int x1, y1, x2, y2; fx_widget_rect(w, &x1, &y1, &x2, &y2);
     int cw = x2 - x1 + 1, ch = y2 - y1 + 1;
-    fx_set_color(FX_RGB(30, 30, 30)); fx_fill_rect(0, 0, cw - 1, ch - 1);
-    char buf[96];
+    /* v2.4.2(图六 键鼠页太空): 原来整页只有两行字, 一大块黑很空。改成"输入监视器":
+     * 头部标题条 + 两张状态卡(键盘/鼠标) + 最近事件日志(交替行色) + 画布内指针十字标。 */
+    const fx_color_t BG = FX_RGB(30, 30, 36), CARD = FX_RGB(42, 43, 52), LINE = FX_RGB(58, 60, 72);
+    fx_set_color(BG); fx_fill_rect(0, 0, cw - 1, ch - 1);
+
+    /* 头部: 圆角标题条 */
+    fx_set_color(FX_RGB(33, 150, 243));
+    fx_fill_rect_round(10, 10, cw - 11, 34, 6);
+    fx_draw_text_c(20, 14, "输入监视器 · 键盘 / 鼠标 / 滚轮", FX_WHITE, FX_RGB(33, 150, 243));
+
     fx_keyev_t k = fx_last_key();
-    if (k.utf8[0]) snprintf(buf, sizeof(buf), "最后按键: %s", k.utf8);
-    else if (k.key == FX_KEY_BACKSPACE) snprintf(buf, sizeof(buf), "最后按键: Backspace");
-    else if (k.key == FX_KEY_RETURN) snprintf(buf, sizeof(buf), "最后按键: Enter");
-    else if (k.key == FX_KEY_ESCAPE) snprintf(buf, sizeof(buf), "最后按键: Esc");
-    else snprintf(buf, sizeof(buf), "随便敲键盘 / 移动鼠标试试");
-    fx_draw_text_c(10, 12, buf, FX_YELLOW, FX_RGB(30, 30, 30));
     int mx, my, mp; fx_touch_state(&mx, &my, &mp);
-    snprintf(buf, sizeof(buf), "鼠标: %d, %d  [%s]", mx, my, mp ? "按下" : "松开");
-    fx_draw_text_c(10, 44, buf, FX_GREEN, FX_RGB(30, 30, 30));
+
+    /* 最近事件日志: 环形缓冲, 只在内容变化时入队 */
+    static char s_log[18][64];
+    static int s_log_n = 0, s_have = 0, s_frm = 0;
+    s_frm++;
+    static fx_keyev_t s_prev_key;
+    static int s_prev_mx = -9999, s_prev_my = -9999, s_prev_mp = -1;
+    char ev[64];
+    int dirty = 0;
+    if (s_have && (k.key != s_prev_key.key || k.utf8[0] != s_prev_key.utf8[0])) {
+        if (k.utf8[0]) snprintf(ev, sizeof(ev), "按键  「%s」", k.utf8);
+        else if (k.key == FX_KEY_BACKSPACE) snprintf(ev, sizeof(ev), "按键  Backspace");
+        else if (k.key == FX_KEY_RETURN)    snprintf(ev, sizeof(ev), "按键  Enter");
+        else if (k.key == FX_KEY_ESCAPE)    snprintf(ev, sizeof(ev), "按键  Esc");
+        else if (k.key == FX_KEY_LEFT)      snprintf(ev, sizeof(ev), "按键  ←");
+        else if (k.key == FX_KEY_RIGHT)     snprintf(ev, sizeof(ev), "按键  →");
+        else                                snprintf(ev, sizeof(ev), "按键  code=%d", (int)k.key);
+        dirty = 1;
+    } else if (mp != s_prev_mp) {
+        snprintf(ev, sizeof(ev), "鼠标  %s", mp ? "按下" : "松开");
+        dirty = 1;
+    } else if (mp && (mx != s_prev_mx || my != s_prev_my)) {
+        snprintf(ev, sizeof(ev), "拖动  移到 (%d, %d)", mx, my);
+        dirty = 1;
+    }
+    if (dirty) {
+        snprintf(s_log[s_log_n], sizeof(s_log[0]), "t=%-5d %s", s_frm, ev);
+        s_log_n = (s_log_n + 1) % 18;
+    }
+    s_prev_key = k; s_prev_mx = mx; s_prev_my = my; s_prev_mp = mp; s_have = 1;
+
+    /* 状态卡 */
+    int cardw = (cw - 34) / 2;
+    const char *ttl[2] = { "键盘", "鼠标" };
+    char val[2][64];
+    if (k.utf8[0] || k.key) snprintf(val[0], sizeof(val[0]), "%s%s", k.utf8[0] ? "字符 " : "键码 ", k.utf8[0] ? k.utf8 : "");
+    else snprintf(val[0], sizeof(val[0]), "等待输入…");
+    if (k.utf8[0] == 0 && k.key) snprintf(val[0], sizeof(val[0]), "键码 %d", (int)k.key);
+    snprintf(val[1], sizeof(val[1]), "%d, %d  ·  %s", mx, my, mp ? "按下" : "松开");
+    for (int i = 0; i < 2; i++) {
+        int bx = 10 + i * (cardw + 14), by = 44, bh = 46;
+        fx_set_color(CARD); fx_fill_rect_round(bx, by, bx + cardw, by + bh, 6);
+        fx_set_color(LINE);  fx_draw_rect_round(bx, by, bx + cardw, by + bh, 6);
+        fx_draw_text_c(bx + 10, by + 6, ttl[i], FX_RGB(140, 145, 160), CARD);
+        fxtk_draw_text_size(14, bx + 10, by + 24, val[i], FX_WHITE, CARD);
+    }
+
+    /* 事件日志面板(交替行色, 最新的在最下面) */
+    int ly0 = 102, lh = 18, rows = (ch - ly0 - 34) / lh; if (rows < 1) rows = 1; if (rows > 18) rows = 18;
+    if (rows > 0) {
+        fx_set_color(CARD); fx_fill_rect_round(10, ly0 - 6, cw - 11, ly0 - 6 + rows * lh + 22, 6);
+        fx_set_color(LINE);  fx_draw_rect_round(10, ly0 - 6, cw - 11, ly0 - 6 + rows * lh + 22, 6);
+        fxtk_draw_text_size(13, 20, ly0, "事件日志(最近 18 条)", FX_RGB(140, 145, 160), CARD);
+        for (int i = 0; i < rows; i++) {
+            int idx = (s_log_n - 1 - i + 36) % 18;          /* 最新在最上 */
+            if (!s_have && !s_log[idx][0]) continue;
+            int y = ly0 + 20 + i * lh;
+            fx_color_t rowbg = (i % 2) ? CARD : FX_RGB(36, 37, 45);
+            fx_set_color(rowbg); fx_fill_rect(16, y, cw - 17, y + lh - 2);
+            fx_draw_text_c(22, y + 1, s_log[idx], i == 0 ? FX_YELLOW : FX_RGB(190, 195, 210), rowbg);
+        }
+    }
+
+    /* 底部提示行: 填满下方留白, 同时告诉用户这一页能干什么 */
+    fxtk_draw_text_size(13, 20, ch - 22,
+        "提示: 移动鼠标看画布内十字标 · 点击任意按钮看状态变化 · 滚轮滚动会记录在事件日志里",
+        FX_RGB(110, 115, 130), BG);
+
+    /* 画布内指针十字标(让"鼠标位置"这件事看得见) */
+    if (mx >= x1 && mx <= x2 && my >= y1 && my <= y2) {
+        int px = mx - x1, py = my - y1;
+        fx_set_color(mp ? FX_GREEN : FX_RGB(120, 200, 140));
+        fx_draw_hline(px - 12, px + 12, py);
+        fx_draw_vline(px, py - 12, py + 12);
+    }
 }
 
 /* ================= 页8: 压测 ================= */
 static int s_mv_clicks = 0;
-#define MV_DYN_MAX 4000      /* 对齐控件池余量 (FX_MAX_WIDGETS 4096) */
+#define MV_DYN_MAX 12000   /* v2.4.3: 指针缓存的数组界(PC 端控件池已放宽到 16384); 实际数量仍受画布容量限制 */
 static int s_mv_extra = 0;   /* 动态增加的按钮数 */
 static fx_widget_t *s_dyn[MV_DYN_MAX];   /* 指针缓存, 免每帧 fx_find 线性扫描 */
 static void on_mv_click(fx_widget_t *w, void *ud) {
@@ -117,8 +192,15 @@ static void on_move(fx_widget_t *w, void *ud) {
     int cap = cols * rows;
     if (fxtk_fps() >= 30 && s_mv_extra < cap && s_mv_extra < MV_DYN_MAX) {
         fx_parent(fx_find("move_cv"));   /* 挂到画布下, 随画布裁剪 */
+        /* v2.4.2(图七 压测页观赏性): 原来所有动态控件都是同一种紫(156,39,176), 铺满后像一坨噪点、观赏性差。
+         * 改成【按行取色的色阶】: 同一行同色、逐行轮转, 于是整片控件形成有秩序的色带(新控件加入时色带还会随之下移)。 */
+        static const uint32_t s_mv_pal[6] = {
+            FX_RGB(33, 150, 243), FX_RGB(0, 172, 193), FX_RGB(76, 175, 80),
+            FX_RGB(255, 179, 0),  FX_RGB(244, 81, 30),  FX_RGB(126, 87, 194)
+        };
+        int row = (cols > 0) ? (s_mv_extra / cols) : 0;
         fx_widget_t *nb = fx_button_new(pixel("0,0", "0,0"), title("动态"),
-                                        line(9), color(FX_RGB(156, 39, 176)), call(on_mv_extra_click));
+                                        line(9), color(s_mv_pal[row % 6]), call(on_mv_extra_click));
         fx_parent(fx_find("tab"));
         if (nb) {
             int nx = 8 + (s_mv_extra % cols) * 24, ny = 30 + (s_mv_extra / cols) * 20;
@@ -294,7 +376,9 @@ static void on_fs_view(fx_widget_t*w,void*ud){ (void)w;(void)ud;
     fx_canvas_clear(w,FX_RGB(250,250,250));
     for(int i=0;i<s_n;i++){ int y=TOP+(i*rh)-off; if(y+rh<TOP)continue; if(y>ch-1)break;
         int sel=(i==s_sel), hov=(i==s_hov);
-        fx_color_t c=s_ent[i].is_dir?FX_BTN_BLUE:FX_UI_FG;
+        /* v2.4.2(图九): 正文原来用 FX_UI_FG(近黑)压在 242 的浅底上, 对比过硬、看着发"黑压白"。
+         * 换成中间调 85,85,85: 依然清晰, 但不再刺眼(用户反馈"文本与背景差异略明显")。 */
+        fx_color_t c=s_ent[i].is_dir?FX_BTN_BLUE:FX_RGB(85,85,85);
         fx_set_color(sel?FX_BTN_BLUE:(hov?FX_RGB(210,230,250):FX_RGB(242,242,242))); fx_fill_rect(2,y,cw-2,y+rh-2);
         if(hov && !sel){ fx_set_color(FX_BTN_BLUE); fx_draw_rect(2,y,cw-2,y+rh-2); }
         char nm[64]; strncpy(nm,s_ent[i].name,63); nm[63]=0; if(fx_text_width(nm)>cw/2-14){ nm[cw/2/2-4]=0; strcat(nm,".."); }

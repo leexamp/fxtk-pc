@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    name: Linux (build + headless test + examples)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev \
+            libegl1-mesa-dev libgles2-mesa-dev libx11-dev
+
+      - name: Build demo (fxtk_sim)
+        run: make -C demo-main fxtk_sim
+
+      - name: Run headless unit tests
+        run: make -C demo-main test
+
+      - name: Build a representative set of examples
+        run: make -C demo-main ex01_hello ex02_widgets ex03_anim ex07_snake ex14_resize
+
+      - name: Build canvas tutorial examples (examples/canvas)
+        run: make -C demo-main canvas_01_primitives canvas_03_offscreen canvas_06_interact
+
+      - name: Headless-render canvas examples (catches resize crashes)
+        run: |
+          cd demo-main
+          for e in canvas_01_primitives canvas_02_immediate canvas_03_offscreen canvas_04_custom_widget canvas_05_image canvas_06_interact canvas_07_aa; do
+            gcc -O2 -I. -I../components/fxtk test/render_canvas.c ../examples/canvas/$e.c \
+              ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
+              ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_extra.c \
+              ../components/fxtk/fxtk_effects.c -o /tmp/rc_$e -lm
+            /tmp/rc_$e 480 272 /tmp/$e.ppm || { echo "render crash at 480: $e"; exit 1; }
+            /tmp/rc_$e 200 112 /tmp/${e}_small.ppm || { echo "render crash at 200: $e"; exit 1; }
+          done
+          echo "headless canvas render OK"
+
+      - name: Warnings report (non-blocking)
+        run: |
+          set +e
+          gcc -O2 -Wall -Wextra -o /dev/null -I. -I../components/fxtk \
+            ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
+            ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_font.c \
+            ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_extra.c \
+            ../components/fxtk/fxtk_backends.c \
+            fxtk_sdl_driver.c raymarch.c gpu_raymarch.c \
+            main_linux.c app.c app_desktop.c \
+            -lSDL2 -lSDL2_ttf -lSDL2_image -lm -pthread -lEGL -lGLESv2 -lX11 2> /tmp/fxtk_warnings.txt
+          if [ $? -ne 0 ]; then
+            echo "❌ Warnings step: compile failed, report would be meaningless:"
+            tail -30 /tmp/fxtk_warnings.txt
+            exit 1
+          fi
+          n=$(grep -c 'warning:' /tmp/fxtk_warnings.txt)
+          echo "Total -Wall -Wextra warnings: $n (v2.3.1 baseline: 69, advisory only)"
+
+
+      - name: Golden image regression (画布金图, 逐像素)
+        # 只跑画布示例金图: 它们走【纯软件假驱动】, 不依赖 GPU/SDL/字体文件, 因此在 CI runner 上可复现。
+        # 演示页金图依赖 SDL/SDL_ttf 版本(不同 runner 渲染可能不逐位一致), 只在本地/参考环境跑, 见 tools/golden.sh。
+        # 容差 1 用于吸收不同 gcc 版本下浮点抗锯齿的最后一位差异。
+        run: GOLDEN_SKIP_DEMO=1 GOLDEN_TOL=1 ./tools/golden.sh
+
+  windows-cross:
+    name: Windows cross-build (mingw)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mingw toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+
+      - name: Vendor SDL2 Windows dev packages (setup_win_cross.sh)
+        working-directory: demo-main
+        run: bash ./setup_win_cross.sh
+
+      - name: Cross-build demo (uses vendored third_party/SDL2-win)
+        run: cd demo-main && bash ./build_win_cross.sh app
+
+      - name: Cross-build an example
+        run: cd demo-main && bash ./build_win_cross.sh ex05_scroll
+
+  # v2.4: ESP32 侧接口级编译冒烟 (不需要 ESP-IDF 工具链; 抓隐式声明等"侥幸编过"的问题)
+  esp32-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ESP32 接口级冒烟
+        run: ./tools/esp32_smoke.sh

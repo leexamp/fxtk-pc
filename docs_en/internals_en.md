@@ -26,7 +26,7 @@ For people who want to modify the source / port it. For application development,
 - `lines`(font size) / `rows`(alignment) / `value` / `page`
 - Computed rectangle `x1..y2`; parent/child/sibling pointers
 
-**Widget pool**: static array `s_pool[FX_MAX_WIDGETS]`, `FX_MAX_WIDGETS = 4096` (about 940KB BSS). `fxtk_alloc()` linearly finds an empty slot, `fxtk_free()` marks it `FX_W_NONE`.
+**Widget pool**: static array `s_pool[FX_MAX_WIDGETS]`, `FX_MAX_WIDGETS (16384 on PC / 4096 on ESP32)` (about 940KB BSS). `fxtk_alloc()` linearly finds an empty slot, `fxtk_free()` marks it `FX_W_NONE`.
 
 ## Layout & Scaling
 

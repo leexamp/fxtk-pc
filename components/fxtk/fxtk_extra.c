@@ -19,12 +19,21 @@ typedef struct {
 static fx_color_t ex_darken(fx_color_t c)
 {   int r=(c>>16)&0xFF, g=(c>>8)&0xFF, b=c&0xFF;
     return (fx_color_t)(((r*3/4)<<16)|((g*3/4)<<8)|(b*3/4)); }
-static ex_slot_t s_ex[8];
+#ifndef FX_MAX_EXTRA_WIDGETS
+/* v2.4.3: 列表/下拉这类"扩展控件"的并发槽位。原先硬编码 8(ESP 视角)。两端已分化:
+ * PC 默认 64, ESP32 仍 8; 超出会明确告警而不是静默失效。 */
+#  if defined(ESP_PLATFORM)
+#    define FX_MAX_EXTRA_WIDGETS 8
+#  else
+#    define FX_MAX_EXTRA_WIDGETS 64
+#  endif
+#endif
+static ex_slot_t s_ex[FX_MAX_EXTRA_WIDGETS];
 #if FXTK_WIDGET_DROP
 static void ex_close_pop(ex_slot_t *o);   /* v2.3.1: 前向声明 (定义在下方 DROP 段, fx_list_clear 需要提前用) */
 #endif
-static ex_slot_t *ex_get(fx_widget_t *w){ for(int i=0;i<8;i++) if(s_ex[i].w==w) return &s_ex[i]; return 0; }
-static ex_slot_t *ex_new(fx_widget_t *w){ for(int i=0;i<8;i++) if(!s_ex[i].w){ memset(&s_ex[i],0,sizeof(ex_slot_t)); s_ex[i].w=w; s_ex[i].row_h=22; s_ex[i].sel=-1; return &s_ex[i]; } return 0; }
+static ex_slot_t *ex_get(fx_widget_t *w){ for(int i=0;i<FX_MAX_EXTRA_WIDGETS;i++) if(s_ex[i].w==w) return &s_ex[i]; return 0; }
+static ex_slot_t *ex_new(fx_widget_t *w){ for(int i=0;i<FX_MAX_EXTRA_WIDGETS;i++) if(!s_ex[i].w){ memset(&s_ex[i],0,sizeof(ex_slot_t)); s_ex[i].w=w; s_ex[i].row_h=22; s_ex[i].sel=-1; return &s_ex[i]; } return 0; }
 static int ex_rh(ex_slot_t *s){ int rh=s->row_h*fxtk_ui_scale()/100;
 if (rh<12)rh=12;
 if (!getenv("FXTK_COMPACT")&&rh>32)rh=32; return rh; }

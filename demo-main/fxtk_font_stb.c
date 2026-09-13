@@ -89,7 +89,10 @@ void fxtk_font_init(const char *unused_path, int size)
         f->data = (unsigned char *)data;
         f->ok = stbtt_InitFont(&f->info, f->data, stbtt_GetFontOffsetForIndex(f->data, 0));
         f->size = size;
-        f->scale = f->ok ? stbtt_ScaleForPixelHeight(&f->info, (float)size) : 0.0f;
+        f->scale = f->ok ? /* v2.4.1: 字号语义对齐 SDL_ttf —— SDL_ttf 的 size 是【EM 大小】,
+             * 而 ScaleForPixelHeight 是让 ascent+descent 等于 size(ascent-descent 通常比 EM 大 ~15%),
+             * 于是同样名义字号在 sokol 版看着更小。改用 EM 映射后两边视觉一致。 */
+            stbtt_ScaleForMappingEmToPixels(&f->info, (float)size) : 0.0f;
         if (f->ok) {
             stbtt_GetFontVMetrics(&f->info, &f->ascent, &f->descent, &f->linegap);
             s_font_n = 1;
@@ -127,7 +130,10 @@ static font_t *font_get(int size)
     f->ok = stbtt_InitFont(&f->info, f->data, stbtt_GetFontOffsetForIndex(f->data, 0));
     if (!f->ok) { fx_file_free(f->data); return &s_fonts[0]; }
     f->size = size;
-    f->scale = stbtt_ScaleForPixelHeight(&f->info, (float)size);
+    f->scale = /* v2.4.1: 字号语义对齐 SDL_ttf —— SDL_ttf 的 size 是【EM 大小】,
+             * 而 ScaleForPixelHeight 是让 ascent+descent 等于 size(ascent-descent 通常比 EM 大 ~15%),
+             * 于是同样名义字号在 sokol 版看着更小。改用 EM 映射后两边视觉一致。 */
+            stbtt_ScaleForMappingEmToPixels(&f->info, (float)size);
     stbtt_GetFontVMetrics(&f->info, &f->ascent, &f->descent, &f->linegap);
     return f;
 }

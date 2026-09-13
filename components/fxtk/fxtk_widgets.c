@@ -51,10 +51,13 @@ void fxtk_draw_button(fx_widget_t *w)
         int fs = w->lines > 0 ? w->lines : 0;
         int th = fs > 0 ? fs + 4 : 18;
         int tw = fxtk_text_width_size(fs, w->title);
+        /* v2.4.2: 按下时按钮整体压暗了, 但文字块的底色还是原来的 w->bg → 文字后面留一块"旧色"的方块
+         * (用户反馈"按下按钮后字体背景颜色未及时改变")。让文字底色跟随按下态一起变。 */
+        fx_color_t lbl_bg = pr ? btn_mix(w->bg, FX_BLACK, 12) : w->bg;
         if (fs <= 0) fx_draw_text_c(w->x1 + (cw-tw)/2 + pr, w->y1 + (ch-18)/2 + pr,
-                          w->title, w->fg, w->bg);
+                          w->title, w->fg, lbl_bg);
         else fxtk_draw_text_size(fs, w->x1 + (cw-tw)/2 + pr, w->y1 + (ch-th)/2 + pr,
-                          w->title, w->fg, w->bg);
+                          w->title, w->fg, lbl_bg);
     }
 }
 
@@ -266,7 +269,7 @@ void fxtk_draw_tab(fx_widget_t *w)
         int sel = (i == w->value);
         fx_color_t bg = w->bg;                  /* 文字底: 未选中与标签条同色 → 文字块自然融进去 */
         if (sel) {
-            bg = btn_mix(w->bg, FX_WHITE, 55);
+            bg = btn_mix(w->bg, FX_WHITE, FX_TOK_TAB_PILL_MIX);
             int padx = 2, pady = 2;
             int rr = (ty2 - ty1 + 1 - pady * 2) / 2;
             if (rr > FX_TOK_RADIUS_M) rr = FX_TOK_RADIUS_M;
@@ -282,10 +285,29 @@ void fxtk_draw_tab(fx_widget_t *w)
         memcpy(seg, p, (size_t)len);
         seg[len] = 0;
         int sw = fx_text_width(seg);
+        /* v2.4.2: 低分辨率下(窗口缩到最小 480x272 时)标签会挤到越界/重叠(用户反馈"低分率下字体出界")。
+         * 挤不下就自动降一档字号; 再挤不下就省略号收尾, 保证永不越出格子。 */
+        int cellw = tx2 - tx1 + 1;
+        int use_small = 0;
+        if (sw > cellw - 4) { use_small = 1; sw = fxtk_text_width_size(12, seg); }
+        if (sw > cellw - 4) {
+            int n = (int)strlen(seg);
+            while (n > 1) {
+                n--;
+                while (n > 0 && ((unsigned char)seg[n] & 0xC0) == 0x80) n--;
+                if (fxtk_text_width_size(12, seg) <= cellw - 4) break;
+                seg[n] = 0;
+            }
+            sw = fxtk_text_width_size(12, seg);
+        }
         /* 文字配色: 未选中的格子现在直接露标签条底色(浅色), 原来的浅灰字会"糊"掉 ——
          * 实测肉眼几乎读不出来, 所以未选中改深灰(TEXT_DIM), 选中用正文色深灰压在浅色胶囊上。 */
-        fx_draw_text_c(tx1 + (tx2 - tx1 + 1 - sw) / 2, ty1 + (ty2 - ty1 - 16) / 2,
-                       seg, sel ? FX_TOK_TEXT : FX_TOK_TEXT_DIM, bg);
+        if (use_small)
+            fxtk_draw_text_size(12, tx1 + (cellw - sw) / 2, ty1 + (ty2 - ty1 - 12) / 2,
+                                seg, sel ? FX_TOK_TEXT : FX_TOK_TAB_TEXT, bg);
+        else
+            fx_draw_text_c(tx1 + (cellw - sw) / 2, ty1 + (ty2 - ty1 - 16) / 2,
+                           seg, sel ? FX_TOK_TEXT : FX_TOK_TAB_TEXT, bg);
         p = comma ? comma + 1 : p + strlen(p);
     }
     /* 标签条与内容区之间: 深阴影 + 高光, 增强分层 (按方位) */
@@ -406,6 +428,10 @@ void fxtk_draw_textedit(fx_widget_t *w)
         int cy = ty0 + Lc * lh;
         fx_set_color(fg);
         fx_fill_rect(cx, cy - 1, cx + 1, cy + 20);   /* 2px 光标: 与文字完整高度对齐(含descender), 右缘对齐字符边界 */
+        /* v2.4.1: 让输入法候选窗贴到光标下方。
+         * 注意 cx/cy 已经是【屏幕绝对坐标】—— tx = w->x1 + PAD、ty0 = w->y1 + 5 - scroll
+         * 都已含文本框原点; 早先这里又加了 w->x1/w->y1, 原点多算一遍 → 候选窗整体偏下一个框高。 */
+        fx_set_ime_pos(cx, cy + 20);
     }
 /* TE-SCROLLBAR */
 if (total_h > vis_h) {

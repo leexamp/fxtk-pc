@@ -596,7 +596,7 @@ if (fxtk_fps() >= 30 && n < cap) {
 ```
 
 - `fx_widget_fix(w, x, y)`: switch to **fixed-coordinate mode** (`FX_POS_FIXED`); subsequent `fx_layout()` (triggered by resize/new widget) will not reset it with ox/oy, and it records the movement reference point.
-- The widget pool is **4096** slots by default (`FX_MAX_WIDGETS`); `fxtk_widget_count()` checks the current live count.
+- The widget pool size comes from `FX_MAX_WIDGETS`: **16384 on PC** (default) and **4096 on ESP32** — the two targets have diverged (see the README). `fxtk_widget_count()` returns the live count; `-DFX_MAX_WIDGETS=N` overrides.
 - For dynamic widgets, cache pointers in an array to avoid a linear `fx_find` scan every frame.
 
 ### 10.3 Deleting Widgets
@@ -700,7 +700,7 @@ int w = fxtk_text_width_size(16, "Large font");   /* measure width */
 1. **Static content**: don't use `anim(1)`; when it changes, call `fx_repaint_rect` manually.
 2. **Animated content**: use an `anim(1)` canvas; avoid `fx_find` every frame inside it (cache pointers).
 3. **Many particles/primitives**: draw into a small offscreen image then scale it up with `fx_draw_image` (GPU blit), e.g. the particle page's 2x downscaled buffer.
-4. **Dynamically adding widgets**: the widget pool caps at 4096; add only when the frame rate is comfortable (≥30fps) to avoid runaway.
+4. **Dynamically adding widgets**: bounded by `FX_MAX_WIDGETS` (16384 on PC); add only when the frame rate is comfortable (≥30fps).
 5. **Text**: identical text/color auto-runs the texture cache; avoid concatenating volatile strings that become keys.
 
 ---
@@ -869,3 +869,22 @@ const char *r = gpu_raymarch_renderer();       /* return the renderer name */
 `gpu_raymarch_ok()` returns 0 and it auto-falls back to CPU (on VM/CI environments without hardware GL); on Windows, `gpu_stub_win.c` provides a no-op implementation. The scene includes a reflective floor/spheres + stepping rings + soft shadows + fog.
 
 > If you want to understand the source details of widget drawing, layout, and repaint, see `docs/internals.md`.
+
+---
+
+## v2.4.3 notes (input / clipboard / forensics / diverged targets)
+
+- **Linux IME (XIM) works** in the sokol build: the vendored `sokol_app.h` now creates an input context
+  (`XOpenIM`/`XCreateIC`), **filters events with `XFilterEvent` in the event loop**, and uses
+  `Xutf8LookupString`; the candidate window follows the caret via `fx_set_ime_pos()` → driver hook
+  `ime_pos` → `sapp_x11_set_ime_spot()`. Without an IME present it falls back to the old path.
+- **Clipboard** (sokol): implemented through `xsel`/`xclip`/`wl-copy`, with an in-process buffer fallback.
+  *Known limitation: Windows clipboard is not implemented yet.*
+- **Forensics**: `FXTK_RECTDBG=1` prints primitive parameters together with the active clip rect whenever
+  they look degenerate; `./build_dbg.sh` (or `make fxtk_sim_dbg`) compiles the probes in and logs a
+  self-test line at startup.
+- **The two targets have diverged**: PC is not constrained by ESP32 resource limits — the same source
+  builds with `FX_MAX_WIDGETS`/`FX_MAX_SCROLL_STATES`/`FX_MAX_EXTRA_WIDGETS` = 16384/64/64 on PC and
+  4096/8/8 on ESP32. Only API/syntax and rendered output are kept in sync.
+- Font scale now matches SDL_ttf (`stbtt_ScaleForMappingEmToPixels`), and the widget-layer SDF
+  anti-aliasing is **on by default** (`FXTK_AA=0` disables; A/B cost measured at ~1.6%).

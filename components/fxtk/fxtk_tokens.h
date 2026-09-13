@@ -23,6 +23,9 @@
 #define FX_TOK_WARN           FX_RGB(255, 152, 0)     /* 提醒 */
 #define FX_TOK_TEXT           FX_RGB(40, 40, 40)      /* 正文 */
 #define FX_TOK_TEXT_DIM       FX_RGB(120, 120, 120)   /* 次要文字/提示 */
+/* v2.4.2 审美: 标签条对比度太弱(用户反馈"标签页对比度偏低") —— 未选中文字加深、选中胶囊提亮 */
+#define FX_TOK_TAB_TEXT        FX_RGB(85, 85, 85)     /* 未选中标签文字 */
+#define FX_TOK_TAB_PILL_MIX    85                     /* 选中胶囊混白比例(%) */
 #define FX_TOK_BORDER         FX_RGB(200, 200, 200)   /* 常规描边 */
 #define FX_TOK_MUTED          FX_LGRAY                /* 静默底色 */
 #define FX_TOK_ON_PRIMARY     FX_WHITE                /* 主色之上的文字 */

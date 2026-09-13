@@ -58,7 +58,7 @@ fx_canvas_new(pixel("6,32","444,236"), anim(1), call(on_draw));
 - 改文字 `fx_set_title`；改矩形 `fx_widget_set_rect`；
 - 查控件 `fx_find("name")`；切换父 `fx_parent(...)`；
 - 读鼠标 `fx_touch_state`；读按键 `fx_last_key`；
-- 动态控件用 `fx_widget_fix` 固定坐标，数量上限由控件池（4096）决定。
+- 动态控件用 `fx_widget_fix` 固定坐标，数量上限由控件池决定（`FX_MAX_WIDGETS`：PC 默认 16384 / ESP32 默认 4096）。
 
 ## 全屏压测
 

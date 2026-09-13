@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <math.h>
+#include <limits.h>   /* v2.4.2: INT_MIN/INT_MAX 鲁棒性测试 */
 
 /* ---------- 假驱动 ---------- */
 static int s_hit_cb_ok = 0;          /* 命中回调用触发器 */
@@ -33,7 +34,12 @@ static void drv_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
 static void drv_push_pixels(const uint32_t *px, uint32_t n) {(void)px;(void)n;}
 static void drv_hold_begin(void) {}
 static void drv_hold_end(void) {}
-static void drv_fill_rect(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint32_t c) {(void)x0;(void)y0;(void)x1;(void)y1;(void)c;}
+static long s_fill_px = 0;   /* v2.4.2: 统计填充面积, 供"极端坐标"鲁棒性测试使用 */
+static void drv_fill_rect(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint32_t c)
+{
+    (void)c;
+    if (x1 >= x0 && y1 >= y0) s_fill_px += (long)(x1 - x0 + 1) * (long)(y1 - y0 + 1);
+}
 static int  drv_touch_read(int *x, int *y, int *pressed) {(void)x;(void)y;(void)pressed; return 0;}
 static int  drv_key_read(fx_keyev_t *ev) {(void)ev; return 0;}
 static void drv_clip_set(const char *s) {(void)s;}
@@ -443,6 +449,30 @@ int main(void) {
         fx_transform_reset();
         if (fx_transform_depth() == 0) printf("  [ok]   reset\n");
         else { printf("  [FAIL] reset\n"); fails++; }
+    }
+
+    /* [16] 极端坐标鲁棒性: 图元入口必须钳制坐标。
+     * 现实缺陷(用户实测): 拖动角点出界 → 归一化坐标退化 → NaN/inf 转 int 得到 INT_MIN →
+     * 调用处 "hx-7 / hx+7" 整数溢出 → 钳到裁剪后变成横贯整屏的色带("窗口布满黄线")。 */
+    printf("[16] 极端坐标鲁棒性\n");
+    {
+        long before = s_fill_px;
+        fx_fill_rect(INT_MIN, INT_MIN, INT_MAX, INT_MAX);
+        fx_fill_rect(INT_MIN + 7, 100, INT_MIN - 7, 200);
+        fx_draw_rect(INT_MAX, INT_MAX, INT_MIN, INT_MIN);
+        fx_draw_line(INT_MIN, 0, INT_MAX, 0);
+        /* 精确回归: 矩形完全落在裁剪区左侧时, 必须【一笔都不画】。
+         * 曾因"裁剪夹取后未再判空区间", x2 保持负值传给驱动的 uint16_t → 65000+ → 横贯整屏的色带。 */
+        long b2 = s_fill_px;
+        fx_fill_rect(-348, 341, -334, 355);
+        fx_draw_rect(-348, 341, -334, 355);
+        long left_out = s_fill_px - b2;
+        if (left_out == 0) printf("  [ok]   裁剪区外的矩形一笔不画 (未发生无符号回绕)\n");
+        else { printf("  [FAIL] 裁剪区外仍画了 %ld 像素(无符号回绕?)\n", left_out); fails++; }
+        long added = s_fill_px - before;
+        long cap = (long)fx_width() * fx_height() * 3;
+        if (added >= 0 && added <= cap) printf("  [ok]   极端坐标填充面积受限 (%ld <= %ld)\n", added, cap);
+        else { printf("  [FAIL] 极端坐标填充面积失控 %ld\n", added); fails++; }
     }
 
     printf("== done: %s (%d fail) ==\n", fails ? "FAIL" : "PASS", fails);    return fails ? 1 : 0;

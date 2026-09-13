@@ -42,6 +42,12 @@ static int s_aa = FX_AA_DEFAULT;
 int fxtk_aa(void) { return s_aa; }
 /* v2.4: GPU 控件层抗锯齿档位。与画布 CPU AA(上面那个 s_aa)解耦 ——
  * 后者会把画布强制离屏并逐像素混合(开销大, 默认关), 前者是驱动的 SDF 钩子(默认开)。 */
+/* v2.4.2: 控件层 SDF 抗锯齿【恢复默认开启】。
+ * 之前默认关掉是因为"图形页按钮只画出一圈边界(填充退化成 50% 混合)"——当时定位到 SDF 顶点参数疑似丢失。
+ * 后来发现该现象与【输入状态机的按下态】有关:修复 fx_poll 分支顺序(释放事件被吞)之后,
+ * 同样场景下按钮蓝色像素从 1635 恢复到 8976(正常≈9095), 即 SDF 填充已正常。
+ * 因此恢复默认 AA=1: 圆角/斜线真正走距离场, 不再靠逐行填充"硬画"(用户反馈"看着不是矢量图")。
+ * 若某平台出现异常, 可用 FXTK_AA=0 或 fx_set_widget_aa(0) 即时回退。 */
 static int s_widget_aa = 1;
 int  fx_widget_aa_level(void) { return s_widget_aa; }
 void fx_set_widget_aa(int level)
@@ -534,8 +540,95 @@ void fx_draw_vline(int x, int y1, int y2)
 
 static void fx_draw_line_plain(int x1, int y1, int x2, int y2);
 
+/* v2.4.2 修复(用户实测"拖出屏幕后窗口布满黄线"): 图元入口统一钳制坐标。
+ * 起因: 调用者算出退化坐标(NaN/inf 转 int 会得到 INT_MIN/INT_MAX), 随后的 "x-7 / x+7" 发生整数溢出,
+ * 交换后变成 "从 INT_MIN 到 INT_MAX" 的巨大区间 → 钳到裁剪后就是横贯整屏的色带, 每个手柄一条、每帧重画。
+ * 在入口处把坐标夹到 ±32767, 之后所有算术都不可能溢出; 屏幕内的正常绘制完全不受影响。 */
+/* v2.4.2 现场取证: 只要图元拿到越界坐标就打印参数+裁剪区+调用签名。
+ * 用途: 用户报告"拖角点出界后出现橙色大矩形", 但合成事件无法复现 —— 用它在真实操作里取证,
+ * 一次日志就能判定是"调用方算错"还是"框架/驱动放大"。开关: FXTK_RECTDBG=1 */
+/* v2.4.2: 取证开关有两种打开方式 —— 运行期 FXTK_RECTDBG=1, 或编译期 -DFXTK_DEBUG_LOG=1
+ * (后者用于"怎么都出不来日志"的情况: 直接把探针编进二进制, 不依赖环境变量)。 */
+#ifndef FXTK_DEBUG_LOG
+#define FXTK_DEBUG_LOG 0
+#endif
+static int fx_dbg_on(void)
+{
+#if FXTK_DEBUG_LOG
+    return 1;
+#else
+    return getenv("FXTK_RECTDBG") != NULL;
+#endif
+}
+
+static void fx_rect_dbg(const char *who, int x1, int y1, int x2, int y2);   /* 前置声明 */
+
+static void fx_rect_dbg_r(const char *who, int x1, int y1, int x2, int y2, int r)
+{
+    if (r < -512 || r > 512) {   /* 半径异常: 单独报一次 */
+        if (fx_dbg_on())
+            fprintf(stderr, "[rectdbg] %s(%d,%d,%d,%d) r=%d 半径异常\n", who, x1, y1, x2, y2, r);
+    }
+    fx_rect_dbg(who, x1, y1, x2, y2);
+}
+
+static void fx_rect_dbg(const char *who, int x1, int y1, int x2, int y2)
+{
+    static char seen[64][48];
+    static int nseen = 0;
+    if (!fx_dbg_on()) return;
+    long w = (long)x2 - x1 + 1, h = (long)y2 - y1 + 1;
+    if (w < 0) w = -w;
+    if (h < 0) h = -h;
+    long area = w * h;
+    int oob = !(x1 > -2000 && x1 < 4000 && y1 > -2000 && y1 < 4000 &&
+                x2 > -2000 && x2 < 4000 && y2 > -2000 && y2 < 4000);
+    long cap = (long)fx_width() * fx_height() * 2;    /* 超过两屏面积 = 可疑的大色块 */
+    if (!oob && area <= cap) return;
+    char sig[48];
+    snprintf(sig, sizeof(sig), "%s:%d,%d,%d,%d", who, x1, y1, x2, y2);
+    for (int i = 0; i < nseen; i++) if (!strcmp(seen[i], sig)) return;
+    if (nseen < 64) snprintf(seen[nseen++], sizeof(seen[0]), "%s", sig);
+    fprintf(stderr, "[rectdbg] %s(%d,%d,%d,%d) area=%ld clip=(%d,%d,%d,%d) color=%08x\n",
+            who, x1, y1, x2, y2, area, s_clip_x1, s_clip_y1, s_clip_x2, s_clip_y2, s_color);
+    printf("[rectdbg] %s(%d,%d,%d,%d) area=%ld clip=(%d,%d,%d,%d) color=%08x\n",
+           who, x1, y1, x2, y2, area, s_clip_x1, s_clip_y1, s_clip_x2, s_clip_y2, s_color);
+}
+
+#define FX_COORD_LIMIT 32767
+static int fx_clamp_coord(int v)
+{
+    if (v < -FX_COORD_LIMIT) return -FX_COORD_LIMIT;
+    if (v >  FX_COORD_LIMIT) return  FX_COORD_LIMIT;
+    return v;
+}
+
+/* 【关键】退化输入的识别与拒绝。经验教训: 只做"钳制"是不够的 ——
+ * 调用方溢出后常常得到一对 (INT_MIN+7, INT_MAX-6) 这样的坐标, 钳到 ±32767 再夹进裁剪区,
+ * 结果正好是"从裁剪区左边到右边"的一整条 —— 于是 15x15 的手柄被画成横贯屏幕的橙色长带
+ * (用户实测"拖角点出界后窗口布满橙色横带", 驱动侧日志抓到 请求=(41,493)-(1279,507) 1239x15)。
+ * 正确语义: 这种坐标说明对象已经在屏幕外极远处, 应当【什么都不画】。
+ * 判据: 用 64 位算宽高, 只要绝对值超过 65536(远超任何屏幕/画布)就判为退化 → 直接返回。 */
+static int fx_rect_sane(int x1, int y1, int x2, int y2)
+{
+    long w = (long)x2 - (long)x1, h = (long)y2 - (long)y1;
+    if (w < 0) w = -w;
+    if (h < 0) h = -h;
+    return (w <= 65536 && h <= 65536);
+}
+static int fx_line_sane(int x1, int y1, int x2, int y2)
+{
+    long w = (long)x2 - (long)x1, h = (long)y2 - (long)y1;
+    if (w < 0) w = -w;
+    if (h < 0) h = -h;
+    return (w <= 65536 && h <= 65536);
+}
+
 void fx_draw_line(int x1, int y1, int x2, int y2)
 {
+    fx_rect_dbg("fx_draw_line", x1, y1, x2, y2);
+    x1 = fx_clamp_coord(x1); y1 = fx_clamp_coord(y1);
+    x2 = fx_clamp_coord(x2); y2 = fx_clamp_coord(y2);
     if (s_xf_active) {   /* v2.4: 变换端点后走原路径 */
         float ax, ay, bx, by;
         fx_canvas_transform_point((float)x1, (float)y1, &ax, &ay);
@@ -581,6 +674,14 @@ static void fx_draw_line_plain(int x1, int y1, int x2, int y2)
 
 void fx_draw_rect(int x1, int y1, int x2, int y2)
 {
+    if (!fx_rect_sane(x1, y1, x2, y2)) return;   /* v2.4.2: 退化输入一律不画 ✓ */
+    /* v2.4.2: 完全落在裁剪区之外 → 直接返回。
+     * 这一步必须在任何裁剪夹取/类型转换【之前】: 否则"矩形在裁剪区左侧"时 x2 会保持负值,
+     * 传给驱动的 uint16_t 参数就变成 65000+, 画出一条横贯整屏的色带(用户实测的橙色横带)。 */
+    if (x2 < s_clip_x1 || x1 > s_clip_x2 || y2 < s_clip_y1 || y1 > s_clip_y2) return;
+    fx_rect_dbg("fx_draw_rect", x1, y1, x2, y2);
+    x1 = fx_clamp_coord(x1); y1 = fx_clamp_coord(y1);
+    x2 = fx_clamp_coord(x2); y2 = fx_clamp_coord(y2);
     if (s_aa && s_offing) {   /* v2.2 抗锯齿: 四条边各用 AA 线段 */
         aa_line(x1, y1, x2, y1, s_color); aa_line(x1, y2, x2, y2, s_color);
         aa_line(x1, y1, x1, y2, s_color); aa_line(x2, y1, x2, y2, s_color);
@@ -594,6 +695,19 @@ int fxtk_drv_width(void) { return s_drv->width; }
 int fxtk_drv_height(void) { return s_drv->height; }
 void fx_fill_rect(int x1, int y1, int x2, int y2)
 {
+    if (!fx_rect_sane(x1, y1, x2, y2)) return;   /* v2.4.2: 退化输入一律不画 ✓ */
+    /* v2.4.2 定向取证: 手柄橙(0xffa000)的填充 —— 打印【钳制前】的原始坐标, 判断是调用方算错还是框架放大 */
+#if FXTK_DEBUG_LOG
+    if ((s_color & 0xFFFFFFu) == 0xFFA000u) {
+        static int fx_handle_probe = 0;
+        if (fx_handle_probe++ < 12)
+            fprintf(stderr, "[handleprobe] fill_rect 原始=(%d,%d)-(%d,%d) clip=(%d,%d,%d,%d)\n",
+                    x1, y1, x2, y2, s_clip_x1, s_clip_y1, s_clip_x2, s_clip_y2);
+    }
+#endif
+    fx_rect_dbg("fx_fill_rect", x1, y1, x2, y2);
+    x1 = fx_clamp_coord(x1); y1 = fx_clamp_coord(y1);
+    x2 = fx_clamp_coord(x2); y2 = fx_clamp_coord(y2);
     if (s_xf_active) {   /* v2.4: 变换生效 → 变实心四边形填充 (旋转/斜切矩形) */
         float xy8[8];
         xf_rect_corners(x1, y1, x2, y2, xy8);
@@ -606,6 +720,11 @@ void fx_fill_rect(int x1, int y1, int x2, int y2)
     if (y1 < s_clip_y1) y1 = s_clip_y1;
     if (x2 > s_clip_x2) x2 = s_clip_x2;
     if (y2 > s_clip_y2) y2 = s_clip_y2;
+    /* 【v2.4.2 关键修复】裁剪夹取之后必须再判一次空区间。
+     * 否则: 矩形完全在裁剪区左侧时, x1 被抬到 clip_x1、而 x2 仍是负值 → x2 < x1;
+     * 这个负值传给驱动的 uint16_t 参数会变成 65000+ → 画出一条横贯整屏的色带
+     * (用户实测"拖角点出界后窗口布满橙色横带", 定向探针抓到 原始=(-348,341)-(-334,355) → 请求=(41,493)-(1279,507))。 */
+    if (x2 < x1 || y2 < y1) return;
     if (x1 < 0) x1 = 0;
     if (y1 < 0) y1 = 0;
     if (x2 >= s_drv->width) x2 = s_drv->width - 1;
@@ -681,6 +800,14 @@ void fx_fill_rect_gradient(int x1, int y1, int x2, int y2, fx_color_t c1, fx_col
 
 void fx_fill_rect_round(int x1, int y1, int x2, int y2, int r)
 {
+    if (!fx_rect_sane(x1, y1, x2, y2)) return;   /* v2.4.2: 退化输入一律不画 ✓ */
+    /* v2.4.2: 完全落在裁剪区之外 → 直接返回。
+     * 这一步必须在任何裁剪夹取/类型转换【之前】: 否则"矩形在裁剪区左侧"时 x2 会保持负值,
+     * 传给驱动的 uint16_t 参数就变成 65000+, 画出一条横贯整屏的色带(用户实测的橙色横带)。 */
+    if (x2 < s_clip_x1 || x1 > s_clip_x2 || y2 < s_clip_y1 || y1 > s_clip_y2) return;
+    fx_rect_dbg_r("fx_fill_rect_round", x1, y1, x2, y2, r);
+    x1 = fx_clamp_coord(x1); y1 = fx_clamp_coord(y1);
+    x2 = fx_clamp_coord(x2); y2 = fx_clamp_coord(y2);
     if (r <= 0) { fx_fill_rect(x1, y1, x2, y2); return; }
     int w = x2 - x1 + 1, h = y2 - y1 + 1;
     if (r * 2 > w) r = w / 2;
@@ -714,6 +841,14 @@ void fx_fill_rect_round(int x1, int y1, int x2, int y2, int r)
 
 void fx_draw_rect_round(int x1, int y1, int x2, int y2, int r)
 {
+    if (!fx_rect_sane(x1, y1, x2, y2)) return;   /* v2.4.2: 退化输入一律不画 ✓ */
+    /* v2.4.2: 完全落在裁剪区之外 → 直接返回。
+     * 这一步必须在任何裁剪夹取/类型转换【之前】: 否则"矩形在裁剪区左侧"时 x2 会保持负值,
+     * 传给驱动的 uint16_t 参数就变成 65000+, 画出一条横贯整屏的色带(用户实测的橙色横带)。 */
+    if (x2 < s_clip_x1 || x1 > s_clip_x2 || y2 < s_clip_y1 || y1 > s_clip_y2) return;
+    fx_rect_dbg_r("fx_draw_rect_round", x1, y1, x2, y2, r);
+    x1 = fx_clamp_coord(x1); y1 = fx_clamp_coord(y1);
+    x2 = fx_clamp_coord(x2); y2 = fx_clamp_coord(y2);
     if (r <= 0) { fx_draw_rect(x1, y1, x2, y2); return; }
     if (!s_offing && !s_xf_active && s_widget_aa >= 1 && s_drv && s_drv->stroke_rect_round) {
         flush_line();
@@ -976,6 +1111,13 @@ fx_image_t *fx_image_load(const char *path)
 }
 
 /* ================= v2.4 GPU 光线步进入口 ================= */
+void fx_debug_log_selftest(void)   /* 由驱动在启动时调用: 若取证开启, 打一行证明链路可通 */
+{
+    if (fx_dbg_on()) fx_rect_dbg("selftest 取证链路正常(看到这行说明日志已生效)", 99999, 99999, 99999, 99999);
+}
+
+void fx_set_ime_pos(int x, int y) { if (s_drv && s_drv->ime_pos) s_drv->ime_pos(x, y); }
+
 int fx_quad_warp_gpu(void) { return (s_drv && s_drv->draw_image_quad) ? 1 : 0; }
 
 int fx_raymarch_available(void) { return (s_drv && s_drv->raymarch) ? 1 : 0; }
@@ -1150,6 +1292,8 @@ void fx_fill_quad(const float *xy8)
     }
 }
 
+static void quad_fallback(const fx_image_t *img, const float *xy8);   /* v2.4.2: GPU 路径的退化保护要用到 */
+
 /* 退化四边形回退: 用包围盒矩形映射 (并只告警一次, 不刷屏) */
 static void quad_fallback(const fx_image_t *img, const float *xy8)
 {
@@ -1170,6 +1314,16 @@ void fx_draw_image_quad(const fx_image_t *img, const float *xy8)
 {
     if (!img || !img->px || !xy8 || img->w <= 0 || img->h <= 0) return;
 
+    /* 【v2.4.2 修复】退化/自交四边形的保护必须放在 GPU 分支【之前】。
+     * 原来这段检查只存在于 CPU 路径: 而 GPU 分支在上面就 return 了 —— 于是自交(蝴蝶形)四边形
+     * 被直接送进顶点着色器, 透视权重(gl_Position.w)爆掉, 表现为"把角点拉出界后出现一条横贯屏幕的色带"
+     * (用户实测截图)。这里先用与 CPU 路径完全相同的判据检查一次: 退化则回退为包围盒矩形映射。 */
+    {
+        static const float u8[8] = { 0, 0, 1, 0, 1, 1, 0, 1 };
+        float Hc[9], Hic[9];
+        if (!fx_quad_homography(u8, xy8, Hc) || !fx_mat3_invert(Hc, Hic)) { quad_fallback(img, xy8); return; }
+    }
+
     /* GPU 路径 (P4: sokol 顶点着色器做透视校正插值) */
     if (!s_offing && s_drv && s_drv->draw_image_quad) {
         flush_line();
@@ -1177,6 +1331,19 @@ void fx_draw_image_quad(const fx_image_t *img, const float *xy8)
         /* 【v2.4 修正】四角坐标必须同样加上画布原点偏移。CPU 路径是在离屏缓冲里按局部坐标画的、
          * 再由框架整体 blit, 所以不需要偏移; 而 GPU 钩子是直接画到【屏幕坐标系】的批次里 ——
          * 上面裁剪加了 s_ox/s_oy 而这里没加, 结果整幅图会偏移一个画布原点的量(实测偏了 (41,152))。 */
+        if (fx_dbg_on()) {
+            float mnx = xy8[0], mxx = xy8[0], mny = xy8[1], mxy = xy8[1];
+            for (int i = 1; i < 4; i++) {
+                if (xy8[i*2]   < mnx) mnx = xy8[i*2];
+                if (xy8[i*2]   > mxx) mxx = xy8[i*2];
+                if (xy8[i*2+1] < mny) mny = xy8[i*2+1];
+                if (xy8[i*2+1] > mxy) mxy = xy8[i*2+1];
+            }
+            if (mnx < -2000 || mxx > 4000 || mny < -2000 || mxy > 4000 ||
+                !(mxx - mnx < 4000 && mxy - mny < 4000))
+                fprintf(stderr, "[rectdbg] image_quad 角点=(%.0f,%.0f)(%.0f,%.0f)(%.0f,%.0f)(%.0f,%.0f) 尺寸=%.0fx%.0f\n",
+                        xy8[0],xy8[1],xy8[2],xy8[3],xy8[4],xy8[5],xy8[6],xy8[7], mxx-mnx, mxy-mny);
+        }
         float q8[8];
         for (int i = 0; i < 4; i++) { q8[i * 2] = xy8[i * 2] + s_ox; q8[i * 2 + 1] = xy8[i * 2 + 1] + s_oy; }
         s_drv->draw_image_quad(img->px, img->w, img->h, q8, 1);

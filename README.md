@@ -1,7 +1,7 @@
 # fxtk — 轻量GUI框架 (v2.4)
 
 <p>
-  <img alt="version" src="https://img.shields.io/badge/version-v2.4-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-v2.3-blue">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green">
   <img alt="c" src="https://img.shields.io/badge/language-C99-9cf">
   <img alt="platform" src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20ESP32-lightgrey">
@@ -38,6 +38,31 @@
   截图 `fx_screenshot()` 走驱动的 `read_pixels`, 零外部依赖。
 - 注意:控件层 SDF 抗锯齿目前**默认关闭**(`s_widget_aa = 0`), 可用 `fx_set_widget_aa(1)` 或 `FXTK_AA=1` 开启
   —— 它在"画布 + 文字 + quadwarp 混排"场景下有一个已知缺陷正在修(详见 CHANGELOG v2.4.1)。
+
+## 已知限制
+
+- ~~中文输入(输入法)在 sokol 版不可用~~ —— **v2.4.1 已解决**:给 vendored sokol_app 的 X11 后端补了
+  XIM 支持(惰性 `XOpenIM`/`XCreateIC` + `setlocale` + `XSetLocaleModifiers` + **事件循环里的 `XFilterEvent`** +
+  `Xutf8LookupString`),现在 fcitx5/ibus 等输入法在 sokol 版可正常组字。实测(本机 fcitx5 + rime):
+  输入框里打 `nihao` → 上屏"你好" ✓。
+- **控件层 SDF 抗锯齿默认关闭**(`s_widget_aa = 0`):它在"画布 + 文字 + quadwarp 混排"场景下有一个已知缺陷
+  (实心填充退化成边界环),定位中。想试可 `fx_set_widget_aa(1)` 或 `FXTK_AA=1`。
+- **Windows 剪贴板仍是桩**:剪贴板实现目前走 X11 工具(xsel/xclip/wl-copy),Windows 需要另写
+  `OpenClipboard` 版本,尚未做(应用内复制/粘贴也不可用)。
+
+## 两个目标端：已分化，只要求"语法一致 + 效果一致"
+
+`fxtk` 起于 ESP32 端（`esp32(测试) → fxtk-pc(v1.0) → esp32-fxtk(自 PC v1.0 搬运)`），
+但**两端现在已高度分化**，因此方针是：
+
+- **PC 端不必迁就 ESP 的资源约束**。PC 有几百 MB 内存和 GPU，硬把"零动态分配/极小静态池"搬到 PC，
+  换来的是"列表开多了就滚不动"这类**人为 bug**，不是优点。
+- **只保证两条**：① **API 与语法一致**（同一份 `fxtk.h`，同一套控件宏与回调约定）；
+  ② **渲染效果一致**（同样的控件、同样的坐标，两端画出来是一个东西）。
+- 具体体现：并发资源在 PC 上给足并可按需调大（`FX_MAX_SCROLL_STATES` / `FX_MAX_EXTRA_WIDGETS`
+  在 PC 上默认 **64**，在 ESP32 上仍是 **8**）；热路径允许 PC 侧按需分配
+  （如粒子缓冲 `pt_reserve()` 就地扩容）；ESP 端保留纯 CPU 绘制路径，PC 端默认走 GPU。
+- **不是"把单片机的紧箍咒套在 PC 上"**，而是"一套 API 两端跑"：PC 端负责快与好用，ESP 端负责小与稳。
 
 ## 特性
 
