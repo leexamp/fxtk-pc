@@ -39,6 +39,18 @@
 - 注意:控件层 SDF 抗锯齿目前**默认关闭**(`s_widget_aa = 0`), 可用 `fx_set_widget_aa(1)` 或 `FXTK_AA=1` 开启
   —— 它在"画布 + 文字 + quadwarp 混排"场景下有一个已知缺陷正在修(详见 CHANGELOG v2.4.1)。
 
+## 已知限制
+
+- **中文输入(输入法)在 sokol 版不可用**:`sokol_app` 的 X11 后端不实现 XIM(源码里没有 `XOpenIM`/`Xutf8LookupString`),
+  fcitx/ibus 无法组字。三个绕行:
+  ① 在别处复制中文 → 到输入框 `Ctrl+V`(剪贴板已实现, 支持中文);
+  ② 用遗留 SDL 版 `./build.sh --sdl`(SDL2 走 `SDL_TEXTINPUT`, 输入法正常);
+  ③ 界面文字本身一直是中文正常的, 受限的只是"用键盘直接打中文"。
+- **控件层 SDF 抗锯齿默认关闭**(`s_widget_aa = 0`):它在"画布 + 文字 + quadwarp 混排"场景下有一个已知缺陷
+  (实心填充退化成边界环),定位中。想试可 `fx_set_widget_aa(1)` 或 `FXTK_AA=1`。
+- **Windows 剪贴板仍是桩**:剪贴板实现目前走 X11 工具(xsel/xclip/wl-copy),Windows 需要另写
+  `OpenClipboard` 版本,尚未做(应用内复制/粘贴也不可用)。
+
 ## 特性
 
 - **声明式控件**：`fx_button_new(pixel(...), title(...), call(...))` 属性宏链
