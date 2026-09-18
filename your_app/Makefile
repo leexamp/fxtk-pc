@@ -8,7 +8,7 @@
 CORE = ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
        ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_effects.c \
        ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c
-DRV  = ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c
+DRV  = ../drivers/fxtk_app_sokol.c ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c
 INC  = -I. -I../components/fxtk -I../third_party/sokol -I../drivers -I../demo-main
 CFLAGS = -Os -s -flto -ffunction-sections -fdata-sections -DNDEBUG
 LIBS   = -lX11 -lXi -lXcursor -lGL -ldl -lpthread -lm
