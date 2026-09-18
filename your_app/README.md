@@ -7,6 +7,20 @@ cd your_app
 make && ./your_app
 ```
 
+## 构建形态（都不需要额外配置）
+
+| 命令 | 产物 | 说明 |
+|---|---|---|
+| `./build.sh` | `your_app` 173K | Linux 单文件，默认 `-Os` |
+| `./build.sh --autotrim` | 157K | 按 `main.c` 实际用到的控件裁掉其余（体积更小） |
+| `./build.sh --shared` | `your_app` **15K** + `libfxtk.so` + `libfxtk_sokol.so` | exe 只留应用层（注意：sokol 实现必须在 `.so` 里，别编进 exe） |
+| `./build_win.sh` | `dist/win/your_app.exe` | **在 Linux 上交叉编译**出 Windows 单 exe；只依赖系统 DLL，无 DLL 需要分发 |
+| `./build_win.sh --autotrim` | 更小的 exe | 同上 + 控件裁剪 |
+| `./build.sh -O2` | — | 换优化级别（默认 `-Os`） |
+
+Windows 交叉编译需要 mingw-w64：`sudo apt install gcc-mingw-w64-x86-64`（或跑 `../demo-main/setup_win_cross.sh`）。
+验证依赖：`x86_64-w64-mingw32-objdump -p dist/win/your_app.exe | grep 'DLL Name'`
+
 ## 三个文件就够
 
 | 文件 | 作用 |

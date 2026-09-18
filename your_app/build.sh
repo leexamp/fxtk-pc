@@ -6,6 +6,7 @@
 #   ./build.sh --no-run       只构建
 #   ./build.sh -O2            换优化级别(透传给 CFLAGS)
 #   ./build.sh --autotrim     先扫描 main.c 真正用到的控件, 生成裁剪开关再构建(体积更小)
+#   ./build.sh --win          交叉编译 Windows 单 exe(见 build_win.sh)
 #   ./build.sh --shared       动态库形态: exe 只留应用层, 框架编成 libfxtk.so
 #   ./build.sh --release      构建 + 打包到 dist/(含运行说明)
 #   ./build.sh --clean        清理产物
@@ -21,6 +22,7 @@ for a in "$@"; do
     --no-run)   MODE=build ;;
     --release)  MODE=release ;;
     --shared)   MODE=shared ;;
+    --win)      exec ./build_win.sh ;;
     --autotrim) AUTOTRIM=1 ;;
     --clean)    MODE=clean ;;
     -O0|-O1|-O2|-O3|-Os|-Oz) OPT="$a" ;;
