@@ -144,6 +144,35 @@ static void frame_cb(void)
     int want_shot  = (s_shot_path[0]  && s_frames + 1 == s_shot_at);
     int want_shot2 = (s_shot2_path[0] && s_frames + 1 == s_shot2_at);
     if (want_shot || want_shot2) fxtk_sokol_request_shot();   /* 驱动在本帧 pass 内抓取 */
+    /* ===== GPU 路径基准: FXTK_GPU_BENCH=<帧数> =====
+     * 用途: 回答"压测页在 GPU(sokol)路径下的真实帧时间", 与 SDL 软件路径的 bench 对照。
+     * 做法: 等测试钩子把页面切好(默认第 25 帧之后), 把【框架逐帧 + 提交渲染】连续跑 N 次并逐帧计时,
+     *       取后半段平均(避开压测页控件还在增生的阶段), 打印后退出。
+     * 说明: 这个版本【包含】交换链提交(与真实运行一致); 纯离屏、不含 present 的版本是后续细化。 */
+    {
+        const char *gb = getenv("FXTK_GPU_BENCH");
+        const char *ga = getenv("FXTK_GPU_BENCH_AT");   /* 可选: 第几帧开始测(默认 25; 用于先 resize 窗口再测) */
+        int at = ga ? atoi(ga) : 25;
+        if (gb && s_frames >= at) {
+            extern uint32_t fxtk_sokol_now_us(void);
+            int n = atoi(gb);
+            if (n < 60) n = 60;
+            long sum = 0; int cnt = 0;
+            for (int i = 0; i < n; i++) {
+                uint32_t t0 = fxtk_sokol_now_us();
+                fx_poll();
+                fxtk_sokol_frame(sapp_width(), sapp_height());
+                uint32_t dt = fxtk_sokol_now_us() - t0;
+                if (i >= n / 2) { sum += (long)dt; cnt++; }
+            }
+            if (cnt < 1) cnt = 1;
+            fprintf(stdout, "[gpubench] %d 帧(取后 %d)  控件 %d  %.3f ms/frame  %.1f fps\n",
+                    n, cnt, fxtk_widget_count(), (double)sum / cnt / 1000.0, cnt * 1e6 / (double)sum);
+            fflush(stdout);
+            sapp_quit();
+            return;
+        }
+    }
     {   /* 整帧计时(框架逐帧 + 像素层 + 提交), FXTK_STAT 汇总打印: 光看 fps 判断不出"手感延迟" */
         extern uint32_t fxtk_sokol_now_us(void);
         extern void fxtk_sokol_note_frame(uint32_t us);
