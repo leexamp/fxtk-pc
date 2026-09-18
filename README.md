@@ -98,7 +98,10 @@
 
 ```
 components/fxtk/   核心库 (fxtk.c/draw/widgets/font/effects + 头文件)
-demo-main/         PC 模拟器 (sokol 驱动 / 演示 app / GPU 光追 / examples; SDL2 驱动为遗留对照)
+drivers/           后端驱动 (sokol 驱动 + stb 文本层 + 各自的 main；SDL2 驱动为遗留对照) ← 读代码从这看
+components/fxtk/   ← 框架本体
+your_app/          ← 想写自己的应用就从这里开始(最小示例 + build.sh；不参与主构建)
+demo-main/         PC 演示与工具链 (12 页演示 app / GPU 光追 / examples / Makefile)
 demo-main/Makefile 统一构建 (demo / examples / test 单一源清单)
 demo-main/test/     无头单元测试 (无需 SDL/窗口)
 .github/            CI (Linux 构建 + 测试 + Windows 交叉)

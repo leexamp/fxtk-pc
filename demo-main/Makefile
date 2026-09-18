@@ -27,7 +27,7 @@ LDFLAGS ?= -Wl,--gc-sections -Wl,--build-id=none -Wl,--icf=all -Wl,--as-needed -
 else
 LDFLAGS ?= -Wl,--gc-sections -Wl,--build-id=none
 endif
-INC    := -I. -I../components/fxtk
+INC    := -I. -I../components/fxtk -I../drivers
 
 # demo 链接 (3D 页需要 EGL/GLES/X11)
 LIBS    := -lSDL2 -lSDL2_ttf -lSDL2_image -lm -pthread -lEGL -lGLESv2 -lX11
@@ -45,7 +45,7 @@ CORE := ../components/fxtk/fxtk.c \
         ../components/fxtk/fxtk_extra.c \
         ../components/fxtk/fxtk_backends.c
 HDRS := ../components/fxtk/fxtk.h ../components/fxtk/fxtk_internal.h
-DRIVER := fxtk_sdl_driver.c main_linux.c
+DRIVER := ../drivers/fxtk_sdl_driver.c ../drivers/main_linux.c
 
 # ---- v2.4 起【默认后端 = sokol】----
 # SDL2 降为遗留: 只保留 SDL 驱动作为【无头测试/基准/金图】用的假驱动 (SDL_VIDEODRIVER=dummy),
@@ -55,16 +55,16 @@ all: fxtk_sim
 # 旧名字继续可用(脚本/文档里引用的是它), 现在只是别名 —— 产物仍是 ./fxtk_sim(sokol 版)
 fxtk_sim_sokol: fxtk_sim
 
-fxtk_sim: $(SOKOL_CORE) fxtk_sokol_driver.c fxtk_font_stb.c main_sokol.c \
+fxtk_sim: $(SOKOL_CORE) ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c \
           app.c app_desktop.c raymarch.c gpu_raymarch_stub.c
 	gcc $(CFLAGS) $(INC) $(SOKOL_INC) $(SOKOL_CORE) \
-	    fxtk_sokol_driver.c fxtk_font_stb.c main_sokol.c app.c app_desktop.c raymarch.c \
+	    ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c app.c app_desktop.c raymarch.c \
 	    gpu_raymarch_stub.c -o $@ $(LDFLAGS) $(SOKOL_LIBS)
 
-fxtk_sim_en: $(SOKOL_CORE) fxtk_sokol_driver.c fxtk_font_stb.c main_sokol.c \
+fxtk_sim_en: $(SOKOL_CORE) ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c \
              app_en.c app_desktop_en.c raymarch.c gpu_raymarch_stub.c
 	gcc $(CFLAGS) $(INC) $(SOKOL_INC) $(SOKOL_CORE) \
-	    fxtk_sokol_driver.c fxtk_font_stb.c main_sokol.c app_en.c app_desktop_en.c raymarch.c \
+	    ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c app_en.c app_desktop_en.c raymarch.c \
 	    gpu_raymarch_stub.c -o $@ $(LDFLAGS) $(SOKOL_LIBS)
 
 # ---- 遗留: SDL 版演示 (仅用于对照/过渡; 新功能不再往里加) ----
@@ -77,7 +77,7 @@ fxtk_sim_sdl_en: $(CORE) $(HDRS) $(DRIVER) raymarch.c gpu_raymarch.c app_en.c ap
 	    app_en.c app_desktop_en.c -o $@ $(LDFLAGS) $(LIBS)
 
 # ---- 无头单元测试 ----
-# 不链 fxtk_font.c: 测试文件自带文字/纹理桩 (无 SDL/字体依赖)。
+# 不链 ../drivers/fxtk_font.c: 测试文件自带文字/纹理桩 (无 SDL/字体依赖)。
 # v2.4: 同时跑一份 stub 后端变体 (-DFXTK_BACKEND_STUB: 确定性时钟/定种子随机/内存文件系统),
 #       保证测试结果不依赖宿主机的时钟、随机源与文件系统。
 test: test/headless_test test/headless_test_stub
@@ -105,8 +105,8 @@ sokol: fxtk_sim
 bench: test/bench
 	SDL_VIDEODRIVER=dummy ./test/bench 1200 8 200
 
-test/bench: test/bench.c $(CORE) $(HDRS) fxtk_sdl_driver.c app.c app_desktop.c raymarch.c gpu_raymarch.c
-	gcc $(CFLAGS) $(INC) $(CORE) fxtk_sdl_driver.c \
+test/bench: test/bench.c $(CORE) $(HDRS) ../drivers/fxtk_sdl_driver.c app.c app_desktop.c raymarch.c gpu_raymarch.c
+	gcc $(CFLAGS) $(INC) $(CORE) ../drivers/fxtk_sdl_driver.c \
 	    app.c app_desktop.c raymarch.c gpu_raymarch.c \
 	    test/bench.c -o $@ $(LDFLAGS) $(LIBS)
 
@@ -144,9 +144,9 @@ package:
 .PHONY: package
 
 # ---- 取证/调试构建: 探针编进二进制, 不依赖环境变量 ----
-fxtk_sim_dbg: $(SOKOL_CORE) fxtk_sokol_driver.c fxtk_font_stb.c main_sokol.c app.c app_desktop.c raymarch.c gpu_raymarch_stub.c
+fxtk_sim_dbg: $(SOKOL_CORE) ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c app.c app_desktop.c raymarch.c gpu_raymarch_stub.c
 	gcc -O0 -g -DFXTK_DEBUG_LOG=1 -DFXTK_DEBUG_LOG_DRV=1 $(INC) $(SOKOL_INC) $(SOKOL_CORE) \
-	    fxtk_sokol_driver.c fxtk_font_stb.c main_sokol.c app.c app_desktop.c raymarch.c \
+	    ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c app.c app_desktop.c raymarch.c \
 	    gpu_raymarch_stub.c -o $@ $(SOKOL_LIBS)
 
 .PHONY: dbg
