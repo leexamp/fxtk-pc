@@ -18,7 +18,7 @@
 #  if defined(ESP_PLATFORM)
 #    define FX_MAX_WIDGETS 4096
 #  else
-#    define FX_MAX_WIDGETS 16384
+#    define FX_MAX_WIDGETS 8192    /* v2.4.3: 16384 → 8192(省约 2.6MB .bss; 压测页实际只到约 2820, 不影响可达规模与帧率) */
 #  endif
 #endif
 #endif
