@@ -623,12 +623,12 @@ static void draw_widget_inner(fx_widget_t *w, int cx1, int cy1, int cx2, int cy2
         case FX_W_TAB:
             fxtk_draw_tab(w);
             {
+                int c1 = w->x1, c2 = w->y1, c3 = w->x2, c4 = w->y2;
                 float _p = fx_page_wipe(w);
-                if (_p < 1.0f) {   /* 换页过渡: 只画"已揭示"的那部分 */
-                    int a1,a2,a3,a4; fx_page_wipe_clip(w, w->x1,w->y1,w->x2,w->y2, _p, &a1,&a2,&a3,&a4);
-                    fx_set_clip(a1,a2,a3,a4);
-                }
-                for (fx_widget_t *c=w->child; c; c=c->sibling) if (c->page==w->value) draw_widget(c,w->x1,w->y1,w->x2,w->y2);   /* clip 子控件到 tab 自身矩形 */
+                if (_p < 1.0f) fx_page_wipe_clip(w, w->x1, w->y1, w->x2, w->y2, _p, &c1, &c2, &c3, &c4);
+                /* v2.4.3: 收窄后的矩形必须【当作裁剪参数传进去】—— draw_widget 的第 2~5 个参数就是裁剪矩形,
+                 * 之前在外面 fx_set_clip 会被它覆盖, 所以换页过渡一直看不到效果。 */
+                for (fx_widget_t *c=w->child; c; c=c->sibling) if (c->page==w->value) draw_widget(c, c1, c2, c3, c4);
             }
             return;
 #endif
