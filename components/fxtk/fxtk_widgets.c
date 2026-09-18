@@ -4,6 +4,14 @@
  */
 #include "fxtk_internal.h"
 #include "fxtk_backends.h"   /* v2.4.3: fx_log 告警(动画槽位满时提示加大宏) */
+
+/* v2.4.3: 同时可动画的控件数(每个动画各自的槽位池都用它)。超出会明确告警, 不静默降级。 */
+#ifndef FX_ANIM_SLOTS
+#define FX_ANIM_SLOTS 8
+#endif
+/* 缓出曲线: 让动画"有感觉" —— 线性推进在 100ms 级别几乎看不出变化, 缓出才有明显的起停感。
+ * 另: 时长统一放慢(用户反馈"动得太快, 没感觉")。 */
+static float fx_ease_out(float t) { if (t <= 0.0f) return 0.0f; if (t >= 1.0f) return 1.0f; float u = 1.0f - t; return 1.0f - u * u * u; }
 #include "fxtk_tokens.h"
 #include "fxtk_desktop.h"
 #include <string.h>
@@ -24,6 +32,33 @@ static fx_color_t btn_mix(fx_color_t a, fx_color_t b, int t)
     return (fx_color_t)((r<<16)|(g<<8)|bl);
 }
 #if FXTK_WIDGET_BUTTON
+/* v2.4.3 动画: 按钮按下/松开的压暗量缓动(80ms)。
+ * 稳态值必须是 12(与旧版一致) → 动画关闭或缓动结束时行为与旧版逐像素相同, 因此金图不受影响。
+ * 同样按时间推进: 同一帧内按钮可能被绘制多次, 按帧累加会被重复推进。 */
+static fx_widget_t *s_bt_w[FX_ANIM_SLOTS]; static float s_bt_v[FX_ANIM_SLOTS];
+static uint32_t s_bt_t0[FX_ANIM_SLOTS]; static int s_bt_goal[FX_ANIM_SLOTS];
+#define FX_BTN_PRESS_MS 170u
+#define FX_BTN_PRESS_AMT 12
+static int button_press_amt(fx_widget_t *w, int pr)
+{
+    int goal = pr ? FX_BTN_PRESS_AMT : 0;
+    if (!fx_widget_anim_ok(w)) return goal;
+    int k = -1;
+    for (int i = 0; i < FX_ANIM_SLOTS; i++) if (s_bt_w[i] == w) { k = i; break; }
+    if (k < 0) {
+        for (int i = 0; i < FX_ANIM_SLOTS; i++) if (!s_bt_w[i]) { s_bt_w[i] = w; s_bt_v[i] = (float)goal; s_bt_goal[i] = goal; s_bt_t0[i] = (uint32_t)fx_time_ms(); k = i; break; }
+        static int warned = 0;
+        if (k < 0) { if (!warned) { fx_log(FX_LOG_WARN, "动画槽位已满(%d): 加大 FX_ANIM_SLOTS", FX_ANIM_SLOTS); warned = 1; } return goal; }
+    }
+    if (s_bt_goal[k] != goal) { s_bt_goal[k] = goal; s_bt_t0[k] = (uint32_t)fx_time_ms(); }
+    uint32_t el = (uint32_t)fx_time_ms() - s_bt_t0[k];
+    if (el >= FX_BTN_PRESS_MS) { w->flags &= (uint16_t)~FX_F_ANIM; s_bt_v[k] = (float)goal; return goal; }
+    w->flags |= FX_F_ANIM;
+    float t = fx_ease_out((float)el / (float)FX_BTN_PRESS_MS);
+    s_bt_v[k] = (float)goal * t;
+    return (int)(s_bt_v[k] + 0.5f);
+}
+
 void fxtk_draw_button(fx_widget_t *w)
 {
     /* Adwaita 经典: 纯平圆角 + 锐利1px高光/阴影 (锐线不产生灰阶) */
@@ -33,7 +68,8 @@ void fxtk_draw_button(fx_widget_t *w)
      * 按下态不再只压暗顶边, 而是整块略压暗 —— 触摸屏上"按没按到"更容易一眼看出。 */
     int r = FX_TOK_RADIUS_BTN;
     if (r > ch/2) r = ch/2; if (r > cw/2) r = cw/2;
-    fx_set_color(pr ? btn_mix(w->bg, FX_BLACK, 12) : w->bg);
+    int amt = button_press_amt(w, pr);
+    fx_set_color(amt ? btn_mix(w->bg, FX_BLACK, amt) : w->bg);
     fx_fill_rect_round(w->x1, w->y1, w->x2, w->y2, r);
     if (!pr) {
         fx_set_color(btn_mix(w->bg, FX_WHITE, 90));          /* 顶高光 */
@@ -55,7 +91,7 @@ void fxtk_draw_button(fx_widget_t *w)
         int tw = fxtk_text_width_size(fs, w->title);
         /* v2.4.2: 按下时按钮整体压暗了, 但文字块的底色还是原来的 w->bg → 文字后面留一块"旧色"的方块
          * (用户反馈"按下按钮后字体背景颜色未及时改变")。让文字底色跟随按下态一起变。 */
-        fx_color_t lbl_bg = pr ? btn_mix(w->bg, FX_BLACK, 12) : w->bg;
+        fx_color_t lbl_bg = amt ? btn_mix(w->bg, FX_BLACK, amt) : w->bg;
         if (fs <= 0) fx_draw_text_c(w->x1 + (cw-tw)/2 + pr, w->y1 + (ch-18)/2 + pr,
                           w->title, w->fg, lbl_bg);
         else fxtk_draw_text_size(fs, w->x1 + (cw-tw)/2 + pr, w->y1 + (ch-th)/2 + pr,
@@ -176,15 +212,12 @@ void fxtk_draw_slider(fx_widget_t *w)
 #if FXTK_WIDGET_PROGRESS
 /* v2.4.3 动画: 进度条数值缓动(值突变时平滑增长)。默认全局关 → 行为与旧版完全一致。
  * 与标签淡入同样按【时间】推进: 同一帧内控件可能被绘制多次, 按帧累加会被重复推进(实测会卡在中途)。 */
-#ifndef FX_ANIM_SLOTS
-#define FX_ANIM_SLOTS 8       /* 同时可动画的控件数; 超出会明确告警(不再静默不动画) */
-#endif
 static fx_widget_t *s_pa_w[FX_ANIM_SLOTS];
 static float    s_pa_from[FX_ANIM_SLOTS], s_pa_disp[FX_ANIM_SLOTS];
 static int      s_pa_to[FX_ANIM_SLOTS];
 static uint32_t s_pa_t0[FX_ANIM_SLOTS];
 static int      s_pa_init[FX_ANIM_SLOTS];
-#define FX_PROG_EASE_MS 180u
+#define FX_PROG_EASE_MS 380u
 static int progress_anim_value(fx_widget_t *w)
 {
     int k = -1;
@@ -205,7 +238,7 @@ static int progress_anim_value(fx_widget_t *w)
     uint32_t el = (uint32_t)fx_time_ms() - s_pa_t0[k];
     if (el >= FX_PROG_EASE_MS) { w->flags &= (uint16_t)~FX_F_ANIM; s_pa_disp[k] = (float)s_pa_to[k]; return s_pa_to[k]; }
     w->flags |= FX_F_ANIM;
-    float t = (float)el / (float)FX_PROG_EASE_MS;
+    float t = fx_ease_out((float)el / (float)FX_PROG_EASE_MS);
     s_pa_disp[k] = s_pa_from[k] + ((float)s_pa_to[k] - s_pa_from[k]) * t;
     return (int)(s_pa_disp[k] + 0.5f);
 }
@@ -294,7 +327,7 @@ void fxtk_draw_panel(fx_widget_t *w)
  * 进度按【时间】算而不是按帧累加 —— 同一帧内控件可能被绘制多次, 按帧累加会被重复推进/重复重置,
  * 表现为"淡入到一半就卡住"(实测停在 234 而非 250)。时间基准天然幂等。 */
 static fx_widget_t *s_ta_w[FX_ANIM_SLOTS]; static uint32_t s_ta_t0[FX_ANIM_SLOTS]; static int s_ta_sel[FX_ANIM_SLOTS];
-#define FX_TAB_FADE_MS 140u
+#define FX_TAB_FADE_MS 280u
 static float tab_anim_mix(fx_widget_t *w)
 {
     int k = -1;
@@ -310,7 +343,7 @@ static float tab_anim_mix(fx_widget_t *w)
     uint32_t el = (uint32_t)fx_time_ms() - s_ta_t0[k];
     if (el >= FX_TAB_FADE_MS) { w->flags &= (uint16_t)~FX_F_ANIM; return 1.0f; }   /* 结束: 交还静态绘制 */
     w->flags |= FX_F_ANIM;                                                        /* 进行中: 请求继续重绘 */
-    return (float)el / (float)FX_TAB_FADE_MS;
+    return fx_ease_out((float)el / (float)FX_TAB_FADE_MS);
 }
 
 void fxtk_draw_tab(fx_widget_t *w)

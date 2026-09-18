@@ -107,7 +107,11 @@ typedef struct { fx_widget_t *w; float off, tgt; int last; } fx_scroll_state_t;
 #    define FX_MAX_SCROLL_STATES 64
 #  endif
 #endif
-static fx_scroll_state_t s_scroll_pool[FX_MAX_SCROLL_STATES];   /* v2.3.1: unlink_free/fx_init 也要清它, 故随 typedef 前移至此 */
+static fx_scroll_state_t s_scroll_pool[FX_MAX_SCROLL_STATES];
+/* v2.4.3: 控件池"高水位"。fxtk_alloc 线性找空槽 → 存活控件总是集中在前面,
+ * 所以任何"遍历存活控件"的地方都应只扫到 high, 而不是扫满 FX_MAX_WIDGETS(PC 上 16384)。
+ * 动画的每帧扫描就靠它把开销从 16384 次比较降到与存活数同阶。 */
+static int s_pool_high = 0;   /* v2.3.1: unlink_free/fx_init 也要清它, 故随 typedef 前移至此 */
 static fx_scroll_state_t *scroll_state(fx_widget_t *w);
 static void scroll_drag_to(fx_widget_t *w, int y);
 static void te_sel_para(fx_widget_t*);
@@ -134,7 +138,8 @@ fx_widget_t *fxtk_alloc(void)
             memset(&s_pool[i], 0, sizeof(s_pool[i]));
             s_alloc_hint = i;
             s_widget_live++;
-            return &s_pool[i];
+            if (i + 1 > s_pool_high) s_pool_high = i + 1;
+        return &s_pool[i];
         }
     }
     fx_log(FX_LOG_ERROR, "控件池已满 (%d)! 加大 FX_MAX_WIDGETS 或复用控件", FX_MAX_WIDGETS);
@@ -538,7 +543,7 @@ redraw_widget_now(te); return; }
  * 思路: 不改控件几何(那会牵动布局与命中测试), 而是在换页后的 160ms 内, 把 tab 子控件的裁剪矩形
  * 从一侧逐步展开 —— 新页面像被"拉出来"一样出现。方向跟新标签所在的一侧一致(往右切就从右侧展开)。
  * 状态检测靠"记住上一帧的 value", 因此完全不碰输入路径(改动面最小)。 */
-#define FX_PAGE_WIPE_MS 160u
+#define FX_PAGE_WIPE_MS 220u
 typedef struct { fx_widget_t *w; int prev; uint32_t t0; } fx_wipe_t;
 static fx_wipe_t s_wipe[8];
 static float fx_page_wipe(fx_widget_t *w)   /* 返回揭示进度 0..1(1=无动画) */
@@ -552,7 +557,7 @@ static float fx_page_wipe(fx_widget_t *w)   /* 返回揭示进度 0..1(1=无动�
     uint32_t el = (uint32_t)fx_time_ms() - s_wipe[k].t0;
     if (el >= FX_PAGE_WIPE_MS) { w->flags &= (uint16_t)~FX_F_ANIM; return 1.0f; }
     w->flags |= FX_F_ANIM;
-    return (float)el / (float)FX_PAGE_WIPE_MS;
+    { float t = (float)el / (float)FX_PAGE_WIPE_MS; float u = 1.0f - t; return 1.0f - u * u * u; }   /* 缓出 */
 }
 /* 把 tab 子控件的裁剪收窄到"已揭示"的部分 */
 static void fx_page_wipe_clip(fx_widget_t *w, int x1, int y1, int x2, int y2, float p, int *ox1, int *oy1, int *ox2, int *oy2)
@@ -708,7 +713,8 @@ static void draw_canvas_only(fx_widget_t *w)
      * 之前 FX_F_ANIM 只对 canvas 生效, 所以普通控件设了标志也不会被继续重绘(动画只走一帧就停)。
      * 仅在动画开启时扫描, 关闭时零开销(不影响基准与金图)。 */
     if (s_anim_on) {
-        for (int i = 0; i < FX_MAX_WIDGETS; i++) {
+        int lim = s_pool_high > 0 ? s_pool_high : 0;
+        for (int i = 0; i < lim; i++) {
             fx_widget_t *a = &s_pool[i];
             if (a->type == FX_W_NONE || !(a->flags & FX_F_ANIM)) continue;
             if (a->type == FX_W_CANVAS) continue;              /* 画布已在上面的分支里处理 */

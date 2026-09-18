@@ -38,6 +38,7 @@ static void init_cb(void)
     fx_sokol_driver.height = (uint32_t)sapp_height();
     fx_sokol_driver.init();
     fx_init(&fx_sokol_driver);
+    if (getenv("FXTK_NOANIM")) fx_animation(0);   /* A/B: 关掉演示的动画做性能对照 */
     fx_backend_set_screen(sapp_width(), sapp_height(),
                           (float)sapp_dpi_scale());
     fx_set_bg(FX_WINDOW_BG);
