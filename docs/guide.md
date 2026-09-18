@@ -1018,7 +1018,7 @@ sokol 版默认支持 fcitx/ibus 等输入法组字。原理（都在 vendored `
 sokol_app 没有剪贴板 API，驱动现在这样实现：优先调用系统工具（`xsel` / `xclip` / `wl-copy|wl-paste`），
 找不到时退化为**进程内缓冲**（保证应用内复制/粘贴始终可用）。
 
-> 已知限制：**Windows 剪贴板尚未实现**（需要另写 `OpenClipboard` 版本）。
+> Windows 侧剪贴板用 `OpenClipboard` + `CF_UNICODETEXT` 实现，中英文都可用（另一路是 ESP32：无系统剪贴板）。
 
 ## 3. 图元参数取证（排"参数合法但画面错"的问题）
 

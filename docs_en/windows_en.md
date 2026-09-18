@@ -37,7 +37,7 @@ no `SDL2.dll`, no `libwinpthread-1.dll`, no `libgcc_s_seh-1.dll`.
 | Image import / PNG screenshot | works (stb codecs, no external deps) |
 | Keyboard / mouse / wheel | works |
 | GPU warp / two-tier AA / raymarch | works (OpenGL) |
-| **Clipboard** | **not implemented** (the current implementation uses X11 tools; Windows needs `OpenClipboard`) |
+| **Clipboard** | implemented (`OpenClipboard` + `CF_UNICODETEXT`, UTF-8↔UTF-16, CJK-safe) |
 | **CJK input method** | **not supported** (XIM is X11-only; Windows would need IMM32) |
 | CJK text *display* | works (built-in font, unrelated to input methods) |
 

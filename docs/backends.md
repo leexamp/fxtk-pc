@@ -29,7 +29,7 @@
 | 文件 | `fx_file_read()` / `fx_file_write()` / `fx_file_exists()` | 一次性读写，内部处理大小与错误 |
 | 图片 | `fx_img_load_file()` | PNG / JPEG / BMP / GIF / TGA / PNM（stb，已裁掉 HDR/PSD/PIC 省体积） |
 | 截图 | `fx_screenshot()` | 驱动 `read_pixels` 回读当前帧 → PNG（stb 编码，零外部依赖） |
-| 剪贴板 | `fx_clip_set()` / `fx_clip_get()` | Linux 走 `xsel`/`xclip`/`wl-copy` 并带进程内兜底；**Windows 尚未实现** |
+| 剪贴板 | `fx_clip_set()` / `fx_clip_get()` | Linux 走 `xsel`/`xclip`/`wl-copy` 并带进程内兜底；Windows 用 `OpenClipboard` + `CF_UNICODETEXT`（UTF-8↔UTF-16 转换） |
 | 对话框 | `fx_backend_pick_file()` / `fx_fs_pick_dir()` | Linux 依序尝试 `zenity`→`kdialog`；Win32 用系统对话框 |
 | 偏好 | `fx_pref_set()` / `fx_pref_get()` | 轻量键值持久化（配置目录下的文本文件） |
 | 能力协商 | `fx_backend_caps()` | 哪些能力在当前平台可用（例如"有对话框吗"），**调用方据此决定回退策略** |
@@ -43,7 +43,7 @@
 | 文件读写 | ✅ | ✅ | ✅ | ✅（内存文件系统） |
 | 图片解码 | ✅ | ✅ | ✅ | ✅ |
 | PNG 截图 | ✅ | ✅ | 视驱动 | ✅ |
-| 剪贴板 | ✅（xsel/xclip/wl-copy） | ❌ **未实现** | ❌ | ✅（进程内） |
+| 剪贴板 | ✅（xsel/xclip/wl-copy） | ✅（OpenClipboard，支持中文） | ❌ | ✅（进程内） |
 | 文件/文件夹对话框 | ✅（zenity/kdialog） | ✅（Win32） | ❌ | ❌（返回"取消"并给出提示） |
 | 中文输入法 | ✅（XIM，需 sokol 后端） | ❌ **未实现**（需 IMM32） | 视方案 | — |
 

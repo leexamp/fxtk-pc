@@ -39,7 +39,7 @@ x86_64-w64-mingw32-objdump -p dist/win_sokol/fxtk_sokol.exe | grep 'DLL Name'
 | 图片导入 / 截图(PNG) | ✅ 可用（stb 编解码，无外部依赖） |
 | 键盘/鼠标/滚轮 | ✅ 可用 |
 | GPU 形变 / 两层抗锯齿 / 光追 | ✅ 可用（走 OpenGL） |
-| **剪贴板** | ❌ **未实现**（当前实现走 X11 工具；Windows 需要另写 `OpenClipboard` 版本） |
+| **剪贴板** | ✅ 已实现（`OpenClipboard` + `CF_UNICODETEXT`，UTF-8↔UTF-16，支持中文） |
 | **中文输入法** | ❌ **不支持**（XIM 是 X11 专有；Windows 需走 IMM32） |
 | 中文显示 | ✅ 正常（内置字体，与输入法无关） |
 
