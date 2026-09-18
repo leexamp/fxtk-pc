@@ -43,8 +43,12 @@ static int button_press_amt(fx_widget_t *w, int pr)
 {
     int goal = pr ? FX_BTN_PRESS_AMT : 0;
     if (!fx_widget_anim_ok(w)) return goal;
+    /* 【关键】先看这个控件是否已经有槽位, 且是否已经稳定在目标上 —— 稳定就直接返回,
+     * 不申请槽位、不打 FX_F_ANIM。否则每个被绘制的按钮都会占位并保持"动画中"标志,
+     * 通用重绘通道就会每帧把整页控件标脏(用户反馈: 控件加载明显变慢)。 */
     int k = -1;
     for (int i = 0; i < FX_ANIM_SLOTS; i++) if (s_bt_w[i] == w) { k = i; break; }
+    if (k >= 0 && s_bt_goal[k] == goal && s_bt_v[k] == (float)goal) return goal;   /* 已稳定: 不做任何事 */
     if (k < 0) {
         for (int i = 0; i < FX_ANIM_SLOTS; i++) if (!s_bt_w[i]) { s_bt_w[i] = w; s_bt_v[i] = (float)goal; s_bt_goal[i] = goal; s_bt_t0[i] = (uint32_t)fx_time_ms(); k = i; break; }
         static int warned = 0;
@@ -231,6 +235,7 @@ static int progress_anim_value(fx_widget_t *w)
         }
     }
     if (!s_pa_init[k]) { s_pa_init[k] = 1; s_pa_disp[k] = (float)w->value; s_pa_to[k] = w->value; s_pa_t0[k] = (uint32_t)fx_time_ms(); }
+    if (s_pa_to[k] == w->value && s_pa_disp[k] == (float)w->value) { w->flags &= (uint16_t)~FX_F_ANIM; return w->value; }   /* 稳定: 不打标志 */
     if (!fx_widget_anim_ok(w)) { w->flags &= (uint16_t)~FX_F_ANIM; s_pa_disp[k] = (float)w->value; s_pa_to[k] = w->value; return w->value; }
     if (w->value != s_pa_to[k]) {          /* 值变了: 从当前位置重新出发 */
         s_pa_from[k] = s_pa_disp[k]; s_pa_to[k] = w->value; s_pa_t0[k] = (uint32_t)fx_time_ms();
