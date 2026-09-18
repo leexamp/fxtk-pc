@@ -47,24 +47,29 @@ case "$MODE" in
 esac
 
 if [ "$MODE" = shared ]; then
-    # 动态库形态: 框架编成 libfxtk.so, exe 只留 main.c + 驱动
-    rm -f your_app libfxtk.so
-    echo "🔨 构建 libfxtk.so ..."
+    # 动态库形态(与 demo-main/build_shared.sh 同一分法):
+    #   libfxtk.so        = 框架核心
+    #   libfxtk_sokol.so  = sokol 驱动 + stb 文本层(★ SOKOL_*_IMPL 在这里, 所以 sokol 只编进 .so)
+    #   your_app          = 只含 main.c 与外壳(入口), 不再包含 sokol 实现
+    # 上一版我误把驱动编进 exe → 整套 sokol 进了可执行文件(141K); 正确分法下 exe 只有几十 KB。
+    rm -f your_app libfxtk.so libfxtk_sokol.so
+    CORE_CS="../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c ../components/fxtk/fxtk_widgets.c              ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c"
+    echo "🔨 libfxtk.so (框架核心) ..."
     gcc -shared -fPIC -Os -s -flto -ffunction-sections -fdata-sections -DNDEBUG \
         -I../components/fxtk -I../drivers -I../third_party/sokol \
-        ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c ../components/fxtk/fxtk_widgets.c \
-        ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c \
-        -o libfxtk.so $(grep -o '\-l[a-zA-Z0-9_]*' Makefile | sort -u | tr '\n' ' ') 2>/dev/null || \
-    gcc -shared -fPIC -Os -s -flto -I../components/fxtk -I../drivers -I../third_party/sokol \
-        ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c ../components/fxtk/fxtk_widgets.c \
-        ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c \
-        -o libfxtk.so -lX11 -lXi -lXcursor -lGL -ldl -lpthread -lm
-    echo "🔨 构建 your_app(链接 libfxtk.so, rpath=\$ORIGIN) ..."
+        $CORE_CS -o libfxtk.so -lX11 -lXi -lXcursor -lGL -ldl -lpthread -lm
+    echo "🔨 libfxtk_sokol.so (sokol 驱动 + 文本层, 含 sokol 实现) ..."
+    gcc -shared -fPIC -Os -s -flto -ffunction-sections -fdata-sections -DNDEBUG \
+        -I../components/fxtk -I../drivers -I../third_party/sokol \
+        ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c \
+        -o libfxtk_sokol.so -L. -lfxtk -lX11 -lXi -lXcursor -lGL -ldl -lpthread -lm
+    echo "🔨 your_app (只含应用 + 外壳入口) ..."
     gcc $MAKE_CFLAGS -I. -I../components/fxtk -I../drivers -I../third_party/sokol \
-        main.c ../drivers/fxtk_app_sokol.c ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c \
-        -o your_app -L. -lfxtk -Wl,-rpath,'$ORIGIN' -lX11 -lXi -lXcursor -lGL -ldl -lpthread -lm
-    ls -la --block-size=K libfxtk.so your_app | awk '{print "  "$5"  "$9}'
-    echo "✅ 动态库形态完成(exe 不再包含框架代码)"; exit 0
+        main.c ../drivers/fxtk_app_sokol.c \
+        -o your_app -L. -lfxtk_sokol -lfxtk -Wl,-rpath,'$ORIGIN' -Wl,--export-dynamic \
+        -lX11 -lXi -lXcursor -lGL -ldl -lpthread -lm
+    ls -la --block-size=K libfxtk.so libfxtk_sokol.so your_app | awk '{print "  "$5"  "$9}'
+    echo "✅ 动态库形态完成(对照: demo 的 fxtk_shared 约 60KB)"; exit 0
 fi
 
 if [ "$MODE" = release ]; then
