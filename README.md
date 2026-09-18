@@ -62,7 +62,6 @@
   输入框里打 `nihao` → 上屏"你好" ✓。
 - **控件层 SDF 抗锯齿默认关闭**(`s_widget_aa = 0`):它在"画布 + 文字 + quadwarp 混排"场景下有一个已知缺陷
   (实心填充退化成边界环),定位中。想试可 `fx_set_widget_aa(1)` 或 `FXTK_AA=1`。
-- **Windows 剪贴板仍是桩**:剪贴板实现目前走 X11 工具(xsel/xclip/wl-copy),Windows 需要另写
   `OpenClipboard` 版本,尚未做(应用内复制/粘贴也不可用)。
 
 ## 两个目标端：已分化，只要求"语法一致 + 效果一致"
