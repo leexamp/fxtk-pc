@@ -139,6 +139,14 @@ int fx_backend_pick_dir(char *out, int cap);
 /* 选文件; title 可为 NULL, ext_csv 形如 "png,jpg,jpeg" (NULL = 全部) */
 int fx_backend_pick_file(char *out, int cap, const char *title, const char *ext_csv);
 
+/* v2.4.3 实用后端: 交给系统去打开
+ *   fx_open_url("https://...")   用默认浏览器/应用打开链接
+ *   fx_reveal_file("/path/a.png") 用文件管理器打开所在目录(尽量选中该文件)
+ * 返回 1 表示"已交给系统"(不等待结果), 0 表示当前平台不支持或参数非法。
+ * 设计: 不阻塞、不弹自己的窗口; 失败时明确返回 0, 由调用方决定回退文案。 */
+int fx_open_url(const char *url);
+int fx_reveal_file(const char *path);
+
 /* ================= 系统信息 ================= */
 
 int fx_cpu_count(void);
