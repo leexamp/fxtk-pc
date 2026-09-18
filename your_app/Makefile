@@ -8,8 +8,6 @@ include ../demo-main/Makefile.common
 #   make clean
 # 只需要两样东西：框架核心(components/fxtk) + 你要用的驱动(drivers/)
 # ============================================================
-       ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_effects.c \
-       ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c
 DRV  := ../drivers/fxtk_app_sokol.c ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c
 INC  := -I. -I../components/fxtk -I../third_party/sokol -I../drivers
 CFLAGS = -Os -s -flto -ffunction-sections -fdata-sections -DNDEBUG
