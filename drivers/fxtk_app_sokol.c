@@ -30,6 +30,16 @@ static void app_init_cb(void)
     fxtk_app_init();                                       /* ← 你的界面 */
 }
 
+/* 事件入口：sokol 的鼠标/键盘事件必须转交给驱动，否则界面完全收不到输入
+ * （外壳最初漏了这个 event_cb，表现就是"鼠标点不动"。演示的 main 里一直有这一步。） */
+static void app_event_cb(const sapp_event *e)
+{
+    extern void fxtk_sokol_handle_event(const sapp_event *e);
+    fxtk_sokol_handle_event(e);
+    if (e->type == SAPP_EVENTTYPE_KEY_DOWN && e->key_code == SAPP_KEYCODE_ESCAPE)
+        sapp_request_quit();
+}
+
 static void app_frame_cb(void)
 {
     fx_poll();
@@ -45,6 +55,7 @@ sapp_desc sokol_main(int argc, char *argv[])
     return (sapp_desc){
         .init_cb = app_init_cb,
         .frame_cb = app_frame_cb,
+        .event_cb = app_event_cb,
         .width = w > 0 ? w : 640,
         .height = h > 0 ? h : 360,
         .window_title = fxtk_app_title(),
