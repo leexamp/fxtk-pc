@@ -41,7 +41,7 @@
 #define STBI_NO_HDR
 #define STBI_NO_PSD
 #define STBI_NO_PIC
-#define STBI_NO_PNM
+/* PNM 保留支持(文档承诺 PNG/JPEG/BMP/GIF/TGA/PNM): 之前误关, 这里打开 */
 #define STBI_ONLY_PNG
 #define STBI_ONLY_JPEG
 #define STBI_ONLY_BMP
