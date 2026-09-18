@@ -3,6 +3,7 @@
  * fxtk_widgets.c — 控件绘制实现 (复选框居中+透明背景修复)
  */
 #include "fxtk_internal.h"
+#include "fxtk_backends.h"   /* v2.4.3: fx_log 告警(动画槽位满时提示加大宏) */
 #include "fxtk_tokens.h"
 #include "fxtk_desktop.h"
 #include <string.h>
@@ -173,25 +174,40 @@ void fxtk_draw_slider(fx_widget_t *w)
 
 #endif
 #if FXTK_WIDGET_PROGRESS
-/* v2.4.3 动画: 进度条数值缓动(值突变时平滑增长)。默认全局关 → 行为与旧版完全一致。 */
-static fx_widget_t *s_pa_w[4]; static float s_pa_v[4] = { -1,-1,-1,-1 };
+/* v2.4.3 动画: 进度条数值缓动(值突变时平滑增长)。默认全局关 → 行为与旧版完全一致。
+ * 与标签淡入同样按【时间】推进: 同一帧内控件可能被绘制多次, 按帧累加会被重复推进(实测会卡在中途)。 */
+#ifndef FX_ANIM_SLOTS
+#define FX_ANIM_SLOTS 8       /* 同时可动画的控件数; 超出会明确告警(不再静默不动画) */
+#endif
+static fx_widget_t *s_pa_w[FX_ANIM_SLOTS];
+static float    s_pa_from[FX_ANIM_SLOTS], s_pa_disp[FX_ANIM_SLOTS];
+static int      s_pa_to[FX_ANIM_SLOTS];
+static uint32_t s_pa_t0[FX_ANIM_SLOTS];
+static int      s_pa_init[FX_ANIM_SLOTS];
+#define FX_PROG_EASE_MS 180u
 static int progress_anim_value(fx_widget_t *w)
 {
     int k = -1;
-    for (int i = 0; i < 4; i++) if (s_pa_w[i] == w) { k = i; break; }
-    if (k < 0) for (int i = 0; i < 4; i++) if (!s_pa_w[i]) { s_pa_w[i] = w; k = i; break; }
-    if (k < 0) return w->value;
-    if (s_pa_v[k] < 0) s_pa_v[k] = (float)w->value;
-    if (!fx_widget_anim_ok(w)) { s_pa_v[k] = (float)w->value; w->flags &= (uint16_t)~FX_F_ANIM; return w->value; }
-    float d = (float)w->value - s_pa_v[k];
-    if (d > 0.4f || d < -0.4f) {
-        s_pa_v[k] += d * 0.25f;
-        w->flags |= FX_F_ANIM;
-        return (int)(s_pa_v[k] + 0.5f);
+    for (int i = 0; i < FX_ANIM_SLOTS; i++) if (s_pa_w[i] == w) { k = i; break; }
+    if (k < 0) {
+        for (int i = 0; i < FX_ANIM_SLOTS; i++) if (!s_pa_w[i]) { s_pa_w[i] = w; s_pa_init[i] = 0; k = i; break; }
+        static int warned = 0;
+        if (k < 0) {
+            if (!warned) { fx_log(FX_LOG_WARN, "动画槽位已满(%d): 加大 FX_ANIM_SLOTS", FX_ANIM_SLOTS); warned = 1; }
+            return w->value;
+        }
     }
-    s_pa_v[k] = (float)w->value;
-    w->flags &= (uint16_t)~FX_F_ANIM;
-    return w->value;
+    if (!s_pa_init[k]) { s_pa_init[k] = 1; s_pa_disp[k] = (float)w->value; s_pa_to[k] = w->value; s_pa_t0[k] = (uint32_t)fx_time_ms(); }
+    if (!fx_widget_anim_ok(w)) { w->flags &= (uint16_t)~FX_F_ANIM; s_pa_disp[k] = (float)w->value; s_pa_to[k] = w->value; return w->value; }
+    if (w->value != s_pa_to[k]) {          /* 值变了: 从当前位置重新出发 */
+        s_pa_from[k] = s_pa_disp[k]; s_pa_to[k] = w->value; s_pa_t0[k] = (uint32_t)fx_time_ms();
+    }
+    uint32_t el = (uint32_t)fx_time_ms() - s_pa_t0[k];
+    if (el >= FX_PROG_EASE_MS) { w->flags &= (uint16_t)~FX_F_ANIM; s_pa_disp[k] = (float)s_pa_to[k]; return s_pa_to[k]; }
+    w->flags |= FX_F_ANIM;
+    float t = (float)el / (float)FX_PROG_EASE_MS;
+    s_pa_disp[k] = s_pa_from[k] + ((float)s_pa_to[k] - s_pa_from[k]) * t;
+    return (int)(s_pa_disp[k] + 0.5f);
 }
 
 void fxtk_draw_progress(fx_widget_t *w)
@@ -277,14 +293,18 @@ void fxtk_draw_panel(fx_widget_t *w)
  * 默认全局关; 演示里 fx_animation(1) 打开; 单个控件可用 anim(0) 关掉。
  * 进度按【时间】算而不是按帧累加 —— 同一帧内控件可能被绘制多次, 按帧累加会被重复推进/重复重置,
  * 表现为"淡入到一半就卡住"(实测停在 234 而非 250)。时间基准天然幂等。 */
-static fx_widget_t *s_ta_w[4]; static uint32_t s_ta_t0[4]; static int s_ta_sel[4] = { -9,-9,-9,-9 };
+static fx_widget_t *s_ta_w[FX_ANIM_SLOTS]; static uint32_t s_ta_t0[FX_ANIM_SLOTS]; static int s_ta_sel[FX_ANIM_SLOTS];
 #define FX_TAB_FADE_MS 140u
 static float tab_anim_mix(fx_widget_t *w)
 {
     int k = -1;
-    for (int i = 0; i < 4; i++) if (s_ta_w[i] == w) { k = i; break; }
-    if (k < 0) for (int i = 0; i < 4; i++) if (!s_ta_w[i]) { s_ta_w[i] = w; s_ta_t0[i] = (uint32_t)fx_time_ms(); k = i; break; }
-    if (k < 0) return 1.0f;
+    for (int i = 0; i < FX_ANIM_SLOTS; i++) if (s_ta_w[i] == w) { k = i; break; }
+    if (k < 0) {
+        for (int i = 0; i < FX_ANIM_SLOTS; i++) if (!s_ta_w[i]) { s_ta_w[i] = w; s_ta_t0[i] = (uint32_t)fx_time_ms(); s_ta_sel[i] = -9; k = i; break; }
+        static int warned = 0;
+        if (k < 0) { if (!warned) { fx_log(FX_LOG_WARN, "动画槽位已满(%d): 加大 FX_ANIM_SLOTS", FX_ANIM_SLOTS); warned = 1; } return 1.0f; }
+    }
+    if (s_ta_sel[k] == -9) s_ta_sel[k] = w->value;
     if (s_ta_sel[k] != w->value) { s_ta_sel[k] = w->value; s_ta_t0[k] = (uint32_t)fx_time_ms(); }
     if (!fx_widget_anim_ok(w)) { w->flags &= (uint16_t)~FX_F_ANIM; return 1.0f; }
     uint32_t el = (uint32_t)fx_time_ms() - s_ta_t0[k];
