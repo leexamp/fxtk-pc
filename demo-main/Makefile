@@ -15,7 +15,7 @@
 # v2.3: 体积优化默认档 (-O2 基线 154KB → 101KB, -35%)
 #   -Os 优化体积 / LTO+gc-sections 跨编译单元死代码消除 /
 #   去 unwind 表(C 无异常, 失去回溯栈)与 .comment/.note 构建标识。
-#   需要 -O2 调试时: make CFLAGS="-O2 -g" LDFLAGS=
+#   需要 -O2 调试时: make CFLAGS="-O2 -g" LDFLAGS= -DNDEBUG
 CFLAGS ?= -Os -s -flto -ffunction-sections -fdata-sections \
           -fno-asynchronous-unwind-tables -fno-unwind-tables \
           -fno-stack-protector -fno-ident

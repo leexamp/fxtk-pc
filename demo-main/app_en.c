@@ -432,7 +432,7 @@ static void on_pt(fx_widget_t *w, void *ud){
     fx_draw_text_c(4,4,buf,FX_GREEN,FX_BLACK);
 }
 void app_init(void) {
-    fx_animation(1);
+    /* 动画默认关, 需要时 fx_animation(1) */
     printf("[I] demo: fxtk demo start (3D Raymarch)\n");
     fxtk_set_fps_debug(0);   /* 3D/particle pages already show FPS; don't overlay a global FPS badge on the scrolling canvas */
     gpu_raymarch_start();   /* kick off the GPU channel background thread once */
