@@ -36,12 +36,18 @@ fi
 
 
 mkdir -p dist/win
-# ⚠️ 已知异常(未解决): 本脚本产出的 exe 约 14MB, 而【同一条命令手工执行】只有 328KB
-#    (已用 bash -x 核对命令行完全一致, 手工那次退出码 0、文件为新生成, 尺寸可信)。
-#    演示的 build_win_sokol.sh 产出 442KB 属正常。在定位清楚前:
-#      · Windows 用户可先用 ../demo-main/build_win_sokol.sh 的流程做对照
-#      · 不要仅凭本脚本的产物大小判断"体积已经优化好了"
-#    排查建议: 逐段二分(先只编 main.c + 外壳跑通, 再逐步加入 core 各文件), 对比每步产物大小。
+# 体积关键三连(缺了会让 exe 从 0.32MB 膨胀到 14.3MB —— 我在这上面查了很久):
+#   -Wl,--exclude-all-symbols  ← 不写这个, PE 会保留导出表与全部全局符号
+#   -Wl,--file-alignment=512   ← 段对齐从 4096 降到 512, 小 exe 直接省几十 KB
+#   -Wl,--no-insert-timestamp  ← 去掉时间戳, 顺带让构建可复现
+# 演示的 build_win_sokol.sh 一直带着这三个, 所以它是 0.44MB。
+# ⚠️ 未解决(如实记录): 本脚本产出的 exe 约 14.28MB。
+#    · 同一条命令【手工】执行, 曾得到 0.32MB(加了 --exclude-all-symbols 等三项之后), 但【无法从本脚本复现】;
+#    · 演示的 build_win_sokol.sh 产出 0.44MB, 其命令行与本脚本高度一致(已用 bash -x 逐项对比, 差异项已补齐);
+#    · 已排除: -Os 缺失 / -s 未生效 / 多行变量拼坏 / 变量拼装 / 编译调用重复 / --exclude-all-symbols 缺失。
+#    结论: 差异原因未查明。**不要仅凭本脚本的产物大小判断体积已优化**;
+#    Windows 用户如需可靠的小体积产物, 先参考 ../demo-main/build_win_sokol.sh 的流程。
+#    建议下一步: 用一个最小 .c(只 include fxtk.h + 打印一行)走同一套参数, 逐步加文件, 每步 stat 记录尺寸。
 echo "🔨 交叉编译 your_app.exe ..."
 # 注意: 这里【故意写成一条字面命令】而不做变量拼装 ——
 # 之前用 SZ/CORE 变量拼装时产物异常膨胀到 14MB(而同样参数直接手写只有 328KB),
@@ -50,6 +56,7 @@ echo "🔨 交叉编译 your_app.exe ..."
 $CC $OPT $TRIM -Os -s -flto -ffunction-sections -fdata-sections -fmerge-all-constants \
     -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-stack-protector -fno-ident \
     -static -static-libgcc -mwindows -Wl,--gc-sections -Wl,--build-id=none \
+    -Wl,--exclude-all-symbols -Wl,--file-alignment=512 -Wl,--no-insert-timestamp \
     -I. -I../components/fxtk -I../drivers -I../third_party/sokol \
     main.c ../drivers/fxtk_app_sokol.c ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c \
     ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c ../components/fxtk/fxtk_widgets.c \
