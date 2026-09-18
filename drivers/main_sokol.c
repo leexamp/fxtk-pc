@@ -39,6 +39,7 @@ static void init_cb(void)
     fx_sokol_driver.init();
     fx_init(&fx_sokol_driver);
     if (getenv("FXTK_NOANIM")) fx_animation(0);   /* A/B: 关掉演示的动画做性能对照 */
+    { extern float fxtk_sokol_dpi; fxtk_sokol_dpi = (float)sapp_dpi_scale(); }
     fx_backend_set_screen(sapp_width(), sapp_height(),
                           (float)sapp_dpi_scale());
     fx_set_bg(FX_WINDOW_BG);

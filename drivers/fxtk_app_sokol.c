@@ -25,6 +25,7 @@ static void app_init_cb(void)
     fx_sokol_driver.init();
     fxtk_font_init(NULL, 18);                              /* 文字层：不做就没有字 */
     fx_init(&fx_sokol_driver);
+    { extern float fxtk_sokol_dpi; fxtk_sokol_dpi = (float)sapp_dpi_scale(); }
     fx_backend_set_screen(sapp_width(), sapp_height(),     /* 不上报屏幕尺寸：鼠标点不动 */
                           (float)sapp_dpi_scale());
     fxtk_app_init();                                       /* ← 你的界面 */
