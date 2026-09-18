@@ -1,3 +1,6 @@
+/* v2.4.3: clock_gettime 属 POSIX —— 严格 C99 下必须显式声明特性宏, 否则是隐式声明(-Wall 会警告)。 */
+#define _POSIX_C_SOURCE 199309L
+#include <time.h>
 #include <stdlib.h>
 /**
  * app.c — fxtk 综合演示 (5 页: 波形/动效/控件/图片/3D光追)
