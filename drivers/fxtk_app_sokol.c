@@ -25,7 +25,6 @@ static void app_init_cb(void)
     fx_sokol_driver.init();
     fxtk_font_init(NULL, 18);                              /* 文字层：不做就没有字 */
     fx_init(&fx_sokol_driver);
-    { extern float fxtk_sokol_dpi; fxtk_sokol_dpi = (float)sapp_dpi_scale(); }
     fx_backend_set_screen(sapp_width(), sapp_height(),     /* 不上报屏幕尺寸：鼠标点不动 */
                           (float)sapp_dpi_scale());
     fxtk_app_init();                                       /* ← 你的界面 */
@@ -49,5 +48,11 @@ sapp_desc sokol_main(int argc, char *argv[])
         .width = w > 0 ? w : 640,
         .height = h > 0 ? h : 360,
         .window_title = fxtk_app_title(),
+        /* ↓ 这三行缺了会出怪问题: 2D UI 的管线不带深度, 交换链也必须不带,
+         *   否则【拖动窗口时交换链重建 → 格式冲突 → 黑屏】(稳定后才恢复)。
+         *   演示里一直有这几行, 外壳漏掉就复现了同样的现象。 */
+        .depth_format = SAPP_PIXELFORMAT_NONE,
+        .swap_interval = 1,
+        .high_dpi = false,
     };
 }

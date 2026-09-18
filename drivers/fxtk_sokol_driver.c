@@ -84,8 +84,6 @@ static int s_tex_n = 0;
 
 /* ================= 驱动状态 ================= */
 
-/* v2.4.3: 当前 DPI 缩放。驱动不包含 sokol(拿不到 sapp_dpi_scale), 由 main 侧写入。 */
-float fxtk_sokol_dpi = 1.0f;
 static int s_w = 480, s_h = 272;
 static sg_pipeline s_pip_sdf, s_pip_solid, s_pip_tex, s_pip_raymarch, s_pip_quad;
 static sg_shader s_sh_raymarch;
@@ -1358,11 +1356,6 @@ int  fxtk_sokol_vtx_count(void) { return s_vb_n; }
  * 漏掉 fx_layout/fx_repaint 会让新暴露的区域一直没人画 → 缩放后几乎全屏黑(实测踩坑)。 */
 void fxtk_sokol_apply_size(int w, int h)
 {
-    /* v2.4.3 修复(用户实测: your_app 拖动窗口黑屏, 稳定后恢复):
-     * 这里只更新了驱动自己的帧缓冲尺寸并重绘, 却【没有通知框架屏幕尺寸变了】——
-     * 全项目只有初始化时调用过一次 fx_backend_set_screen, 于是拖动过程中框架仍按旧尺寸
-     * 布局与重绘, 表现为黑屏, 直到尺寸稳定。补上这次上报, 演示与 your_app 同时受益。 */
-    { extern void fx_backend_set_screen(int, int, float); fx_backend_set_screen(w, h, fxtk_sokol_dpi); }
     s_clip_x1 = 0; s_clip_y1 = 0; s_clip_x2 = 32767; s_clip_y2 = 32767;
     if (w < 160) w = 160;
     if (h < 120) h = 120;
