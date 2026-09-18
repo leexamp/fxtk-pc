@@ -120,8 +120,10 @@ static void aa_circle(int cx, int cy, int r, uint32_t c)
         /* v2.4.3 修复: 原来只在"该行圆环水平极值 ±1"处上色 —— 圆的顶部/底部曲线接近水平,
          * 相邻多行会落到同一个 x, 于是呈现为断线/虚线(用户看图时发现圆"缺了一段")。
          * 改为覆盖该行与"圆环带宽 |d-r|<1"相交的完整区间。 */
-        float lo2 = (float)((r - 1) * (r - 1) - dy * dy); if (lo2 < 0) lo2 = 0;
-        float hi2 = (float)((r + 1) * (r + 1) - dy * dy); if (hi2 < 0) continue;
+        float lo2 = (float)((r - 1) * (r - 1) - dy * dy);
+        if (lo2 < 0) lo2 = 0;
+        float hi2 = (float)((r + 1) * (r + 1) - dy * dy);
+        if (hi2 < 0) continue;
         int dlo = (int)sqrtf(lo2), dhi = (int)sqrtf(hi2);
         if (dlo < 0) dlo = 0;
         for (int dd = dlo; dd <= dhi; dd++) {
@@ -321,8 +323,10 @@ void fx_set_clip(int x1, int y1, int x2, int y2)
 {
     if (x1 > x2) { int t = x1; x1 = x2; x2 = t; }
     if (y1 > y2) { int t = y1; y1 = y2; y2 = t; }
-    if (x1 < -32768) x1 = -32768; if (x2 > 32767) x2 = 32767;   /* v2.3.1: 防 int16 截断回绕 */
-    if (y1 < -32768) y1 = -32768; if (y2 > 32767) y2 = 32767;
+    if (x1 < -32768) x1 = -32768;
+    if (x2 > 32767) x2 = 32767;   /* v2.3.1: 防 int16 截断回绕 */
+    if (y1 < -32768) y1 = -32768;
+    if (y2 > 32767) y2 = 32767;
     s_clip_x1 = (int16_t)x1; s_clip_y1 = (int16_t)y1;
     s_clip_x2 = (int16_t)x2; s_clip_y2 = (int16_t)y2;
 }
@@ -1239,15 +1243,18 @@ static uint32_t sample_bilinear(const fx_image_t *img, float u, float v)
     int x1 = x0 + 1 < img->w ? x0 + 1 : x0;
     int y1 = y0 + 1 < img->h ? y0 + 1 : y0;
     float tx = fx - (float)x0, ty = fy - (float)y0;
-    if (tx < 0) tx = 0; if (tx > 1) tx = 1;
-    if (ty < 0) ty = 0; if (ty > 1) ty = 1;
+    if (tx < 0) tx = 0;
+    if (tx > 1) tx = 1;
+    if (ty < 0) ty = 0;
+    if (ty > 1) ty = 1;
     uint32_t c00 = img->px[y0 * img->w + x0], c10 = img->px[y0 * img->w + x1];
     uint32_t c01 = img->px[y1 * img->w + x0], c11 = img->px[y1 * img->w + x1];
     float w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty), w01 = (1 - tx) * ty, w11 = tx * ty;
     int r = (int)(((c00 >> 16 & 255) * w00 + (c10 >> 16 & 255) * w10 + (c01 >> 16 & 255) * w01 + (c11 >> 16 & 255) * w11) + 0.5f);
     int g = (int)(((c00 >> 8 & 255) * w00 + (c10 >> 8 & 255) * w10 + (c01 >> 8 & 255) * w01 + (c11 >> 8 & 255) * w11) + 0.5f);
     int b = (int)(((c00 & 255) * w00 + (c10 & 255) * w10 + (c01 & 255) * w01 + (c11 & 255) * w11) + 0.5f);
-    if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
+    if (r > 255) r = 255;
+    if (g > 255) g = 255; if (b > 255) b = 255;
     return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
 }
 
@@ -1396,7 +1403,7 @@ void fx_draw_image_quad(const fx_image_t *img, const float *xy8)
 void fx_draw_image_quad_persp(const fx_image_t *img, int x1, int y1, int x2, int y2,
                               float top_inset, float top_shift)
 {
-    float w = (float)(x2 - x1), h = (float)(y2 - y1);
+    float w = (float)(x2 - x1);   /* v2.4.3: h 未使用, 删掉 */
     float in = top_inset * w * 0.5f;      /* 顶部左右各内缩 */
     float sh = top_shift * w;             /* 顶部整体水平偏移 */
     float xy8[8] = {

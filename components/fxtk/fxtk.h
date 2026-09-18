@@ -215,6 +215,12 @@ void fx_set_aa(int level);
  *     求覆盖度 → 边缘天然平滑, 且比逐行填充更快。默认档 1(有钩子时开)。
  *  档位: 0=关, 1=SDF(默认), 2=1+图元羽化(线段/圆/弧)。掉帧时由驱动调 fx_aa_autodegrade() 降档。
  *  fx_set_aa(level) 同时设置两层(保持 v2.2 兼容); 只想动 GPU 层用 fx_set_widget_aa()。 */
+/* v2.4.3: 全局动画开关(默认关, 保证无头测试/金图确定性)。
+ * 打开后, 支持动画的控件会做过渡(如标签药丸淡入、进度条数值缓动);
+ * 单个控件用 anim(0) 显式关闭。 */
+void fx_animation(int on);
+int  fx_animation_enabled(void);
+
 void fx_set_widget_aa(int level);   /* 只设 GPU 控件层档位 0/1/2 */
 /* v2.4.1: 把输入法候选窗要贴的位置(文本框光标, 屏幕坐标)告诉后端。
  * 驱动实现 ime_pos 钩子即可(SDL 版走 SDL_SetTextInputRect, sokol 版走 XIM 的 XNSpotLocation);
@@ -263,7 +269,7 @@ enum { FX_KEY_BACKSPACE = 8, FX_KEY_RETURN = 13, FX_KEY_ESCAPE = 27,
        FX_KEY_UP = 5, FX_KEY_DOWN = 6, FX_KEY_DELETE = 127 };
 
 typedef struct {
-    uint32_t width, height;
+    int width, height;
     int  (*init)(void);
     void (*set_window)(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
     void (*push_pixels)(const uint32_t *px, uint32_t n);

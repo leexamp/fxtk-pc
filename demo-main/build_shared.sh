@@ -24,8 +24,8 @@ LD_GOLD=$(command -v ld.gold >/dev/null 2>&1 && echo yes)
 LNK_LIB="-Wl,--gc-sections -Wl,--build-id=none -Wl,--exclude-libs,ALL -Wl,--version-script=fxtk.exports"
 LNK_EXE="-Wl,--gc-sections -Wl,--build-id=none"
 [ "$LD_GOLD" = "yes" ] && { LNK_LIB="$LNK_LIB -fuse-ld=gold -Wl,--icf=all"; LNK_EXE="$LNK_EXE -fuse-ld=gold -Wl,--icf=all"; }
-INC="-I. -I../components/fxtk -I../third_party/sokol"
-# 不含 fxtk_font.c: 那是"驱动 blit_tex 版"字体模块, sokol 版由平台库里的 fxtk_font_stb.c 提供
+INC="-I. -I../components/fxtk -I../drivers -I../third_party/sokol"
+# 不含 ../drivers/fxtk_font.c: 那是"驱动 blit_tex 版"字体模块, sokol 版由平台库里的 ../drivers/fxtk_font_stb.c 提供
 # (静态构建同样把它排除, 见 Makefile 的 SOKOL_CORE)。留着会多十几 KB, 且与平台库重复定义同一批符号。
 CORE="../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c ../components/fxtk/fxtk_widgets.c \
       ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c"
@@ -34,11 +34,11 @@ echo "🔨 libfxtk.so        (核心框架, 与后端无关)"
 gcc $SZ -fPIC -shared $LNK_LIB $INC $CORE -o $OUT/libfxtk.so -lm -lpthread
 
 echo "🔨 libfxtk_sokol.so  (sokol 平台层 + stb 文本; SOKOL_*_IMPL 只在这一个 TU)"
-gcc $SZ -fPIC -shared $LNK_LIB $INC fxtk_sokol_driver.c fxtk_font_stb.c -o $OUT/libfxtk_sokol.so \
+gcc $SZ -fPIC -shared $LNK_LIB $INC ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c -o $OUT/libfxtk_sokol.so \
     -L$OUT -Wl,-rpath,'$ORIGIN' -lfxtk -lX11 -lXi -lXcursor -lGL -ldl -lpthread -lm
 
 echo "🔨 $OUTBIN           (app 层)"
-gcc $SZ $LNK_EXE $INC main_sokol.c $SRCS_APP raymarch.c gpu_raymarch_stub.c -o $OUT/$OUTBIN \
+gcc $SZ $LNK_EXE $INC ../drivers/main_sokol.c $SRCS_APP raymarch.c gpu_raymarch_stub.c -o $OUT/$OUTBIN \
     -L$OUT -Wl,-rpath,'$ORIGIN' -Wl,--export-dynamic -lfxtk -lfxtk_sokol -lGL -lm -lpthread
 
 cat > $OUT/README.txt <<'TXT'

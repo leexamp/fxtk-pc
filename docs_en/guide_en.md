@@ -879,7 +879,7 @@ const char *r = gpu_raymarch_renderer();       /* return the renderer name */
   `Xutf8LookupString`; the candidate window follows the caret via `fx_set_ime_pos()` → driver hook
   `ime_pos` → `sapp_x11_set_ime_spot()`. Without an IME present it falls back to the old path.
 - **Clipboard** (sokol): implemented through `xsel`/`xclip`/`wl-copy`, with an in-process buffer fallback.
-  *Known limitation: Windows clipboard is not implemented yet.*
+  *Windows clipboard is implemented with `OpenClipboard` + `CF_UNICODETEXT` (UTF-8↔UTF-16), so CJK copy/paste works.*
 - **Forensics**: `FXTK_RECTDBG=1` prints primitive parameters together with the active clip rect whenever
   they look degenerate; `./build_dbg.sh` (or `make fxtk_sim_dbg`) compiles the probes in and logs a
   self-test line at startup.

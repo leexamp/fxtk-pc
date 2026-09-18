@@ -41,7 +41,7 @@
 #define STBI_NO_HDR
 #define STBI_NO_PSD
 #define STBI_NO_PIC
-#define STBI_NO_PNM
+/* PNM 保留支持(文档承诺 PNG/JPEG/BMP/GIF/TGA/PNM): 之前误关, 这里打开 */
 #define STBI_ONLY_PNG
 #define STBI_ONLY_JPEG
 #define STBI_ONLY_BMP
@@ -876,3 +876,56 @@ int fx_cpu_count(void)
 #endif
     return n > 0 ? n : 1;
 }
+
+/* ===================== 交给系统去打开（v2.4.3） =====================
+ * 为什么不直接用 system("xdg-open ...")：路径里可能有空格/引号/分号，拼进 shell 就是注入。
+ * 这里用 fork + execlp 直接 exec，参数按原样传递，不经 shell。 */
+#if defined(_WIN32)
+int fx_open_url(const char *url)
+{
+    if (!url || !url[0]) return 0;
+    HINSTANCE r = ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
+    return ((INT_PTR)r > 32) ? 1 : 0;
+}
+int fx_reveal_file(const char *path)
+{
+    if (!path || !path[0]) return 0;
+    char arg[1024];
+    snprintf(arg, sizeof(arg), "/select,\"%s\"", path);
+    HINSTANCE r = ShellExecuteA(NULL, "open", "explorer.exe", arg, NULL, SW_SHOWNORMAL);
+    return ((INT_PTR)r > 32) ? 1 : 0;
+}
+#elif defined(ESP_PLATFORM)
+int fx_open_url(const char *url) { (void)url; return 0; }          /* 设备上没有"默认浏览器" */
+int fx_reveal_file(const char *path) { (void)path; return 0; }
+#else
+#include <sys/wait.h>
+static int fx_spawn(const char *prog, const char *arg1, const char *arg2)
+{
+    pid_t p = fork();
+    if (p < 0) return 0;
+    if (p == 0) {                                  /* 子进程：尽力而为，失败不污染父进程 */
+        setsid();
+        if (arg2) execlp(prog, prog, arg1, arg2, (char *)0);
+        else      execlp(prog, prog, arg1, (char *)0);
+        _exit(127);
+    }
+    return 1;                                      /* 不等结果：打开浏览器是"发射后不管" */
+}
+int fx_open_url(const char *url)
+{
+    if (!url || !url[0]) return 0;
+    if (fx_spawn("xdg-open", url, 0)) return 1;
+    return 0;
+}
+int fx_reveal_file(const char *path)
+{
+    if (!path || !path[0]) return 0;
+    char dir[1024];
+    snprintf(dir, sizeof(dir), "%s", path);
+    char *slash = strrchr(dir, '/');
+    if (slash) *slash = 0;                          /* 打开所在目录 */
+    else       snprintf(dir, sizeof(dir), ".");
+    return fx_spawn("xdg-open", dir, 0);
+}
+#endif

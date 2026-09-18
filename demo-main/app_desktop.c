@@ -125,7 +125,8 @@ static void on_keys_view(fx_widget_t *w, void *ud) {
     }
 
     /* 事件日志面板(交替行色, 最新的在最下面) */
-    int ly0 = 102, lh = 18, rows = (ch - ly0 - 34) / lh; if (rows < 1) rows = 1; if (rows > 18) rows = 18;
+    int ly0 = 102, lh = 18, rows = (ch - ly0 - 34) / lh;
+    if (rows < 1) rows = 1; if (rows > 18) rows = 18;
     if (rows > 0) {
         fx_set_color(CARD); fx_fill_rect_round(10, ly0 - 6, cw - 11, ly0 - 6 + rows * lh + 22, 6);
         fx_set_color(LINE);  fx_draw_rect_round(10, ly0 - 6, cw - 11, ly0 - 6 + rows * lh + 22, 6);
@@ -187,8 +188,10 @@ static void on_move(fx_widget_t *w, void *ud) {
     fx_draw_text_c(10, 8, hdr, FX_GREEN, FX_RGB(20, 20, 26));
 
     /* 按画布实际容量布局 (全屏 1080P 可容数千个), 帧率富余则每帧 +1 */
-    int cols = (cw - 16) / 24; if (cols < 1) cols = 1;
-    int rows = (ch - 46) / 20; if (rows < 1) rows = 1;
+    int cols = (cw - 16) / 24;
+    if (cols < 1) cols = 1;
+    int rows = (ch - 46) / 20;
+    if (rows < 1) rows = 1;
     int cap = cols * rows;
     if (fxtk_fps() >= 30 && s_mv_extra < cap && s_mv_extra < MV_DYN_MAX) {
         fx_parent(fx_find("move_cv"));   /* 挂到画布下, 随画布裁剪 */
@@ -259,8 +262,10 @@ static void on_scroll_view(fx_widget_t *w, void *ud) {
     int cw = x2 - x1 + 1, ch = y2 - y1 + 1;
     /* 行高/字号随 UI 缩放, 保证任意窗口下行条比例与文字一致 */
     int sc = fxtk_ui_scale();
-    int row_h = 40 * sc / 100; if (row_h < 16) row_h = 16;
-    int fs = 18 * sc / 100; if (fs < 10) fs = 10;
+    int row_h = 40 * sc / 100;
+    if (row_h < 16) row_h = 16;
+    int fs = 18 * sc / 100;
+    if (fs < 10) fs = 10;
     int total = 60 * row_h;
     int off = fx_scroll_update(w, total);   /* 核心滚动: rc 手感 (滚轮/插值/重绘 全在库内) */
 
@@ -361,11 +366,13 @@ static void on_fs_pick(fx_widget_t*w,void*ud){ (void)w;(void)ud;
 static void on_fs_view(fx_widget_t*w,void*ud){ (void)w;(void)ud;
     int cw,ch; fx_canvas_size(w,&cw,&ch);
     const int rh=24, TOP=22;
-    int content=s_n*rh, visible=ch-TOP, maxsc=content-visible; if(maxsc<0)maxsc=0;
+    int content=s_n*rh, visible=ch-TOP, maxsc=content-visible;
+    if(maxsc<0)maxsc=0;
     int off = fx_scroll_update(w, content);   /* 统一滚动: 滚轮+缓动, 返回当前偏移 */
     int mx,my,mp; fx_touch_state(&mx,&my,&mp); int x1,y1,x2,y2; fx_widget_rect(w,&x1,&y1,&x2,&y2);
     int lx=mx-x1, ly=my-y1;
-    int sbt_h=ch-TOP, thumb_h=maxsc>0?(sbt_h*visible/content):sbt_h; if(thumb_h<8)thumb_h=8;
+    int sbt_h=ch-TOP, thumb_h=maxsc>0?(sbt_h*visible/content):sbt_h;
+    if(thumb_h<8)thumb_h=8;
     int sb_hover=(lx>=cw-16); int tw=sb_hover?12:5; int tx=cw-tw-3;
     int thumb_y=TOP+(maxsc>0?(sbt_h-thumb_h)*off/maxsc:0);
     if(mp && fx_pressed()==w){
@@ -381,7 +388,7 @@ static void on_fs_view(fx_widget_t*w,void*ud){ (void)w;(void)ud;
         fx_color_t c=s_ent[i].is_dir?FX_BTN_BLUE:FX_RGB(85,85,85);
         fx_set_color(sel?FX_BTN_BLUE:(hov?FX_RGB(210,230,250):FX_RGB(242,242,242))); fx_fill_rect(2,y,cw-2,y+rh-2);
         if(hov && !sel){ fx_set_color(FX_BTN_BLUE); fx_draw_rect(2,y,cw-2,y+rh-2); }
-        char nm[64]; strncpy(nm,s_ent[i].name,63); nm[63]=0; if(fx_text_width(nm)>cw/2-14){ nm[cw/2/2-4]=0; strcat(nm,".."); }
+        char nm[64]; strncpy(nm,s_ent[i].name,63); nm[63]=0; if(fx_text_width(nm)>cw/2-14){ int cut=cw/4-4; if(cut>0&&cut<63) nm[cut]=0; strcat(nm,".."); }   /* v2.4.3: 原 cw/4-4 可能为负 → 负下标越界 */
         fxtk_draw_text_size(15,6,y,nm,sel?FX_WHITE:c,sel?FX_BTN_BLUE:FX_RGB(250,250,250));
         char sz[32]; snprintf(sz,sizeof(sz),"%lld",s_ent[i].size); fxtk_draw_text_size(15,cw/2,y,sz,sel?FX_WHITE:c,sel?FX_BTN_BLUE:FX_RGB(250,250,250));
         fxtk_draw_text_size(15,cw*3/4,y,s_ent[i].date,sel?FX_WHITE:c,sel?FX_BTN_BLUE:FX_RGB(250,250,250)); }
@@ -396,7 +403,8 @@ static void on_fs_view(fx_widget_t*w,void*ud){ (void)w;(void)ud;
     if(s_hov>=0 && s_hov<s_n){
         char tip[160]; snprintf(tip,sizeof(tip),"%s  |  %lld B  |  %s", s_ent[s_hov].name, s_ent[s_hov].size, s_ent[s_hov].date);
         int twd=(fx_text_width(tip)+12<cw-4)?(fx_text_width(tip)+12):(cw-4); int tX=lx+10; int tY=ly+12;
-        if(tX+twd>cw)tX=cw-twd-2; if(tX<2)tX=2; if(tY+19>ch)tY=ch-19; if(tY<2)tY=2;   /* 跟鼠标, 窗口内 */
+        if(tX+twd>cw)tX=cw-twd-2;
+        if(tX<2)tX=2; if(tY+19>ch)tY=ch-19; if(tY<2)tY=2;   /* 跟鼠标, 窗口内 */
         fx_set_color(FX_RGB(40,40,40)); fx_fill_rect(tX,tY,tX+twd-1,tY+19);
         fx_set_color(FX_WHITE); fx_draw_text_c(tX+5,tY+3,tip,FX_WHITE,FX_RGB(40,40,40));
     }

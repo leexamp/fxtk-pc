@@ -21,6 +21,21 @@
 完整演示（12 页）见下方 demo 截图：
 ![graph](graph.png) ![image](image.png) ![rending](rending.png) ![texting](texting.png)
 
+![fxtk 演示](demo.gif)
+
+> 一段真实录制（非渲染动画）：切页 → 图形页的伪 3D 模式 → 图片页拖动四角做真透视形变。
+
+**一句话**：一套 `fxtk.h` + 属性宏，写出的界面在 PC 上是**单文件、零第三方动态库**（Linux 372KB / Windows 439KB），
+在 ESP32 上是同一份 API 的纯 CPU 路径。1080P 下压测页 2820 个控件约 **102–130 fps**（无头软件渲染实测，见 `make bench`）。
+
+**为什么可能值得一用**
+
+- **不想再打包几十 MB 的运行库**：Windows 版是一个 exe 出门（`objdump` 里只有系统 DLL，没有 `SDL2.dll`、没有 `libwinpthread`）。
+- **拷过去就能跑**：图片解码（PNG/JPEG/BMP/GIF/TGA/PNM）、PNG 截图、剪贴板、文件对话框、随机数、时间、偏好持久化全在框架内，无外部依赖。
+- **两端一套 API**：PC 默认接 sokol(OpenGL)，ESP32 走纯 CPU；两端只保证"语法一致 + 渲染效果一致"，PC 端不迁就嵌入式资源约束。
+- **自带验证体系**：`make test`（真假后端各跑一遍）、`make golden`（金图逐像素回归）、`make esp32-smoke`（无需 ESP-IDF）、`make bench`。
+- **能改得动**：所有控件的颜色/圆角/留白集中在 `fxtk_tokens.h`，换风格只改一个文件。
+
 ## v2.4 新增
 
 - **默认后端换成 sokol**(OpenGL), SDL2 降为遗留对照。因此 Windows 版是**单 exe、无第三方 DLL**;
@@ -47,7 +62,6 @@
   输入框里打 `nihao` → 上屏"你好" ✓。
 - **控件层 SDF 抗锯齿默认关闭**(`s_widget_aa = 0`):它在"画布 + 文字 + quadwarp 混排"场景下有一个已知缺陷
   (实心填充退化成边界环),定位中。想试可 `fx_set_widget_aa(1)` 或 `FXTK_AA=1`。
-- **Windows 剪贴板仍是桩**:剪贴板实现目前走 X11 工具(xsel/xclip/wl-copy),Windows 需要另写
   `OpenClipboard` 版本,尚未做(应用内复制/粘贴也不可用)。
 
 ## 两个目标端：已分化，只要求"语法一致 + 效果一致"
@@ -64,34 +78,30 @@
   （如粒子缓冲 `pt_reserve()` 就地扩容）；ESP 端保留纯 CPU 绘制路径，PC 端默认走 GPU。
 - **不是"把单片机的紧箍咒套在 PC 上"**，而是"一套 API 两端跑"：PC 端负责快与好用，ESP 端负责小与稳。
 
-## 特性
+## 能做什么
 
-- **声明式控件**：`fx_button_new(pixel(...), title(...), call(...))` 属性宏链
-- **三种布局**：`pixel()`（480x272 设计坐标，窗口响应式等比缩放）/ `percent()` / `grid()`
-- **开箱即用的默认配色**：浅底深字、蓝按钮、绿滑条——不写 `color()` 也能直接看（可显式覆盖）
-- **控件集**：按钮 / 标签 / 滑条 / 进度条 / 复选框 / 网格键盘 / 画布 / 标签页 / 图片 / 输入框 / 列表 / 下拉 / 滚动容器
-- **立体标签页**：选中页签凸起（亮底深字 + 高光），未选中下凹，阴影分隔线
-- **画布立即模式**：线/圆/椭圆/三角/多边形/圆弧/圆角矩形/文字 + **渐变填充** `fx_fill_rect_gradient`，支持离屏缓冲、动画标志 `anim(1)` 与**抗锯齿** `fx_set_aa(1)`（line/circle/ellipse/rect/round-rect/arc 边缘平滑；默认关闭，按需开启，开后该画布自动离屏）。
-  v2.2 新增 `fx_canvas_size`/`fx_canvas_clear` 便捷 API，并把离屏缓冲推广到任意画布（去掉按名字的性能锁）。
-- **画布学习教程**：`examples/canvas/` 系列（图元 / 立即模式 / 离屏 / 自定义控件 / 图片 / 交互 / 抗锯齿）
-- **桌面扩展**：文本框（换行/跨行框选/Ctrl+A C V X 系统剪贴板/`maxlen` 计数/滚轮/光标像素级对齐）、
-  滚轮路由、**核心滚动一行调用**（`fx_scroll_update`：目标像素累积 + 25% 逐帧插值，rc 手感；
-  状态池多控件并行，静止零重绘）、**滚动条拖拽（含自绘画布）**、焦点管理、
-  `fx_widget_set_rect` 运行时移动控件
-- **渲染引擎**：`fx_image_*` 24bit RGB 表面、`fx_draw_image_rot` 旋转贴图、图像后处理
-  （翻转/灰度/染色/亮度）、多线程软件 Raymarching（SDF 软阴影/AO/雾）+ 可选 GPU(GLSL) 通道
-- **性能**：脏区合并重绘、GPU 顶点批、行级持久线程池光追、GPU 呈现(sokol 后端; 1080P 压测页 2819 控件约 108~111fps)
-- **动态压测**：压测页帧率富余时自动生长控件（全屏 1080P 可容数千个），实时显示总控件数
-- **工程化**：统一 Makefile 单一源清单、无头单元测试、GitHub CI（Linux + Windows 交叉）
-- **体积裁剪（v2.3）**：`-DFXTK_WIDGET_XXX=0` 编译时裁掉用不到的控件，减小二进制（ESP32 等受限平台用，如裁按钮+复选框 170KB→142KB）；`tools/autotrim.sh <源码>` 自动扫描用到的控件并生成这些开关（示例 100KB→88KB）
-- **国际化（v2.3）**：英文文档在 `docs_en/`、英文 demo 在 `demo-main/app_en.c`（用左侧边栏标签放长英文标签），中文保持 `docs/` + `app.c`；标签页支持 `sidebar(FX_TAB_TOP/LEFT/RIGHT/BOTTOM)` 四方位
-- **跨平台文件 API（v2.3）**：`fxtk_fs.h/.c` 的 `fx_fs_pick_dir()`（系统对话框选文件夹：Win32 `SHBrowseForFolderW` / Linux `zenity`）与 `fx_fs_list()`（列目录：Win32 `FindFirstFileW` / POSIX `opendir+stat`）；demo **组件页**含文件浏览器（平滑滚动条+悬停提示+行选中）、颜色选择器（两套 RGB 改按钮底色/字色）、`fx_grid_map(dense())` 网格名字编辑器、可拖动组件区。
+- **控件**：按钮 / 标签 / 滑条 / 进度条 / 复选框 / 网格键盘 / 画布 / 标签页 / 图片 / 输入框 / 列表 / 下拉 / 滚动容器 / 卡片
+- **布局**：`pixel()`（480×272 设计坐标，窗口响应式等比缩放）/ `percent()` / `grid()`
+- **开箱默认配色**：不写 `color()` 也能直接看；想统一换风格改 `fxtk_tokens.h` 一个文件
+- **画布（立即模式）**：线/圆/椭圆/三角/多边形/圆弧/圆角矩形/文字/渐变，支持离屏缓冲与抗锯齿
+  （`fx_set_aa(1)`；开启后该画布自动走离屏）
+- **输入**：文本编辑（换行、跨行框选、`Ctrl+A/C/V/X` 系统剪贴板、字数上限）、滚轮路由、
+  **带动画的滚动**（目标值逐帧逼近，静止时零重绘）、滚动条拖拽（含自绘画布）、焦点管理
+- **渲染**：`fx_image_*` 24bit 表面、旋转贴图、图像后处理（翻转/灰度/染色/亮度）、
+  多线程软件 Raymarching（SDF 软阴影/AO/雾）＋ 可选 GPU(GLSL) 通道
+- **性能**：脏区合并重绘、GPU 顶点批、行级持久线程池光追；1080P 压测页 2820 控件约 102–130 fps
+- **工程化**：统一 Makefile（单一源清单）、无头单测、金图回归、GitHub CI（Linux + Windows 交叉 + ESP32 冒烟）
+- **体积裁剪**：`-DFXTK_WIDGET_XXX=0` 编译期裁掉用不到的控件（受限平台用）；`tools/autotrim.sh` 自动扫描并生成开关
+- **跨平台文件 API**：`fx_fs_pick_dir()` / `fx_fs_list()`，演示里是完整的文件浏览器
 
 ## 目录结构
 
 ```
 components/fxtk/   核心库 (fxtk.c/draw/widgets/font/effects + 头文件)
-demo-main/         PC 模拟器 (sokol 驱动 / 演示 app / GPU 光追 / examples; SDL2 驱动为遗留对照)
+drivers/           后端驱动 (sokol 驱动 + stb 文本层 + 各自的 main；SDL2 驱动为遗留对照) ← 读代码从这看
+components/fxtk/   ← 框架本体
+your_app/          ← 想写自己的应用就从这里开始(最小示例 + build.sh；不参与主构建)
+demo-main/         PC 演示与工具链 (12 页演示 app / GPU 光追 / examples / Makefile)
 demo-main/Makefile 统一构建 (demo / examples / test 单一源清单)
 demo-main/test/     无头单元测试 (无需 SDL/窗口)
 .github/            CI (Linux 构建 + 测试 + Windows 交叉)

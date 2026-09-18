@@ -3,6 +3,15 @@
  * fxtk_widgets.c — 控件绘制实现 (复选框居中+透明背景修复)
  */
 #include "fxtk_internal.h"
+#include "fxtk_backends.h"   /* v2.4.3: fx_log 告警(动画槽位满时提示加大宏) */
+
+/* v2.4.3: 同时可动画的控件数(每个动画各自的槽位池都用它)。超出会明确告警, 不静默降级。 */
+#ifndef FX_ANIM_SLOTS
+#define FX_ANIM_SLOTS 8
+#endif
+/* 缓出曲线: 让动画"有感觉" —— 线性推进在 100ms 级别几乎看不出变化, 缓出才有明显的起停感。
+ * 另: 时长统一放慢(用户反馈"动得太快, 没感觉")。 */
+static float fx_ease_out(float t) { if (t <= 0.0f) return 0.0f; if (t >= 1.0f) return 1.0f; float u = 1.0f - t; return 1.0f - u * u * u; }
 #include "fxtk_tokens.h"
 #include "fxtk_desktop.h"
 #include <string.h>
@@ -23,6 +32,37 @@ static fx_color_t btn_mix(fx_color_t a, fx_color_t b, int t)
     return (fx_color_t)((r<<16)|(g<<8)|bl);
 }
 #if FXTK_WIDGET_BUTTON
+/* v2.4.3 动画: 按钮按下/松开的压暗量缓动(80ms)。
+ * 稳态值必须是 12(与旧版一致) → 动画关闭或缓动结束时行为与旧版逐像素相同, 因此金图不受影响。
+ * 同样按时间推进: 同一帧内按钮可能被绘制多次, 按帧累加会被重复推进。 */
+static fx_widget_t *s_bt_w[FX_ANIM_SLOTS]; static float s_bt_v[FX_ANIM_SLOTS];
+static uint32_t s_bt_t0[FX_ANIM_SLOTS]; static int s_bt_goal[FX_ANIM_SLOTS];
+#define FX_BTN_PRESS_MS 170u
+#define FX_BTN_PRESS_AMT 12
+static int button_press_amt(fx_widget_t *w, int pr)
+{
+    int goal = pr ? FX_BTN_PRESS_AMT : 0;
+    if (!fx_widget_anim_ok(w)) return goal;
+    /* 【关键】先看这个控件是否已经有槽位, 且是否已经稳定在目标上 —— 稳定就直接返回,
+     * 不申请槽位、不打 FX_F_ANIM。否则每个被绘制的按钮都会占位并保持"动画中"标志,
+     * 通用重绘通道就会每帧把整页控件标脏(用户反馈: 控件加载明显变慢)。 */
+    int k = -1;
+    for (int i = 0; i < FX_ANIM_SLOTS; i++) if (s_bt_w[i] == w) { k = i; break; }
+    if (k >= 0 && s_bt_goal[k] == goal && s_bt_v[k] == (float)goal) return goal;   /* 已稳定: 不做任何事 */
+    if (k < 0) {
+        for (int i = 0; i < FX_ANIM_SLOTS; i++) if (!s_bt_w[i]) { s_bt_w[i] = w; s_bt_v[i] = (float)goal; s_bt_goal[i] = goal; s_bt_t0[i] = (uint32_t)fx_time_ms(); k = i; break; }
+        static int warned = 0;
+        if (k < 0) { if (!warned) { fx_log(FX_LOG_WARN, "动画槽位已满(%d): 加大 FX_ANIM_SLOTS", FX_ANIM_SLOTS); warned = 1; } return goal; }
+    }
+    if (s_bt_goal[k] != goal) { s_bt_goal[k] = goal; s_bt_t0[k] = (uint32_t)fx_time_ms(); }
+    uint32_t el = (uint32_t)fx_time_ms() - s_bt_t0[k];
+    if (el >= FX_BTN_PRESS_MS) { w->flags &= (uint16_t)~FX_F_ANIM; s_bt_v[k] = (float)goal; return goal; }
+    w->flags |= FX_F_ANIM;
+    float t = fx_ease_out((float)el / (float)FX_BTN_PRESS_MS);
+    s_bt_v[k] = (float)goal * t;
+    return (int)(s_bt_v[k] + 0.5f);
+}
+
 void fxtk_draw_button(fx_widget_t *w)
 {
     /* Adwaita 经典: 纯平圆角 + 锐利1px高光/阴影 (锐线不产生灰阶) */
@@ -30,8 +70,10 @@ void fxtk_draw_button(fx_widget_t *w)
     int pr = (fx_pressed() == w);
     /* P5 审美迭代 1/9: 圆角走设计令牌(4 → FX_TOK_RADIUS_M=6, 边缘更柔和);
      * 按下态不再只压暗顶边, 而是整块略压暗 —— 触摸屏上"按没按到"更容易一眼看出。 */
-    int r = FX_TOK_RADIUS_BTN; if (r > ch/2) r = ch/2; if (r > cw/2) r = cw/2;
-    fx_set_color(pr ? btn_mix(w->bg, FX_BLACK, 12) : w->bg);
+    int r = FX_TOK_RADIUS_BTN;
+    if (r > ch/2) r = ch/2; if (r > cw/2) r = cw/2;
+    int amt = button_press_amt(w, pr);
+    fx_set_color(amt ? btn_mix(w->bg, FX_BLACK, amt) : w->bg);
     fx_fill_rect_round(w->x1, w->y1, w->x2, w->y2, r);
     if (!pr) {
         fx_set_color(btn_mix(w->bg, FX_WHITE, 90));          /* 顶高光 */
@@ -53,7 +95,7 @@ void fxtk_draw_button(fx_widget_t *w)
         int tw = fxtk_text_width_size(fs, w->title);
         /* v2.4.2: 按下时按钮整体压暗了, 但文字块的底色还是原来的 w->bg → 文字后面留一块"旧色"的方块
          * (用户反馈"按下按钮后字体背景颜色未及时改变")。让文字底色跟随按下态一起变。 */
-        fx_color_t lbl_bg = pr ? btn_mix(w->bg, FX_BLACK, 12) : w->bg;
+        fx_color_t lbl_bg = amt ? btn_mix(w->bg, FX_BLACK, amt) : w->bg;
         if (fs <= 0) fx_draw_text_c(w->x1 + (cw-tw)/2 + pr, w->y1 + (ch-18)/2 + pr,
                           w->title, w->fg, lbl_bg);
         else fxtk_draw_text_size(fs, w->x1 + (cw-tw)/2 + pr, w->y1 + (ch-th)/2 + pr,
@@ -138,10 +180,12 @@ void fxtk_draw_slider(fx_widget_t *w)
 {
     int h = w->y2 - w->y1 + 1;
     int cy = w->y1 + h / 2;
-    int th = h / 4; if (th < FX_TOK_TRACK_H_MIN) th = FX_TOK_TRACK_H_MIN; if (th > FX_TOK_TRACK_H_MAX) th = FX_TOK_TRACK_H_MAX;
+    int th = h / 4;
+    if (th < FX_TOK_TRACK_H_MIN) th = FX_TOK_TRACK_H_MIN; if (th > FX_TOK_TRACK_H_MAX) th = FX_TOK_TRACK_H_MAX;
     int ty0 = cy - th / 2, ty1 = ty0 + th - 1;
     int rw = w->x2 - w->x1 + 1;
-    int kw = h / 2; if (kw < FX_TOK_KNOB_W_MIN) kw = FX_TOK_KNOB_W_MIN; if (kw > FX_TOK_KNOB_W_MAX) kw = FX_TOK_KNOB_W_MAX;
+    int kw = h / 2;
+    if (kw < FX_TOK_KNOB_W_MIN) kw = FX_TOK_KNOB_W_MIN; if (kw > FX_TOK_KNOB_W_MAX) kw = FX_TOK_KNOB_W_MAX;
     int kx = w->x1 + rw * w->value / 100;
     if (kx < w->x1 + kw / 2) kx = w->x1 + kw / 2;
     if (kx > w->x2 - kw / 2) kx = w->x2 - kw / 2;
@@ -154,7 +198,8 @@ void fxtk_draw_slider(fx_widget_t *w)
     fx_draw_hline(w->x1 + th / 2, w->x2 - th / 2, ty1);
 
     int pr = (w->flags & FX_F_PRESSED) ? 1 : 0;
-    int kh = h - 4; if (kh < kw) kh = kw;                                 /* 滑块略高, 更易点 */
+    int kh = h - 4;
+    if (kh < kw) kh = kw;                                 /* 滑块略高, 更易点 */
     int ky0 = cy - kh / 2 + pr, ky1 = ky0 + kh - 1;
     /* P5 审美迭代 3/9(滑杆): 滑块原本是"圆角填充 + 直角描边" —— 圆角被描边的直角切掉,
      * 看起来像方形贴了个圆角, 与按钮/输入框的圆角语言也不统一。描边改用同半径的圆角矩形,
@@ -169,18 +214,54 @@ void fxtk_draw_slider(fx_widget_t *w)
 
 #endif
 #if FXTK_WIDGET_PROGRESS
+/* v2.4.3 动画: 进度条数值缓动(值突变时平滑增长)。默认全局关 → 行为与旧版完全一致。
+ * 与标签淡入同样按【时间】推进: 同一帧内控件可能被绘制多次, 按帧累加会被重复推进(实测会卡在中途)。 */
+static fx_widget_t *s_pa_w[FX_ANIM_SLOTS];
+static float    s_pa_from[FX_ANIM_SLOTS], s_pa_disp[FX_ANIM_SLOTS];
+static int      s_pa_to[FX_ANIM_SLOTS];
+static uint32_t s_pa_t0[FX_ANIM_SLOTS];
+static int      s_pa_init[FX_ANIM_SLOTS];
+#define FX_PROG_EASE_MS 380u
+static int progress_anim_value(fx_widget_t *w)
+{
+    int k = -1;
+    for (int i = 0; i < FX_ANIM_SLOTS; i++) if (s_pa_w[i] == w) { k = i; break; }
+    if (k < 0) {
+        for (int i = 0; i < FX_ANIM_SLOTS; i++) if (!s_pa_w[i]) { s_pa_w[i] = w; s_pa_init[i] = 0; k = i; break; }
+        static int warned = 0;
+        if (k < 0) {
+            if (!warned) { fx_log(FX_LOG_WARN, "动画槽位已满(%d): 加大 FX_ANIM_SLOTS", FX_ANIM_SLOTS); warned = 1; }
+            return w->value;
+        }
+    }
+    if (!s_pa_init[k]) { s_pa_init[k] = 1; s_pa_disp[k] = (float)w->value; s_pa_to[k] = w->value; s_pa_t0[k] = (uint32_t)fx_time_ms(); }
+    if (s_pa_to[k] == w->value && s_pa_disp[k] == (float)w->value) { w->flags &= (uint16_t)~FX_F_ANIM; return w->value; }   /* 稳定: 不打标志 */
+    if (!fx_widget_anim_ok(w)) { w->flags &= (uint16_t)~FX_F_ANIM; s_pa_disp[k] = (float)w->value; s_pa_to[k] = w->value; return w->value; }
+    if (w->value != s_pa_to[k]) {          /* 值变了: 从当前位置重新出发 */
+        s_pa_from[k] = s_pa_disp[k]; s_pa_to[k] = w->value; s_pa_t0[k] = (uint32_t)fx_time_ms();
+    }
+    uint32_t el = (uint32_t)fx_time_ms() - s_pa_t0[k];
+    if (el >= FX_PROG_EASE_MS) { w->flags &= (uint16_t)~FX_F_ANIM; s_pa_disp[k] = (float)s_pa_to[k]; return s_pa_to[k]; }
+    w->flags |= FX_F_ANIM;
+    float t = fx_ease_out((float)el / (float)FX_PROG_EASE_MS);
+    s_pa_disp[k] = s_pa_from[k] + ((float)s_pa_to[k] - s_pa_from[k]) * t;
+    return (int)(s_pa_disp[k] + 0.5f);
+}
+
 void fxtk_draw_progress(fx_widget_t *w)
 {
     /* P5 审美迭代 6/9(进度条): 轨道/填充/描边原为硬直角, 与其它控件不一致。改为圆角,
      * 填充的圆角按高度收敛(短填充不会因圆角过大而变形)。调用次数不变。 */
     int rw = w->x2 - w->x1 + 1;
     int rh = w->y2 - w->y1 + 1;
-    int pr = rh / 2; if (pr > FX_TOK_RADIUS_M) pr = FX_TOK_RADIUS_M; if (pr < 2) pr = 2;
+    int pr = rh / 2;
+    if (pr > FX_TOK_RADIUS_M) pr = FX_TOK_RADIUS_M; if (pr < 2) pr = 2;
     fx_set_color(w->fg);
     fx_fill_rect_round(w->x1, w->y1, w->x2, w->y2, pr);
-    int filled = rw * w->value / 100;
+    int filled = rw * progress_anim_value(w) / 100;   /* v2.4.3: 动画开启时用缓动值 */
     if (filled > 0) {
-        int fr = pr; if (fr > filled / 2) fr = filled / 2; if (fr < 1) fr = 1;
+        int fr = pr;
+        if (fr > filled / 2) fr = filled / 2; if (fr < 1) fr = 1;
         fx_set_color(w->bg);
         fx_fill_rect_round(w->x1, w->y1, w->x1 + filled - 1, w->y2, fr);
     }
@@ -205,7 +286,8 @@ void fxtk_draw_checkbox(fx_widget_t *w)
     }
     /* P5 审美迭代 7/9(复选框): 方框由硬直角改圆角(令牌 S), 与输入框/列表同一套语言;
      * 勾选标记仍是两条线(形状本身没问题), 调用次数不变。 */
-    int cbr = FX_TOK_RADIUS_S; if (cbr > box / 3) cbr = box / 3; if (cbr < 1) cbr = 1;
+    int cbr = FX_TOK_RADIUS_S;
+    if (cbr > box / 3) cbr = box / 3; if (cbr < 1) cbr = 1;
     fx_set_color(w->fg);
     fx_draw_rect_round(w->x1, by, w->x1 + box - 1, by + box - 1, cbr);
     if (w->value) {
@@ -243,8 +325,35 @@ void fxtk_draw_panel(fx_widget_t *w)
 
 #endif
 #if FXTK_WIDGET_TAB
+/* v2.4.3 动画: 标签选中药丸的"淡入"(只改颜色混合, 不动几何 → 不会出现文字/位置错位)。
+ * 默认全局关; 演示里 fx_animation(1) 打开; 单个控件可用 anim(0) 关掉。 */
+/* v2.4.3 动画: 标签选中药丸的"淡入"(只改颜色混合, 不动几何 → 不会出现文字/位置错位)。
+ * 默认全局关; 演示里 fx_animation(1) 打开; 单个控件可用 anim(0) 关掉。
+ * 进度按【时间】算而不是按帧累加 —— 同一帧内控件可能被绘制多次, 按帧累加会被重复推进/重复重置,
+ * 表现为"淡入到一半就卡住"(实测停在 234 而非 250)。时间基准天然幂等。 */
+static fx_widget_t *s_ta_w[FX_ANIM_SLOTS]; static uint32_t s_ta_t0[FX_ANIM_SLOTS]; static int s_ta_sel[FX_ANIM_SLOTS];
+#define FX_TAB_FADE_MS 280u
+static float tab_anim_mix(fx_widget_t *w)
+{
+    int k = -1;
+    for (int i = 0; i < FX_ANIM_SLOTS; i++) if (s_ta_w[i] == w) { k = i; break; }
+    if (k < 0) {
+        for (int i = 0; i < FX_ANIM_SLOTS; i++) if (!s_ta_w[i]) { s_ta_w[i] = w; s_ta_t0[i] = (uint32_t)fx_time_ms(); s_ta_sel[i] = -9; k = i; break; }
+        static int warned = 0;
+        if (k < 0) { if (!warned) { fx_log(FX_LOG_WARN, "动画槽位已满(%d): 加大 FX_ANIM_SLOTS", FX_ANIM_SLOTS); warned = 1; } return 1.0f; }
+    }
+    if (s_ta_sel[k] == -9) s_ta_sel[k] = w->value;
+    if (s_ta_sel[k] != w->value) { s_ta_sel[k] = w->value; s_ta_t0[k] = (uint32_t)fx_time_ms(); }
+    if (!fx_widget_anim_ok(w)) { w->flags &= (uint16_t)~FX_F_ANIM; return 1.0f; }
+    uint32_t el = (uint32_t)fx_time_ms() - s_ta_t0[k];
+    if (el >= FX_TAB_FADE_MS) { w->flags &= (uint16_t)~FX_F_ANIM; return 1.0f; }   /* 结束: 交还静态绘制 */
+    w->flags |= FX_F_ANIM;                                                        /* 进行中: 请求继续重绘 */
+    return fx_ease_out((float)el / (float)FX_TAB_FADE_MS);
+}
+
 void fxtk_draw_tab(fx_widget_t *w)
 {
+    float a_mix = 1.0f;
     int side = w->tab_side;
     fx_set_color(w->bg);
     fx_fill_rect(w->x1, w->y1, w->x2, w->y2);
@@ -267,9 +376,10 @@ void fxtk_draw_tab(fx_widget_t *w)
          * 圆角语言不统一, 而且一格要 5 次绘制。改成: 选中 = 圆角胶囊高亮(内缩 2px 留出间隔),
          * 未选中不铺色、不画线(直接露出标签条底色)。视觉更干净, 且每格少 4 次绘制调用。 */
         int sel = (i == w->value);
+        if (i == 0) a_mix = tab_anim_mix(w);      /* 每帧只算一次药丸淡入进度 */
         fx_color_t bg = w->bg;                  /* 文字底: 未选中与标签条同色 → 文字块自然融进去 */
         if (sel) {
-            bg = btn_mix(w->bg, FX_WHITE, FX_TOK_TAB_PILL_MIX);
+            bg = btn_mix(w->bg, FX_WHITE, (int)(FX_TOK_TAB_PILL_MIX * a_mix));
             int padx = 2, pady = 2;
             int rr = (ty2 - ty1 + 1 - pady * 2) / 2;
             if (rr > FX_TOK_RADIUS_M) rr = FX_TOK_RADIUS_M;
@@ -436,7 +546,8 @@ void fxtk_draw_textedit(fx_widget_t *w)
 /* TE-SCROLLBAR */
 if (total_h > vis_h) {
 int rw2 = w->x2 - 2;
-int th = vis_h * vis_h / total_h; if (th < 20) th = 20;
+int th = vis_h * vis_h / total_h;
+if (th < 20) th = 20;
 int ty = w->y1 + 2 + (int)((long)w->scroll_y * (w->y2 - w->y1 - 4 - th) / (total_h - vis_h));
 fx_set_color(FX_TOK_BORDER);
 fx_fill_rect(rw2 - 3, w->y1 + 2, rw2, w->y2 - 2);

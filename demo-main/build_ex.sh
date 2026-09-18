@@ -12,14 +12,14 @@ SRCS="../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
       ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_font.c \
       ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_extra.c \
       ../components/fxtk/fxtk_backends.c \
-      fxtk_sdl_driver.c main_linux.c"
+      ../drivers/fxtk_sdl_driver.c ../drivers/main_linux.c"
 LIBS="-lSDL2 -lSDL2_ttf -lSDL2_image -lm -pthread -lX11"
 
 build_one() {
     local f="$1" out
     out="${f%.c}"
     echo "🔨 Building $f"
-    gcc -O2 -s -I. -I../components/fxtk $SRCS "$f" -o "$out" $LIBS
+    gcc -O2 -s -I. -I../components/fxtk -I../drivers $SRCS "$f" -o "$out" $LIBS
 }
 
 if [ "$EX" = "all" ]; then

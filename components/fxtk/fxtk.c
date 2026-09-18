@@ -107,7 +107,11 @@ typedef struct { fx_widget_t *w; float off, tgt; int last; } fx_scroll_state_t;
 #    define FX_MAX_SCROLL_STATES 64
 #  endif
 #endif
-static fx_scroll_state_t s_scroll_pool[FX_MAX_SCROLL_STATES];   /* v2.3.1: unlink_free/fx_init 也要清它, 故随 typedef 前移至此 */
+static fx_scroll_state_t s_scroll_pool[FX_MAX_SCROLL_STATES];
+/* v2.4.3: 控件池"高水位"。fxtk_alloc 线性找空槽 → 存活控件总是集中在前面,
+ * 所以任何"遍历存活控件"的地方都应只扫到 high, 而不是扫满 FX_MAX_WIDGETS(PC 上 16384)。
+ * 动画的每帧扫描就靠它把开销从 16384 次比较降到与存活数同阶。 */
+static int s_pool_high = 0;   /* v2.3.1: unlink_free/fx_init 也要清它, 故随 typedef 前移至此 */
 static fx_scroll_state_t *scroll_state(fx_widget_t *w);
 static void scroll_drag_to(fx_widget_t *w, int y);
 static void te_sel_para(fx_widget_t*);
@@ -134,7 +138,8 @@ fx_widget_t *fxtk_alloc(void)
             memset(&s_pool[i], 0, sizeof(s_pool[i]));
             s_alloc_hint = i;
             s_widget_live++;
-            return &s_pool[i];
+            if (i + 1 > s_pool_high) s_pool_high = i + 1;
+        return &s_pool[i];
         }
     }
     fx_log(FX_LOG_ERROR, "控件池已满 (%d)! 加大 FX_MAX_WIDGETS 或复用控件", FX_MAX_WIDGETS);
@@ -184,8 +189,10 @@ static int parse_pct(const char *s, int16_t *a, int16_t *b)
 { float x, y;
 if (sscanf(s, "%f,%f", &x, &y) != 2) return 0;
 /* v2.3.1: percent() 收 0~1 小数; 误写 "100,100" 会在 int16 里回绕成负数把控件甩出屏幕, 钳到合法域 */
-if (x < -1.0f) x = -1.0f; if (x > 1.0f) x = 1.0f;
-if (y < -1.0f) y = -1.0f; if (y > 1.0f) y = 1.0f;
+if (x < -1.0f) x = -1.0f;
+if (x > 1.0f) x = 1.0f;
+if (y < -1.0f) y = -1.0f;
+if (y > 1.0f) y = 1.0f;
 *a = (int)(x*1000); *b = (int)(y*1000); return 1; }
 fx_attr_t pixel(const char *a, const char *b)
 { fx_attr_t at = { FX_A_PIXEL, { {0} } }; parse_xy(a,&at.v.rect.x1,&at.v.rect.y1); parse_xy(b,&at.v.rect.x2,&at.v.rect.y2); return at; }
@@ -207,6 +214,12 @@ fx_attr_t border(int n)         { fx_attr_t a={FX_A_BORDER,{ {0} }}; a.v.iv.v=(i
 fx_attr_t radius(int n)         { fx_attr_t a={FX_A_RADIUS,{ {0} }}; a.v.iv.v=(int16_t)n; return a; }
 fx_attr_t value(int n)          { fx_attr_t a={FX_A_VALUE,{ {0} }}; a.v.iv.v=(int16_t)n; return a; }
 fx_attr_t page(int n)           { fx_attr_t a={FX_A_PAGE,{ {0} }}; a.v.iv.v=(int16_t)n; return a; }
+/* v2.4.3: 全局动画开关。默认关 —— 无头测试与金图回归必须确定性, 不能每帧都在动。 */
+static int s_anim_on = 0;
+void fx_animation(int on) { s_anim_on = on ? 1 : 0; fx_repaint(); }
+int  fx_animation_enabled(void) { return s_anim_on; }
+int  fx_widget_anim_ok(fx_widget_t *w) { return s_anim_on && w && !(w->flags & FX_F_NOANIM); }
+
 fx_attr_t anim(int n)           { fx_attr_t a={FX_A_ANIM,{ {0} }}; a.v.iv.v=(int16_t)n; return a; }
 fx_attr_t sidebar(int side)     { fx_attr_t a={FX_A_SIDEBAR,{ {0} }}; a.v.iv.v=(int16_t)side; return a; }
 fx_attr_t fx_wptr(fx_widget_t *w){ fx_attr_t a={FX_A_WIDGET,{ {0} }}; a.v.w.w=w; return a; }
@@ -238,7 +251,8 @@ fx_widget_t *fx_widget_new_impl(int type, fx_attr_t attrs[])
         case FX_A_PERCENT: w->pos_mode=FX_POS_PERCENT; w->px1=attrs[i].v.pct.p1; w->py1=attrs[i].v.pct.p2; w->px2=attrs[i].v.pct.p3; w->py2=attrs[i].v.pct.p4; break;
         case FX_A_GRID: w->pos_mode=FX_POS_GRID; w->grid_ref=fx_find(attrs[i].v.grid.name); w->gname=attrs[i].v.grid.name; w->gr1=attrs[i].v.grid.r1; w->gc1=attrs[i].v.grid.c1; w->gr2=attrs[i].v.grid.r2; w->gc2=attrs[i].v.grid.c2; break;
         case FX_A_TITLE: { const char *ts0 = attrs[i].v.str.s?attrs[i].v.str.s:"";
-            size_t tl0 = strlen(ts0); if (tl0 > sizeof(w->title)-1) tl0 = sizeof(w->title)-1;
+            size_t tl0 = strlen(ts0);
+            if (tl0 > sizeof(w->title)-1) tl0 = sizeof(w->title)-1;
             while (tl0 > 0 && ((unsigned char)ts0[tl0] & 0xC0) == 0x80) tl0--;   /* v2.3.1: UTF-8 边界回退 */
             memcpy(w->title, ts0, tl0); w->title[tl0]=0; break; }
         case FX_A_NAME: strncpy(w->name, attrs[i].v.str.s?attrs[i].v.str.s:"", sizeof(w->name)-1); w->name[sizeof(w->name)-1]=0; break;
@@ -254,7 +268,7 @@ fx_widget_t *fx_widget_new_impl(int type, fx_attr_t attrs[])
         case FX_A_PAGE: w->page=attrs[i].v.iv.v; break;
         case FX_A_IMAGE: w->img=(fx_image_t*)attrs[i].v.w.w; break;
         case FX_A_MAXLEN: w->text_max=attrs[i].v.iv.v; break;
-        case FX_A_ANIM: if (attrs[i].v.iv.v) w->flags|=FX_F_ANIM; break;
+        case FX_A_ANIM: if (attrs[i].v.iv.v) w->flags|=FX_F_ANIM; else w->flags|=FX_F_NOANIM; break;   /* v2.4.3: anim(0)=显式关动画 */
         case FX_A_SIDEBAR: w->tab_side=(uint8_t)attrs[i].v.iv.v; break;
         default: break;
         }
@@ -525,6 +539,41 @@ redraw_widget_now(te); return; }
     }
 }
 
+/* v2.4.3 动画: 切页"揭示"过渡。
+ * 思路: 不改控件几何(那会牵动布局与命中测试), 而是在换页后的 160ms 内, 把 tab 子控件的裁剪矩形
+ * 从一侧逐步展开 —— 新页面像被"拉出来"一样出现。方向跟新标签所在的一侧一致(往右切就从右侧展开)。
+ * 状态检测靠"记住上一帧的 value", 因此完全不碰输入路径(改动面最小)。 */
+#define FX_PAGE_WIPE_MS 220u
+typedef struct { fx_widget_t *w; int prev; uint32_t t0; } fx_wipe_t;
+static fx_wipe_t s_wipe[8];
+static float fx_page_wipe(fx_widget_t *w)   /* 返回揭示进度 0..1(1=无动画) */
+{
+    if (!fx_widget_anim_ok(w)) return 1.0f;
+    int k = -1;
+    for (int i = 0; i < 8; i++) if (s_wipe[i].w == w) { k = i; break; }
+    if (k < 0) for (int i = 0; i < 8; i++) if (!s_wipe[i].w) { s_wipe[i].w = w; s_wipe[i].prev = w->value; s_wipe[i].t0 = (uint32_t)fx_time_ms(); k = i; break; }
+    if (k < 0) return 1.0f;
+    if (s_wipe[k].prev != w->value) { s_wipe[k].prev = w->value; s_wipe[k].t0 = (uint32_t)fx_time_ms(); }
+    uint32_t el = (uint32_t)fx_time_ms() - s_wipe[k].t0;
+    if (el >= FX_PAGE_WIPE_MS) { w->flags &= (uint16_t)~FX_F_ANIM; return 1.0f; }
+    w->flags |= FX_F_ANIM;
+    { float t = (float)el / (float)FX_PAGE_WIPE_MS; float u = 1.0f - t; return 1.0f - u * u * u; }   /* 缓出 */
+}
+/* 把 tab 子控件的裁剪收窄到"已揭示"的部分 */
+static void fx_page_wipe_clip(fx_widget_t *w, int x1, int y1, int x2, int y2, float p, int *ox1, int *oy1, int *ox2, int *oy2)
+{
+    *ox1 = x1; *oy1 = y1; *ox2 = x2; *oy2 = y2;
+    if (p >= 1.0f) return;
+    int wpx = (x2 - x1 + 1);
+    int span = (int)(wpx * p);
+    int k = -1;
+    for (int i = 0; i < 8; i++) if (s_wipe[i].w == w) { k = i; break; }
+    int from_left = (k >= 0 && s_wipe[k].prev <= w->value);
+    if (from_left) *ox1 = x1 + (wpx - span);            /* 从右侧展开(往右切页) */
+    else           { *ox2 = x1 + span - 1; }            /* 从左侧展开(往左切页) */
+    if (*ox2 < *ox1) *ox2 = *ox1;
+}
+
 static void redraw_region(int x1,int y1,int x2,int y2);   /* 定义在后面: 立即重绘复用它擦背景 */
 
 static void redraw_widget_now(fx_widget_t *w)
@@ -578,7 +627,14 @@ static void draw_widget_inner(fx_widget_t *w, int cx1, int cy1, int cx2, int cy2
 #if FXTK_WIDGET_TAB
         case FX_W_TAB:
             fxtk_draw_tab(w);
-            for (fx_widget_t *c=w->child; c; c=c->sibling) if (c->page==w->value) draw_widget(c,w->x1,w->y1,w->x2,w->y2);   /* clip 子控件到 tab 自身矩形, 防画到 tab 外(470->480) */
+            {
+                int c1 = w->x1, c2 = w->y1, c3 = w->x2, c4 = w->y2;
+                float _p = fx_page_wipe(w);
+                if (_p < 1.0f) fx_page_wipe_clip(w, w->x1, w->y1, w->x2, w->y2, _p, &c1, &c2, &c3, &c4);
+                /* v2.4.3: 收窄后的矩形必须【当作裁剪参数传进去】—— draw_widget 的第 2~5 个参数就是裁剪矩形,
+                 * 之前在外面 fx_set_clip 会被它覆盖, 所以换页过渡一直看不到效果。 */
+                for (fx_widget_t *c=w->child; c; c=c->sibling) if (c->page==w->value) draw_widget(c, c1, c2, c3, c4);
+            }
             return;
 #endif
         case FX_W_SCROLL: {
@@ -651,8 +707,29 @@ static void redraw_region(int x1,int y1,int x2,int y2)
 static void draw_canvas_only(fx_widget_t *w)
 {
     if (!(w->flags & FX_F_VISIBLE)) return;
-    if (w->type==FX_W_TAB) { fx_set_clip(w->x1,w->y1,w->x2,w->y2); 
-    for(fx_widget_t *c=w->child;c;c=c->sibling) if (c->page==w->value) draw_canvas_only(c); fx_reset_clip(); return; }   /* 子内容裁剪到 tab */
+
+    /* v2.4.3 动画: 除 canvas 外, 任何带 FX_F_ANIM 的可见控件也把自身矩形标脏, 让核心本帧重绘它。
+     * 这是"全局动画开关"能作用于普通控件(如标签页药丸淡入、进度条缓动)的关键——
+     * 之前 FX_F_ANIM 只对 canvas 生效, 所以普通控件设了标志也不会被继续重绘(动画只走一帧就停)。
+     * 仅在动画开启时扫描, 关闭时零开销(不影响基准与金图)。 */
+    if (s_anim_on) {
+        int lim = s_pool_high > 0 ? s_pool_high : 0;
+        for (int i = 0; i < lim; i++) {
+            fx_widget_t *a = &s_pool[i];
+            if (a->type == FX_W_NONE || !(a->flags & FX_F_ANIM)) continue;
+            if (a->type == FX_W_CANVAS) continue;              /* 画布已在上面的分支里处理 */
+            if (!(a->flags & FX_F_VISIBLE)) continue;
+            if (!widget_in_active_page(a)) continue;
+            fx_repaint_rect(a->x1, a->y1, a->x2, a->y2);
+        }
+    }
+    if (w->type==FX_W_TAB) {
+        fx_set_clip(w->x1,w->y1,w->x2,w->y2);
+        float p2 = fx_page_wipe(w);
+        if (p2 < 1.0f) { int b1,b2,b3,b4; fx_page_wipe_clip(w, w->x1,w->y1,w->x2,w->y2, p2, &b1,&b2,&b3,&b4); fx_set_clip(b1,b2,b3,b4); }
+        for(fx_widget_t *c=w->child;c;c=c->sibling) if (c->page==w->value) draw_canvas_only(c);
+        fx_reset_clip(); return;
+    }   /* 子内容裁剪到 tab(+ 换页过渡时收窄) */
 #if FXTK_WIDGET_CANVAS
     if (w->type==FX_W_CANVAS && w->cb && (w->flags & FX_F_ANIM && widget_in_active_page(w))) {
         if (w->flags & FX_F_BUF) { fxtk_off_begin(w); fxtk_draw_canvas(w); fx_canvas_begin(w); w->cb(w,w->ud); fx_canvas_end(); fxtk_off_end(w); }
@@ -976,7 +1053,8 @@ static void te_insert(fx_widget_t *w,const char *utf8)
     if (te_chars_n(utf8,ul)>free_n) { int i=0,c=0; 
     while(i<ul&&c<free_n){if(((unsigned char)utf8[i]&0xC0)!=0x80)c++;i++;} ul=i;
     if (ul<=0)return; } }
-    int len=(int)strlen(s); if (!te_grow(w,len+ul+1)) return;   /* v2.3.1: OOM 放弃本次插入, 防越界写 */
+    int len=(int)strlen(s);
+    if (!te_grow(w,len+ul+1)) return;   /* v2.3.1: OOM 放弃本次插入, 防越界写 */
     s=w->text_buf;
     memmove(s+w->caret+ul,s+w->caret,(size_t)(len-w->caret)+1);
     memcpy(s+w->caret,utf8,(size_t)ul);

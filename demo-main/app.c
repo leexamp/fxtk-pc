@@ -1,3 +1,6 @@
+/* v2.4.3: clock_gettime 属 POSIX —— 严格 C99 下必须显式声明特性宏, 否则是隐式声明(-Wall 会警告)。 */
+#define _POSIX_C_SOURCE 199309L
+#include <time.h>
 #include <stdlib.h>
 /**
  * app.c — fxtk 综合演示 (5 页: 波形/动效/控件/图片/3D光追)
@@ -632,6 +635,7 @@ static void on_pt(fx_widget_t *w, void *ud){
     fx_draw_text_c(4,4,buf,FX_GREEN,FX_BLACK);
 }
 void app_init(void) {
+    /* v2.4.3: 动画默认关(用户实测: 开启后整体不如以前利落)。需要时显式调用 fx_animation(1)。 */
     printf("[I] demo: fxtk demo start (3D Raymarch)\n");
     fxtk_set_fps_debug(0);   /* 3D/粒子页已有 FPS, 不在滚动画布上叠加全局角标 */
     gpu_raymarch_start();   /* GPU 通道后台线程一次性点火 */

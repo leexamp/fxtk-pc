@@ -25,7 +25,9 @@
 #define FX_TOK_TEXT_DIM       FX_RGB(120, 120, 120)   /* 次要文字/提示 */
 /* v2.4.2 审美: 标签条对比度太弱(用户反馈"标签页对比度偏低") —— 未选中文字加深、选中胶囊提亮 */
 #define FX_TOK_TAB_TEXT        FX_RGB(85, 85, 85)     /* 未选中标签文字 */
-#define FX_TOK_TAB_PILL_MIX    85                     /* 选中胶囊混白比例(%) */
+/* 注意: btn_mix(a,b,t) 的 t 是【0~256 权重】而非百分比 —— 之前把 85 当成"85%"写, 实际只有 33%,
+ * 于是"提亮"远弱于预期(实测药丸最终色 234 而非 250)。这里按真实权重取值: 218/256 ≈ 85%。 */
+#define FX_TOK_TAB_PILL_MIX    218                    /* 选中胶囊混白权重(0~256): 218 ≈ 85% */
 #define FX_TOK_BORDER         FX_RGB(200, 200, 200)   /* 常规描边 */
 #define FX_TOK_MUTED          FX_LGRAY                /* 静默底色 */
 #define FX_TOK_ON_PRIMARY     FX_WHITE                /* 主色之上的文字 */
@@ -52,7 +54,7 @@
  * 按钮常被成组紧密排列, 圆角必须保守; 需要更圆的场景(卡片/胶囊标签)另有令牌。 */
 #define FX_TOK_RADIUS_BTN     4
 #define FX_TOK_RADIUS_KNOB_DIV 3   /* 滑块圆角 = 宽度的 1/3(越大越"胶囊") */
-#define FX_TOK_BTN_EDGE_MIX   25    /* 按钮描边加深比例(%): 提高与背景的分离度, 不增加绘制调用 */
+#define FX_TOK_BTN_EDGE_MIX   64    /* 按钮描边加深权重(0~256): 64 ≈ 25%; 同样曾被误当百分比(原 25 ≈ 10%) */
 #define FX_TOK_TRACK_H_MIN    6     /* 滑杆轨道厚度下限 */
 #define FX_TOK_TRACK_H_MAX    10    /* 滑杆轨道厚度上限 */
 #define FX_TOK_KNOB_W_MIN     12    /* 滑块宽度下限 */
