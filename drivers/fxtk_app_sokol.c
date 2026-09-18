@@ -8,6 +8,7 @@
 #include "sokol_app.h"
 #include "fxtk.h"
 #include "fxtk_app.h"
+#include "fxtk_backends.h"   /* fx_backend_set_screen 的声明: 缺了会隐式声明, float 参数会被当 double 传 */
 
 extern fx_driver_t fx_sokol_driver;                        /* fxtk_sokol_driver.c */
 extern void fxtk_sokol_frame(int fb_w, int fb_h);
