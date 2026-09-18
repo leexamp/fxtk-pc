@@ -69,6 +69,7 @@ int main(int argc, char **argv)
     sdl_first_target();
     fx_set_bg(FX_WINDOW_BG);
     app_init();
+    fx_animation(0);   /* v2.4.3: 基准/金图必须确定性 —— 显式关掉动画(即使演示里打开了) */
     if (page >= 0) fx_set_value(fx_find("tab"), page);
 
     printf("# bench: %dx%d page=%d frames=%d\n", sdl_get_width(), sdl_get_height(), page, frames);

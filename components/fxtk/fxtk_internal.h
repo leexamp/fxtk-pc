@@ -27,6 +27,7 @@
 #define FX_F_PRESSED  0x02
 #define FX_F_ANIM     0x04
 #define FX_F_BUF      0x08
+#define FX_F_NOANIM   0x10   /* v2.4.3: 该控件显式关闭动画(anim(0)), 优先于全局开关 */
 
 #define FX_POS_PIXEL   0
 #define FX_POS_PERCENT 1
@@ -156,3 +157,6 @@ void fxtk_draw_image(fx_widget_t *w);
 #endif
 
 #endif
+
+/* v2.4.3: 该控件是否应播放动画(全局开 且 未用 anim(0) 显式关闭) */
+int fx_widget_anim_ok(fx_widget_t *w);

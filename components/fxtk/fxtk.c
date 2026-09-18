@@ -209,6 +209,12 @@ fx_attr_t border(int n)         { fx_attr_t a={FX_A_BORDER,{ {0} }}; a.v.iv.v=(i
 fx_attr_t radius(int n)         { fx_attr_t a={FX_A_RADIUS,{ {0} }}; a.v.iv.v=(int16_t)n; return a; }
 fx_attr_t value(int n)          { fx_attr_t a={FX_A_VALUE,{ {0} }}; a.v.iv.v=(int16_t)n; return a; }
 fx_attr_t page(int n)           { fx_attr_t a={FX_A_PAGE,{ {0} }}; a.v.iv.v=(int16_t)n; return a; }
+/* v2.4.3: 全局动画开关。默认关 —— 无头测试与金图回归必须确定性, 不能每帧都在动。 */
+static int s_anim_on = 0;
+void fx_animation(int on) { s_anim_on = on ? 1 : 0; fx_repaint(); }
+int  fx_animation_enabled(void) { return s_anim_on; }
+int  fx_widget_anim_ok(fx_widget_t *w) { return s_anim_on && w && !(w->flags & FX_F_NOANIM); }
+
 fx_attr_t anim(int n)           { fx_attr_t a={FX_A_ANIM,{ {0} }}; a.v.iv.v=(int16_t)n; return a; }
 fx_attr_t sidebar(int side)     { fx_attr_t a={FX_A_SIDEBAR,{ {0} }}; a.v.iv.v=(int16_t)side; return a; }
 fx_attr_t fx_wptr(fx_widget_t *w){ fx_attr_t a={FX_A_WIDGET,{ {0} }}; a.v.w.w=w; return a; }
@@ -257,7 +263,7 @@ fx_widget_t *fx_widget_new_impl(int type, fx_attr_t attrs[])
         case FX_A_PAGE: w->page=attrs[i].v.iv.v; break;
         case FX_A_IMAGE: w->img=(fx_image_t*)attrs[i].v.w.w; break;
         case FX_A_MAXLEN: w->text_max=attrs[i].v.iv.v; break;
-        case FX_A_ANIM: if (attrs[i].v.iv.v) w->flags|=FX_F_ANIM; break;
+        case FX_A_ANIM: if (attrs[i].v.iv.v) w->flags|=FX_F_ANIM; else w->flags|=FX_F_NOANIM; break;   /* v2.4.3: anim(0)=显式关动画 */
         case FX_A_SIDEBAR: w->tab_side=(uint8_t)attrs[i].v.iv.v; break;
         default: break;
         }
@@ -654,6 +660,21 @@ static void redraw_region(int x1,int y1,int x2,int y2)
 static void draw_canvas_only(fx_widget_t *w)
 {
     if (!(w->flags & FX_F_VISIBLE)) return;
+
+    /* v2.4.3 动画: 除 canvas 外, 任何带 FX_F_ANIM 的可见控件也把自身矩形标脏, 让核心本帧重绘它。
+     * 这是"全局动画开关"能作用于普通控件(如标签页药丸淡入、进度条缓动)的关键——
+     * 之前 FX_F_ANIM 只对 canvas 生效, 所以普通控件设了标志也不会被继续重绘(动画只走一帧就停)。
+     * 仅在动画开启时扫描, 关闭时零开销(不影响基准与金图)。 */
+    if (s_anim_on) {
+        for (int i = 0; i < FX_MAX_WIDGETS; i++) {
+            fx_widget_t *a = &s_pool[i];
+            if (a->type == FX_W_NONE || !(a->flags & FX_F_ANIM)) continue;
+            if (a->type == FX_W_CANVAS) continue;              /* 画布已在上面的分支里处理 */
+            if (!(a->flags & FX_F_VISIBLE)) continue;
+            if (!widget_in_active_page(a)) continue;
+            fx_repaint_rect(a->x1, a->y1, a->x2, a->y2);
+        }
+    }
     if (w->type==FX_W_TAB) { fx_set_clip(w->x1,w->y1,w->x2,w->y2); 
     for(fx_widget_t *c=w->child;c;c=c->sibling) if (c->page==w->value) draw_canvas_only(c); fx_reset_clip(); return; }   /* 子内容裁剪到 tab */
 #if FXTK_WIDGET_CANVAS

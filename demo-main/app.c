@@ -635,6 +635,7 @@ static void on_pt(fx_widget_t *w, void *ud){
     fx_draw_text_c(4,4,buf,FX_GREEN,FX_BLACK);
 }
 void app_init(void) {
+    fx_animation(1);   /* v2.4.3: 演示开启动画(标签药丸淡入/进度条缓动); 无头测试与金图不受影响 */
     printf("[I] demo: fxtk demo start (3D Raymarch)\n");
     fxtk_set_fps_debug(0);   /* 3D/粒子页已有 FPS, 不在滚动画布上叠加全局角标 */
     gpu_raymarch_start();   /* GPU 通道后台线程一次性点火 */

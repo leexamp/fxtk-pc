@@ -173,6 +173,27 @@ void fxtk_draw_slider(fx_widget_t *w)
 
 #endif
 #if FXTK_WIDGET_PROGRESS
+/* v2.4.3 动画: 进度条数值缓动(值突变时平滑增长)。默认全局关 → 行为与旧版完全一致。 */
+static fx_widget_t *s_pa_w[4]; static float s_pa_v[4] = { -1,-1,-1,-1 };
+static int progress_anim_value(fx_widget_t *w)
+{
+    int k = -1;
+    for (int i = 0; i < 4; i++) if (s_pa_w[i] == w) { k = i; break; }
+    if (k < 0) for (int i = 0; i < 4; i++) if (!s_pa_w[i]) { s_pa_w[i] = w; k = i; break; }
+    if (k < 0) return w->value;
+    if (s_pa_v[k] < 0) s_pa_v[k] = (float)w->value;
+    if (!fx_widget_anim_ok(w)) { s_pa_v[k] = (float)w->value; w->flags &= (uint16_t)~FX_F_ANIM; return w->value; }
+    float d = (float)w->value - s_pa_v[k];
+    if (d > 0.4f || d < -0.4f) {
+        s_pa_v[k] += d * 0.25f;
+        w->flags |= FX_F_ANIM;
+        return (int)(s_pa_v[k] + 0.5f);
+    }
+    s_pa_v[k] = (float)w->value;
+    w->flags &= (uint16_t)~FX_F_ANIM;
+    return w->value;
+}
+
 void fxtk_draw_progress(fx_widget_t *w)
 {
     /* P5 审美迭代 6/9(进度条): 轨道/填充/描边原为硬直角, 与其它控件不一致。改为圆角,
@@ -183,7 +204,7 @@ void fxtk_draw_progress(fx_widget_t *w)
     if (pr > FX_TOK_RADIUS_M) pr = FX_TOK_RADIUS_M; if (pr < 2) pr = 2;
     fx_set_color(w->fg);
     fx_fill_rect_round(w->x1, w->y1, w->x2, w->y2, pr);
-    int filled = rw * w->value / 100;
+    int filled = rw * progress_anim_value(w) / 100;   /* v2.4.3: 动画开启时用缓动值 */
     if (filled > 0) {
         int fr = pr;
         if (fr > filled / 2) fr = filled / 2; if (fr < 1) fr = 1;
@@ -250,8 +271,31 @@ void fxtk_draw_panel(fx_widget_t *w)
 
 #endif
 #if FXTK_WIDGET_TAB
+/* v2.4.3 动画: 标签选中药丸的"淡入"(只改颜色混合, 不动几何 → 不会出现文字/位置错位)。
+ * 默认全局关; 演示里 fx_animation(1) 打开; 单个控件可用 anim(0) 关掉。 */
+/* v2.4.3 动画: 标签选中药丸的"淡入"(只改颜色混合, 不动几何 → 不会出现文字/位置错位)。
+ * 默认全局关; 演示里 fx_animation(1) 打开; 单个控件可用 anim(0) 关掉。
+ * 进度按【时间】算而不是按帧累加 —— 同一帧内控件可能被绘制多次, 按帧累加会被重复推进/重复重置,
+ * 表现为"淡入到一半就卡住"(实测停在 234 而非 250)。时间基准天然幂等。 */
+static fx_widget_t *s_ta_w[4]; static uint32_t s_ta_t0[4]; static int s_ta_sel[4] = { -9,-9,-9,-9 };
+#define FX_TAB_FADE_MS 140u
+static float tab_anim_mix(fx_widget_t *w)
+{
+    int k = -1;
+    for (int i = 0; i < 4; i++) if (s_ta_w[i] == w) { k = i; break; }
+    if (k < 0) for (int i = 0; i < 4; i++) if (!s_ta_w[i]) { s_ta_w[i] = w; s_ta_t0[i] = (uint32_t)fx_time_ms(); k = i; break; }
+    if (k < 0) return 1.0f;
+    if (s_ta_sel[k] != w->value) { s_ta_sel[k] = w->value; s_ta_t0[k] = (uint32_t)fx_time_ms(); }
+    if (!fx_widget_anim_ok(w)) { w->flags &= (uint16_t)~FX_F_ANIM; return 1.0f; }
+    uint32_t el = (uint32_t)fx_time_ms() - s_ta_t0[k];
+    if (el >= FX_TAB_FADE_MS) { w->flags &= (uint16_t)~FX_F_ANIM; return 1.0f; }   /* 结束: 交还静态绘制 */
+    w->flags |= FX_F_ANIM;                                                        /* 进行中: 请求继续重绘 */
+    return (float)el / (float)FX_TAB_FADE_MS;
+}
+
 void fxtk_draw_tab(fx_widget_t *w)
 {
+    float a_mix = 1.0f;
     int side = w->tab_side;
     fx_set_color(w->bg);
     fx_fill_rect(w->x1, w->y1, w->x2, w->y2);
@@ -274,9 +318,10 @@ void fxtk_draw_tab(fx_widget_t *w)
          * 圆角语言不统一, 而且一格要 5 次绘制。改成: 选中 = 圆角胶囊高亮(内缩 2px 留出间隔),
          * 未选中不铺色、不画线(直接露出标签条底色)。视觉更干净, 且每格少 4 次绘制调用。 */
         int sel = (i == w->value);
+        if (i == 0) a_mix = tab_anim_mix(w);      /* 每帧只算一次药丸淡入进度 */
         fx_color_t bg = w->bg;                  /* 文字底: 未选中与标签条同色 → 文字块自然融进去 */
         if (sel) {
-            bg = btn_mix(w->bg, FX_WHITE, FX_TOK_TAB_PILL_MIX);
+            bg = btn_mix(w->bg, FX_WHITE, (int)(FX_TOK_TAB_PILL_MIX * a_mix));
             int padx = 2, pady = 2;
             int rr = (ty2 - ty1 + 1 - pady * 2) / 2;
             if (rr > FX_TOK_RADIUS_M) rr = FX_TOK_RADIUS_M;
