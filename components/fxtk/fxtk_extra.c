@@ -60,7 +60,8 @@ static void ex_draw_list(ex_slot_t *s, int cw, int ch)
         int sel_or_hov = (idx==s->sel) ? 1 : (idx==hov ? 2 : 0);
         if (sel_or_hov) {
             int hr = FX_TOK_RADIUS_S; int hh = hy1 - hy0 + 1;
-            if (hr > hh/2 - 1) hr = hh/2 - 1; if (hr < 2) hr = 2;
+            if (hr > hh/2 - 1) hr = hh/2 - 1;
+            if (hr < 2) hr = 2;
             fx_set_color(sel_or_hov==1 ? FX_TOK_PRIMARY : FX_TOK_LIST_HOVER);
             fx_fill_rect_round(3, hy0 + 1, cw - 6, hy1 - 1, hr);
         }

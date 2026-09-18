@@ -30,7 +30,8 @@ void fxtk_draw_button(fx_widget_t *w)
     int pr = (fx_pressed() == w);
     /* P5 审美迭代 1/9: 圆角走设计令牌(4 → FX_TOK_RADIUS_M=6, 边缘更柔和);
      * 按下态不再只压暗顶边, 而是整块略压暗 —— 触摸屏上"按没按到"更容易一眼看出。 */
-    int r = FX_TOK_RADIUS_BTN; if (r > ch/2) r = ch/2; if (r > cw/2) r = cw/2;
+    int r = FX_TOK_RADIUS_BTN;
+    if (r > ch/2) r = ch/2; if (r > cw/2) r = cw/2;
     fx_set_color(pr ? btn_mix(w->bg, FX_BLACK, 12) : w->bg);
     fx_fill_rect_round(w->x1, w->y1, w->x2, w->y2, r);
     if (!pr) {
@@ -138,10 +139,12 @@ void fxtk_draw_slider(fx_widget_t *w)
 {
     int h = w->y2 - w->y1 + 1;
     int cy = w->y1 + h / 2;
-    int th = h / 4; if (th < FX_TOK_TRACK_H_MIN) th = FX_TOK_TRACK_H_MIN; if (th > FX_TOK_TRACK_H_MAX) th = FX_TOK_TRACK_H_MAX;
+    int th = h / 4;
+    if (th < FX_TOK_TRACK_H_MIN) th = FX_TOK_TRACK_H_MIN; if (th > FX_TOK_TRACK_H_MAX) th = FX_TOK_TRACK_H_MAX;
     int ty0 = cy - th / 2, ty1 = ty0 + th - 1;
     int rw = w->x2 - w->x1 + 1;
-    int kw = h / 2; if (kw < FX_TOK_KNOB_W_MIN) kw = FX_TOK_KNOB_W_MIN; if (kw > FX_TOK_KNOB_W_MAX) kw = FX_TOK_KNOB_W_MAX;
+    int kw = h / 2;
+    if (kw < FX_TOK_KNOB_W_MIN) kw = FX_TOK_KNOB_W_MIN; if (kw > FX_TOK_KNOB_W_MAX) kw = FX_TOK_KNOB_W_MAX;
     int kx = w->x1 + rw * w->value / 100;
     if (kx < w->x1 + kw / 2) kx = w->x1 + kw / 2;
     if (kx > w->x2 - kw / 2) kx = w->x2 - kw / 2;
@@ -154,7 +157,8 @@ void fxtk_draw_slider(fx_widget_t *w)
     fx_draw_hline(w->x1 + th / 2, w->x2 - th / 2, ty1);
 
     int pr = (w->flags & FX_F_PRESSED) ? 1 : 0;
-    int kh = h - 4; if (kh < kw) kh = kw;                                 /* 滑块略高, 更易点 */
+    int kh = h - 4;
+    if (kh < kw) kh = kw;                                 /* 滑块略高, 更易点 */
     int ky0 = cy - kh / 2 + pr, ky1 = ky0 + kh - 1;
     /* P5 审美迭代 3/9(滑杆): 滑块原本是"圆角填充 + 直角描边" —— 圆角被描边的直角切掉,
      * 看起来像方形贴了个圆角, 与按钮/输入框的圆角语言也不统一。描边改用同半径的圆角矩形,
@@ -175,12 +179,14 @@ void fxtk_draw_progress(fx_widget_t *w)
      * 填充的圆角按高度收敛(短填充不会因圆角过大而变形)。调用次数不变。 */
     int rw = w->x2 - w->x1 + 1;
     int rh = w->y2 - w->y1 + 1;
-    int pr = rh / 2; if (pr > FX_TOK_RADIUS_M) pr = FX_TOK_RADIUS_M; if (pr < 2) pr = 2;
+    int pr = rh / 2;
+    if (pr > FX_TOK_RADIUS_M) pr = FX_TOK_RADIUS_M; if (pr < 2) pr = 2;
     fx_set_color(w->fg);
     fx_fill_rect_round(w->x1, w->y1, w->x2, w->y2, pr);
     int filled = rw * w->value / 100;
     if (filled > 0) {
-        int fr = pr; if (fr > filled / 2) fr = filled / 2; if (fr < 1) fr = 1;
+        int fr = pr;
+        if (fr > filled / 2) fr = filled / 2; if (fr < 1) fr = 1;
         fx_set_color(w->bg);
         fx_fill_rect_round(w->x1, w->y1, w->x1 + filled - 1, w->y2, fr);
     }
@@ -205,7 +211,8 @@ void fxtk_draw_checkbox(fx_widget_t *w)
     }
     /* P5 审美迭代 7/9(复选框): 方框由硬直角改圆角(令牌 S), 与输入框/列表同一套语言;
      * 勾选标记仍是两条线(形状本身没问题), 调用次数不变。 */
-    int cbr = FX_TOK_RADIUS_S; if (cbr > box / 3) cbr = box / 3; if (cbr < 1) cbr = 1;
+    int cbr = FX_TOK_RADIUS_S;
+    if (cbr > box / 3) cbr = box / 3; if (cbr < 1) cbr = 1;
     fx_set_color(w->fg);
     fx_draw_rect_round(w->x1, by, w->x1 + box - 1, by + box - 1, cbr);
     if (w->value) {
@@ -436,7 +443,8 @@ void fxtk_draw_textedit(fx_widget_t *w)
 /* TE-SCROLLBAR */
 if (total_h > vis_h) {
 int rw2 = w->x2 - 2;
-int th = vis_h * vis_h / total_h; if (th < 20) th = 20;
+int th = vis_h * vis_h / total_h;
+if (th < 20) th = 20;
 int ty = w->y1 + 2 + (int)((long)w->scroll_y * (w->y2 - w->y1 - 4 - th) / (total_h - vis_h));
 fx_set_color(FX_TOK_BORDER);
 fx_fill_rect(rw2 - 3, w->y1 + 2, rw2, w->y2 - 2);

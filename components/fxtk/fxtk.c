@@ -184,8 +184,10 @@ static int parse_pct(const char *s, int16_t *a, int16_t *b)
 { float x, y;
 if (sscanf(s, "%f,%f", &x, &y) != 2) return 0;
 /* v2.3.1: percent() 收 0~1 小数; 误写 "100,100" 会在 int16 里回绕成负数把控件甩出屏幕, 钳到合法域 */
-if (x < -1.0f) x = -1.0f; if (x > 1.0f) x = 1.0f;
-if (y < -1.0f) y = -1.0f; if (y > 1.0f) y = 1.0f;
+if (x < -1.0f) x = -1.0f;
+if (x > 1.0f) x = 1.0f;
+if (y < -1.0f) y = -1.0f;
+if (y > 1.0f) y = 1.0f;
 *a = (int)(x*1000); *b = (int)(y*1000); return 1; }
 fx_attr_t pixel(const char *a, const char *b)
 { fx_attr_t at = { FX_A_PIXEL, { {0} } }; parse_xy(a,&at.v.rect.x1,&at.v.rect.y1); parse_xy(b,&at.v.rect.x2,&at.v.rect.y2); return at; }
@@ -238,7 +240,8 @@ fx_widget_t *fx_widget_new_impl(int type, fx_attr_t attrs[])
         case FX_A_PERCENT: w->pos_mode=FX_POS_PERCENT; w->px1=attrs[i].v.pct.p1; w->py1=attrs[i].v.pct.p2; w->px2=attrs[i].v.pct.p3; w->py2=attrs[i].v.pct.p4; break;
         case FX_A_GRID: w->pos_mode=FX_POS_GRID; w->grid_ref=fx_find(attrs[i].v.grid.name); w->gname=attrs[i].v.grid.name; w->gr1=attrs[i].v.grid.r1; w->gc1=attrs[i].v.grid.c1; w->gr2=attrs[i].v.grid.r2; w->gc2=attrs[i].v.grid.c2; break;
         case FX_A_TITLE: { const char *ts0 = attrs[i].v.str.s?attrs[i].v.str.s:"";
-            size_t tl0 = strlen(ts0); if (tl0 > sizeof(w->title)-1) tl0 = sizeof(w->title)-1;
+            size_t tl0 = strlen(ts0);
+            if (tl0 > sizeof(w->title)-1) tl0 = sizeof(w->title)-1;
             while (tl0 > 0 && ((unsigned char)ts0[tl0] & 0xC0) == 0x80) tl0--;   /* v2.3.1: UTF-8 边界回退 */
             memcpy(w->title, ts0, tl0); w->title[tl0]=0; break; }
         case FX_A_NAME: strncpy(w->name, attrs[i].v.str.s?attrs[i].v.str.s:"", sizeof(w->name)-1); w->name[sizeof(w->name)-1]=0; break;
@@ -976,7 +979,8 @@ static void te_insert(fx_widget_t *w,const char *utf8)
     if (te_chars_n(utf8,ul)>free_n) { int i=0,c=0; 
     while(i<ul&&c<free_n){if(((unsigned char)utf8[i]&0xC0)!=0x80)c++;i++;} ul=i;
     if (ul<=0)return; } }
-    int len=(int)strlen(s); if (!te_grow(w,len+ul+1)) return;   /* v2.3.1: OOM 放弃本次插入, 防越界写 */
+    int len=(int)strlen(s);
+    if (!te_grow(w,len+ul+1)) return;   /* v2.3.1: OOM 放弃本次插入, 防越界写 */
     s=w->text_buf;
     memmove(s+w->caret+ul,s+w->caret,(size_t)(len-w->caret)+1);
     memcpy(s+w->caret,utf8,(size_t)ul);

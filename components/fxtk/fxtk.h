@@ -263,7 +263,7 @@ enum { FX_KEY_BACKSPACE = 8, FX_KEY_RETURN = 13, FX_KEY_ESCAPE = 27,
        FX_KEY_UP = 5, FX_KEY_DOWN = 6, FX_KEY_DELETE = 127 };
 
 typedef struct {
-    uint32_t width, height;
+    int width, height;
     int  (*init)(void);
     void (*set_window)(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
     void (*push_pixels)(const uint32_t *px, uint32_t n);
