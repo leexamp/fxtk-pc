@@ -26,7 +26,15 @@ For people who want to modify the source / port it. For application development,
 - `lines`(font size) / `rows`(alignment) / `value` / `page`
 - Computed rectangle `x1..y2`; parent/child/sibling pointers
 
-**Widget pool**: static array `s_pool[FX_MAX_WIDGETS]`, `FX_MAX_WIDGETS (16384 on PC / 4096 on ESP32)` (about 940KB BSS). `fxtk_alloc()` linearly finds an empty slot, `fxtk_free()` marks it `FX_W_NONE`.
+**Widget pool**: static array `s_pool[FX_MAX_WIDGETS]`, `FX_MAX_WIDGETS` (**8192 on PC ≈ 2.6MB BSS / 4096 on ESP32 ≈ 1.3MB**; `sizeof(fx_widget_t)` = 328B). `fxtk_alloc()` linearly finds an empty slot, `fxtk_free()` marks it `FX_W_NONE`.
+
+> **The whole `.bss` bill** (measured **14.77MB** on PC/sokol — the widget pool is only ~2.6MB of it):
+> the largest item is the driver's **vertex/index buffers** in `drivers/fxtk_sokol_driver.c`:
+> `s_vb[VB_MAX]` (`VB_MAX=262144` × 32B = **8MB**) and `s_ib[IB_MAX]` (`IB_MAX=VB_MAX*2` × 4B = **2MB**),
+> plus command/texture-slot/event-queue arrays (~0.4MB). This is a **virtual reservation** — `.bss` is
+> demand-paged, so a minimal app measured **7.3MB** resident and the full 12-page demo **32.9MB**.
+> Note `VB_MAX`/`IB_MAX` are currently **source-level defines, not overridable via `-D`**.
+
 
 ## Layout & Scaling
 

@@ -278,7 +278,7 @@ void fx_log(fx_log_level_t lv, const char *fmt, ...);     /* single logging entr
 ## Config macros
 | Macro | Meaning | PC default | ESP32 default |
 |---|---|---|---|
-| `FX_MAX_WIDGETS` | widget pool | **16384** | 4096 |
+| `FX_MAX_WIDGETS` | widget pool | **8192** | 4096 |
 | `FX_MAX_SCROLL_STATES` | concurrent scroll states | **64** | 8 |
 | `FX_MAX_EXTRA_WIDGETS` | list/dropdown slots | **64** | 8 |
 | `FXTK_WIDGET_*` | compile-time widget trimming | all on | trim as needed |

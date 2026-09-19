@@ -1,5 +1,9 @@
 # fxtk — 轻量GUI框架 (v2.4)
 
+> ## 📖 ENGLISH VERSION AVAILABLE AT [docs_en/README_en.md](docs_en/README_en.md)
+>
+> **[→ Read this README in English](docs_en/README_en.md)**
+
 <p>
   <img alt="version" src="https://img.shields.io/badge/version-v2.4-blue">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green">
@@ -7,8 +11,14 @@
   <img alt="platform" src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20ESP32-lightgrey">
 </p>
 
-**一个单帧、脏区重绘、属性宏驱动的 C GUI 框架**——核心纯 C、热路径零分配、480×272 响应式设计、
-一份头文件就能上手。PC 默认走 **sokol(OpenGL)**，ESP32 用 `fx_driver_t` 抽象，几乎零改动跨平台。
+**一个 377KB 单文件、零第三方动态库的 C GUI 框架**——`ldd` 里只有系统库，没有 `SDL2.dll`、没有
+`libwinpthread`。同一份 `fxtk.h` 与同一套控件 API，PC 走 **sokol(OpenGL)**、ESP32 走纯 CPU 路径。
+核心纯 C、480×272 响应式设计、属性宏建界面。
+
+> 可当场验证：`cd demo-main && make && ldd ./fxtk_sim` —— 或见下方「为什么可能值得一用」。
+
+> 注：本框架带脏区矩形合并的实现，但**当前被 `s_full=1` 旁路、不生效**，每次请求都是整帧重绘
+> （因此不残影，但也没有脏区优化）——详见「性能」一节与 `fxtk.c` 中 `fx_repaint_rect()` 的注释。
 
 **画布与抗锯齿（v2.2 无头渲染示意图）**：
 | 抗锯齿 `fx_set_aa(1)` | 渐变 `fx_fill_rect_gradient` | 自定义控件（仪表盘） | 棋盘格（缩放安全） |
@@ -25,7 +35,7 @@
 
 > 一段真实录制（非渲染动画）：切页 → 图形页的伪 3D 模式 → 图片页拖动四角做真透视形变。
 
-**一句话**：一套 `fxtk.h` + 属性宏，写出的界面在 PC 上是**单文件、零第三方动态库**（Linux 372KB / Windows 439KB），
+**一句话**：一套 `fxtk.h` + 属性宏，写出的界面在 PC 上是**单文件、零第三方动态库**（Linux 377KB / Windows 439KB），
 在 ESP32 上是同一份 API 的纯 CPU 路径。1080P 下压测页 2820 个控件约 **102–130 fps**（无头软件渲染实测，见 `make bench`）。
 
 **为什么可能值得一用**
@@ -37,7 +47,8 @@
   `make golden`（金图逐像素回归）、`make esp32-smoke`（假 IDF 头做语法级检查）、`make bench`。
   **如实说明覆盖边界**：`make test` 用的是无头假驱动，它**不渲染帧缓冲**（`push_pixels` 只累计像素数），
   但 v2.4.4 起已补上**颜色/几何契约断言**（验证"框架让驱动画了什么"）与离屏画布推送计数；
-  **逐像素正确性仍靠 `make golden` 的金图**，而金图目前**不在 CI 里跑**。
+  **逐像素正确性仍靠 `make golden` 的金图**。金图**本地默认容差 0**（逐像素），
+  **CI 里会跑**，但用 `GOLDEN_TOL=1` 并跳过依赖 SDL/字体版本差异的演示页——即 CI 上不是逐像素口径。
 - **能改得动**：所有控件的颜色/圆角/留白集中在 `fxtk_tokens.h`，换风格只改一个文件。
 
 ## v2.4 新增
@@ -53,7 +64,7 @@
 - **后端服务层** `fxtk_backends.h`:随机(PCG32 可复现)/时间/路径/文件/图片解码(PNG·JPEG·BMP·GIF·TGA·PNM)/
   PNG 编码/剪贴板/文件对话框/偏好/能力协商;`-DFXTK_BACKEND_STUB` 提供确定性变体。
 - **canvas 变换栈** `fx_canvas_push_affine/pop_affine` + `fx_fill_quad`:push 后矩形填充变实心四边形、图片走透视。
-- **验证体系**:`make test`(真实/stub 两种 OS 服务后端, 无头假驱动、不含像素断言)/ `make golden`(金图逐像素; **注意目前不在 CI 里**)/ `make esp32-smoke`(语法级)/ `make bench`;
+- **验证体系**:`make test`(真实/stub 两种 OS 服务后端, 无头假驱动、不含像素断言)/ `make golden`(金图, 本地容差 0; CI 上 `GOLDEN_TOL=1` 并跳过演示页)/ `make esp32-smoke`(语法级)/ `make bench`;
   截图 `fx_screenshot()` 走驱动的 `read_pixels`, 零外部依赖。
 - 注意:控件层 SDF 抗锯齿**默认开启**(`s_widget_aa = 1`);要对比或排查观感用 `fx_set_widget_aa(0/1/2)`
   —— 它在"画布 + 文字 + quadwarp 混排"场景下有一个已知缺陷正在修(详见 CHANGELOG v2.4.1)。
@@ -95,7 +106,7 @@
 - **渲染**：`fx_image_*` 24bit 表面、旋转贴图、图像后处理（翻转/灰度/染色/亮度）、
   多线程软件 Raymarching（SDF 软阴影/AO/雾）＋ 可选 GPU(GLSL) 通道
 - **性能**：GPU 顶点批、行级持久线程池光追；1080P 压测页 2820 控件约 102–130 fps（实测区间）
-  - 说明：代码里有脏区矩形合并的实现，但当前**被 `s_full=1` 旁路、不生效**，每次请求都是整帧重绘 —— 详见 `fxtk.c` 中 `fx_repaint_rect()` 的注释
+  - 说明：**当前每次请求都是整帧重绘**（脏区合并未启用，见本文档开头「注」）—— 该帧率是整帧重建口径下的读数
 - **工程化**：统一 Makefile（单一源清单）、无头单测、金图回归、GitHub CI（Linux + Windows 交叉 + ESP32 冒烟）
 - **体积裁剪**：`-DFXTK_WIDGET_XXX=0` 编译期裁掉用不到的控件（受限平台用）；`tools/autotrim.sh` 自动扫描并生成开关
 - **跨平台文件 API**：`fx_fs_pick_dir()` / `fx_fs_list()`，演示里是完整的文件浏览器
@@ -140,7 +151,7 @@ cd demo-main
 make                       # 构建完整演示 fxtk_sim (sokol, 单文件)
 make fxtk_sim_en           # 英文版
 make test                  # 无头单元测试: 真实后端 + stub 后端各一遍
-make golden                # 金图逐像素回归(画布示例; CI 里跑的就是这个)
+make golden                # 金图回归(画布示例; 本地容差 0, CI 用 GOLDEN_TOL=1)
 make esp32-smoke           # ESP32 接口级编译冒烟(不需要 ESP-IDF 工具链)
 make bench                 # 渲染吞吐基准(无头, 无 vsync)
 make shared                # 打包成动态库(exe 只留 app 层, 体积更小)

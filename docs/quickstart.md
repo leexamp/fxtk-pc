@@ -12,7 +12,15 @@ cd demo-main
 ./build_ex.sh ex03_anim   # 任意独立示例 ex01~ex18
 ```
 
-依赖：`libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev`（`sudo apt install`）。
+依赖（**默认后端是 sokol，不依赖 SDL2**）：
+
+```bash
+sudo apt install libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev
+```
+
+> 只有跑遗留对照版 `./build.sh --sdl` 才需要 `libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev`。
+> 无头测试/基准/金图（`make test` / `make bench` / `make golden`）走 SDL 的 dummy 驱动，
+> 同样需要这套 SDL 开发包——但**默认的 `./build.sh` 不需要**。
 
 ## 三步写一个界面
 
@@ -58,7 +66,7 @@ fx_canvas_new(pixel("6,32","444,236"), anim(1), call(on_draw));
 - 改文字 `fx_set_title`；改矩形 `fx_widget_set_rect`；
 - 查控件 `fx_find("name")`；切换父 `fx_parent(...)`；
 - 读鼠标 `fx_touch_state`；读按键 `fx_last_key`；
-- 动态控件用 `fx_widget_fix` 固定坐标，数量上限由控件池决定（`FX_MAX_WIDGETS`：PC 默认 16384 / ESP32 默认 4096）。
+- 动态控件用 `fx_widget_fix` 固定坐标，数量上限由控件池决定（`FX_MAX_WIDGETS`：PC 默认 8192 / ESP32 默认 4096）。
 
 ## 全屏压测
 

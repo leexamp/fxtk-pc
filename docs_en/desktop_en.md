@@ -26,7 +26,7 @@ The top of the interface is a `tab` tab bar (the selected tab is **raised in 3D*
 - The title shows the **total widget count** in real time (`fxtk_widget_count()`).
 - When frame rate ≥30fps, one purple small button (9px font) is created per frame, positioned automatically in a 24×20 grid based on the actual canvas capacity.
 - New buttons **sinusoidally drift** like other widgets; the number of layout columns changes with window size.
-- At full-screen 1080P the canvas is roughly 1753×810 → can hold **2700+** dynamic buttons (widget pool: 16384 on PC).
+- At full-screen 1080P the canvas is roughly 1753×810 → can hold **2700+** dynamic buttons (widget pool: 8192 on PC).
 - Dynamic widgets use `fx_widget_fix()` to fix their coordinates, preventing `fx_layout()` from resetting them; pointers are cached in `s_dyn[]` to avoid `fx_find` each frame.
 
 ## Key interactions

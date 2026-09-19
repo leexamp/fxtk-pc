@@ -12,7 +12,16 @@ cd demo-main
 ./build_ex.sh ex03_anim   # any standalone example (ex01~ex18)
 ```
 
-Dependencies: `libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev` (`sudo apt install`).
+Dependencies (**the default backend is sokol — SDL2 is not required**):
+
+```bash
+sudo apt install libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev
+```
+
+> Only the legacy comparison build `./build.sh --sdl` needs
+> `libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev`. The headless targets
+> (`make test` / `make bench` / `make golden`) go through SDL's `dummy` driver and need that
+> SDL dev package too — but **the default `./build.sh` does not**.
 
 ## Build a UI in Three Steps
 
@@ -58,7 +67,7 @@ fx_canvas_new(pixel("6,32","444,236"), anim(1), call(on_draw));
 - Change text `fx_set_title`; change rect `fx_widget_set_rect`;
 - Find a widget `fx_find("name")`; switch parent `fx_parent(...)`;
 - Read touch `fx_touch_state`; read key `fx_last_key`;
-- For dynamic widgets, fix coordinates with `fx_widget_fix`; the count cap is set by the widget pool (`FX_MAX_WIDGETS`: 16384 on PC / 4096 on ESP32).
+- For dynamic widgets, fix coordinates with `fx_widget_fix`; the count cap is set by the widget pool (`FX_MAX_WIDGETS`: 8192 on PC / 4096 on ESP32).
 
 ## Fullscreen Stress Test
 

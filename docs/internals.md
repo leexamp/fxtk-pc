@@ -26,7 +26,14 @@
 - `lines`(字号) / `rows`(对齐) / `value` / `page`
 - 计算后矩形 `x1..y2`；父子/兄弟指针
 
-**控件池**：静态数组 `s_pool[FX_MAX_WIDGETS]`，`FX_MAX_WIDGETS`（**PC 默认 16384 ≈ 5MB BSS / ESP32 默认 4096 ≈ 1.3MB**）。`fxtk_alloc()` 线性找空槽，`fxtk_free()` 标记 `FX_W_NONE`。
+**控件池**：静态数组 `s_pool[FX_MAX_WIDGETS]`，`FX_MAX_WIDGETS`（**PC 默认 8192 ≈ 2.6MB BSS / ESP32 默认 4096 ≈ 1.3MB**；`sizeof(fx_widget_t)` = 328B）。`fxtk_alloc()` 线性找空槽，`fxtk_free()` 标记 `FX_W_NONE`。
+
+> **整个 `.bss` 的账**（PC / sokol 版实测 **14.77MB**，控件池只占其中约 2.6MB）：
+> 最大项是驱动的**顶点/索引缓冲** —— `drivers/fxtk_sokol_driver.c` 里
+> `s_vb[VB_MAX]`（`VB_MAX=262144` × 32B = **8MB**）与 `s_ib[IB_MAX]`（`IB_MAX=VB_MAX*2` × 4B = **2MB**），
+> 加上命令/纹理槽/事件队列等约 0.4MB。这是**虚拟保留**，`.bss` 按需分页：极简应用实测常驻仅 **7.3MB**、
+> 完整 12 页演示 **32.9MB**。注意 `VB_MAX`/`IB_MAX` 目前是**源内 define，不可用 `-D` 覆盖**。
+
 
 ## 布局与缩放
 
