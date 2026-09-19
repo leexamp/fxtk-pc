@@ -32,7 +32,12 @@ static ex_slot_t s_ex[FX_MAX_EXTRA_WIDGETS];
 #if FXTK_WIDGET_DROP
 static void ex_close_pop(ex_slot_t *o);   /* v2.3.1: 前向声明 (定义在下方 DROP 段, fx_list_clear 需要提前用) */
 #endif
-static ex_slot_t *ex_get(fx_widget_t *w){ for(int i=0;i<FX_MAX_EXTRA_WIDGETS;i++) if(s_ex[i].w==w) return &s_ex[i]; return 0; }
+static ex_slot_t *ex_get(fx_widget_t *w){
+    /* v2.4.4 修复(评审 A3): 原先把 NULL 也拿来比较, 会命中第一个【空槽】(s_ex[i].w==NULL),
+     * 于是 '属主已被删除' 的守卫永远不触发, 拿到的是别人的槽位。 */
+    if (!w) return 0;
+    for(int i=0;i<FX_MAX_EXTRA_WIDGETS;i++) if(s_ex[i].w==w) return &s_ex[i];
+    return 0; }
 static ex_slot_t *ex_new(fx_widget_t *w){ for(int i=0;i<FX_MAX_EXTRA_WIDGETS;i++) if(!s_ex[i].w){ memset(&s_ex[i],0,sizeof(ex_slot_t)); s_ex[i].w=w; s_ex[i].row_h=22; s_ex[i].sel=-1; return &s_ex[i]; } return 0; }
 static int ex_rh(ex_slot_t *s){ int rh=s->row_h*fxtk_ui_scale()/100;
 if (rh<12)rh=12;
@@ -139,7 +144,14 @@ static void ex_close_pop(ex_slot_t *o)
     fx_widget_t *p=o->pop;
     int x1,y1,x2,y2; fx_widget_rect(p,&x1,&y1,&x2,&y2);
     ex_slot_t *ps=ex_get(p);
-    if (ps)ps->owner=0;
+    if (ps) {
+        /* v2.4.4 修复(评审 A3, 已核实): 弹层槽里的 items[] 只是属主字符串的【别名指针】,
+         * 属主 fx_list_clear/free 之后它们就悬垂了, 而这里原先不清 n/items →
+         * 后续绘制会把悬垂的非 NULL 指针当有效条目读进 fx_draw_text_c(读到已释放内存)。
+         * 这里只清引用(不 free —— 字符串归属主所有)。 */
+        ps->owner = 0; ps->n = 0; ps->sel = -1;
+        memset(ps->items, 0, sizeof ps->items);
+    }
     o->pop=0;
     p->page=-1;                                   /* 离页: 不画不命中 */
     fx_widget_set_rect(p,-2000,-2000,-1900,-1900);/* 池化: 移屏外, 不销毁 */
