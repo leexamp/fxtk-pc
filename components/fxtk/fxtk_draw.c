@@ -281,11 +281,13 @@ static int gpu_clip_push(void)
 }
 static void gpu_clip_pop(int pushed)
 {
+    if (!s_drv) return;   /* v2.4.4: 与 flush_line 同款判空 —— 此前 fx_init 之前调用即库内 segfault */
     if (pushed && s_drv && s_drv->set_clip_rect) s_drv->set_clip_rect(0, 0, 32767, 32767);
 }
 
 void fxtk_put_px(int x, int y, uint32_t c)
 {
+    if (!s_drv) return;   /* v2.4.4: 与 flush_line 同款判空(此前裸解引用) */
     if (x < s_clip_x1 || x > s_clip_x2 || y < s_clip_y1 || y > s_clip_y2) return;
     x += s_ox; y += s_oy;
     if (s_offing && s_offbuf_active) {
@@ -524,6 +526,7 @@ void fx_draw_pixel(int x, int y)
 
 void fx_draw_hline(int x1, int x2, int y)
 {
+    if (!s_drv) return;   /* v2.4.4: 与 flush_line 同款判空(此前裸解引用) */
     if (x1 > x2) { int t = x1; x1 = x2; x2 = t; }
     if (x1 < s_clip_x1) x1 = s_clip_x1;
     if (x2 > s_clip_x2) x2 = s_clip_x2;
@@ -537,6 +540,7 @@ void fx_draw_hline(int x1, int x2, int y)
 
 void fx_draw_vline(int x, int y1, int y2)
 {
+    if (!s_drv) return;   /* v2.4.4: 与 flush_line 同款判空(此前裸解引用) */
     if (y1 > y2) { int t = y1; y1 = y2; y2 = t; }
     if (y1 < s_clip_y1) y1 = s_clip_y1;
     if (y2 > s_clip_y2) y2 = s_clip_y2;
@@ -651,6 +655,7 @@ void fx_draw_line(int x1, int y1, int x2, int y2)
 
 static void fx_draw_line_plain(int x1, int y1, int x2, int y2)
 {
+    if (!s_drv) return;   /* v2.4.4: 与 flush_line 同款判空(此前裸解引用) */
     if (s_aa && s_offing) { aa_line(x1, y1, x2, y2, s_color); return; }   /* v2.2 抗锯齿 */
     /* v2.4 档位 2: GPU 羽化线段(片元按到线心距离混合) —— 斜线不再有阶梯; 无钩子自动跳过 */
     if (!s_offing && !s_xf_active && s_widget_aa >= 2 && s_drv && s_drv->draw_line_aa) {
@@ -705,6 +710,7 @@ int fxtk_drv_width(void) { return s_drv->width; }
 int fxtk_drv_height(void) { return s_drv->height; }
 void fx_fill_rect(int x1, int y1, int x2, int y2)
 {
+    if (!s_drv) return;   /* v2.4.4: 与 flush_line 同款判空(此前裸解引用) */
     if (!fx_rect_sane(x1, y1, x2, y2)) return;   /* v2.4.2: 退化输入一律不画 ✓ */
     /* v2.4.2 定向取证: 手柄橙(0xffa000)的填充 —— 打印【钳制前】的原始坐标, 判断是调用方算错还是框架放大 */
 #if FXTK_DEBUG_LOG
@@ -810,6 +816,7 @@ void fx_fill_rect_gradient(int x1, int y1, int x2, int y2, fx_color_t c1, fx_col
 
 void fx_fill_rect_round(int x1, int y1, int x2, int y2, int r)
 {
+    if (!s_drv) return;   /* v2.4.4: 与 flush_line 同款判空(此前裸解引用) */
     if (!fx_rect_sane(x1, y1, x2, y2)) return;   /* v2.4.2: 退化输入一律不画 ✓ */
     /* v2.4.2: 完全落在裁剪区之外 → 直接返回。
      * 这一步必须在任何裁剪夹取/类型转换【之前】: 否则"矩形在裁剪区左侧"时 x2 会保持负值,
@@ -851,6 +858,7 @@ void fx_fill_rect_round(int x1, int y1, int x2, int y2, int r)
 
 void fx_draw_rect_round(int x1, int y1, int x2, int y2, int r)
 {
+    if (!s_drv) return;   /* v2.4.4: 与 flush_line 同款判空(此前裸解引用) */
     if (!fx_rect_sane(x1, y1, x2, y2)) return;   /* v2.4.2: 退化输入一律不画 ✓ */
     /* v2.4.2: 完全落在裁剪区之外 → 直接返回。
      * 这一步必须在任何裁剪夹取/类型转换【之前】: 否则"矩形在裁剪区左侧"时 x2 会保持负值,
@@ -903,6 +911,7 @@ void fx_draw_circle(int cx, int cy, int r)
 
 void fx_fill_circle(int cx, int cy, int r)
 {
+    if (!s_drv) return;   /* v2.4.4: 与 flush_line 同款判空(此前裸解引用) */
     if (r <= 0) return;
     if (s_aa && s_offing) { aa_fill_circle(cx, cy, r, s_color); return; }   /* v2.2 抗锯齿 */
     if (!s_offing && s_drv && s_drv->fill_tri) {   /* v2: 圆=GPU三角扇, 1次提交 */
@@ -979,6 +988,7 @@ void fx_draw_triangle(int x1, int y1, int x2, int y2, int x3, int y3)
 
 void fx_fill_polygon(const int16_t *pts, int n)
 {
+    if (!s_drv) return;   /* v2.4.4: 与 flush_line 同款判空(此前裸解引用) */
     if (n < 3) return;
     if (!s_offing && s_drv && s_drv->fill_tri) { for (int i=1;i+1<n;i++) fx_fill_triangle(pts[0],pts[1],pts[i*2],pts[i*2+1],pts[(i+1)*2],pts[(i+1)*2+1]); return; }
     int ymin = 32767, ymax = -32768;
@@ -1016,6 +1026,7 @@ void fx_fill_polygon(const int16_t *pts, int n)
 
 void fx_fill_triangle(int x1, int y1, int x2, int y2, int x3, int y3)
 {
+    if (!s_drv) return;   /* v2.4.4: 与 flush_line 同款判空(此前裸解引用) */
     if (!s_offing && s_drv && s_drv->fill_tri) {   /* v2: 三角GPU; v2.3.1 补上 clip */
         flush_line();
         int pushed = gpu_clip_push();
@@ -1066,6 +1077,7 @@ static uint32_t img_darken(uint32_t c)
 }
 void fx_draw_image_ex(fx_image_t *img, int x, int y, int dw, int dh, int dark)
 {
+    if (!s_drv) return;   /* v2.4.4: 与 flush_line 同款判空(此前裸解引用) */
     if (!img || !img->px || dw <= 0 || dh <= 0) return;
     if (s_xf_active) {   /* v2.4: 变换生效 → 走透视四边形 (旋转/缩放/斜切一次到位) */
         (void)dark;
@@ -1325,6 +1337,7 @@ static void quad_fallback(const fx_image_t *img, const float *xy8)
 
 void fx_draw_image_quad(const fx_image_t *img, const float *xy8)
 {
+    if (!s_drv) return;   /* v2.4.4: 与 flush_line 同款判空(此前裸解引用) */
     if (!img || !img->px || !xy8 || img->w <= 0 || img->h <= 0) return;
 
     /* 【v2.4.2 修复】退化/自交四边形的保护必须放在 GPU 分支【之前】。
