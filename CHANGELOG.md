@@ -45,6 +45,20 @@ v2.4.4 的审计条目写着「CI 结构性失败（已修）：canvas 渲染步
 原 `Cross-build an example` 步骤其实编的还是 demo，**一个 example 都没编**；
 且 `--autotrim` 被当成目标名 → 静默编出英文版。现如实命名并补上英文 demo 的交叉编译。
 
+### ★ Warnings 报告步骤引用的是旧路径（报告本身失效）
+
+`linux` job 的 `Warnings report` 编译时仍写 `fxtk_sdl_driver.c` / `main_linux.c`，
+而这两个文件在 v2.4.0 的「驱动独立」重构里已移到 `drivers/`。于是该步骤长期停在：
+
+```
+cc1: fatal error: fxtk_sdl_driver.c: No such file or directory
+cc1: fatal error: main_linux.c: No such file or directory
+```
+
+它自己会打印 "report would be meaningless" 然后 `exit 1` —— 一个号称「非阻塞」的告警报告
+变成了硬失败，而且**告警数统计从来没真正跑过**。现改用 `../drivers/` 前缀，
+实测退出码 0、统计到 72 条 advisory warning（注释里写的 baseline 69 已过时）。
+
 ### ★ 用户可见修复：`fx_set_title` 对文本框是空操作（计算器/时钟这类程序直接不能用）
 
 - **现象**：点按钮后输入框内容不变。计算器这类"按钮改显示"的程序看着完全没反应。
