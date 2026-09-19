@@ -167,6 +167,14 @@ int v = fx_get_value(w);
 
 **You never call `fx_repaint()`** — the setters repaint for you.
 
+**Text boxes specifically**: write with `fx_set_title(w, "text")`, read with
+`fx_textedit_text(w)`. There is no `fx_textedit_set_text`. Note `title(...)` at creation is
+only the *initial* text; after creation you change it with `fx_set_title`.
+
+> ⚠ **This only works on v2.4.5+.** Before that, `fx_set_title` wrote `w->title` while the
+> widget draws `w->text_buf`, so it was a **silent no-op on text boxes** — the symptom is
+> "the button works but the text field never changes". Reading (`fx_textedit_text`) always worked.
+
 ---
 
 ## 5. Never use these (they do NOT exist — this is where models hallucinate)
@@ -180,7 +188,8 @@ int v = fx_get_value(w);
 | `fx_textedit_set_readonly` | **only exists in v2.4.5+**; on older checkouts it fails to link. Guard with `#ifdef FXTK_HAVE_READONLY` (see `ref_app.c`) if you must support older trees |
 | `fxtk_font_height(n)` | declared in `fxtk.h` but **has no implementation** — linking it fails |
 | `fx_create_*`, `fx_add_widget`, `fx_widget_create` | not in this API |
-| `fx_set_text` | `fx_set_title` |
+| `fx_set_text` | `fx_set_title` (works on text boxes on v2.4.5+) |
+| `fx_textedit_set_text` | not in this API — use `fx_set_title` to write a text box |
 | `fx_draw_string` | `fx_draw_text` / `fx_draw_text_c` |
 | `SDL_*` / `sokol_*` in your app | the shell hides the backend; never include them |
 | calling `fx_repaint()` after every change | unnecessary; setters repaint |
