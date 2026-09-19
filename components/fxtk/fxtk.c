@@ -885,8 +885,15 @@ else if (s_repaint && s_dirty_n > 0) {
 uint16_t fx_width(void){return s_drv?s_drv->width:0;} uint16_t fx_height(void){return s_drv?s_drv->height:0;}
 void fx_set_autorepaint(int on){s_autorepaint=on;} void fx_set_touch_debug(int on){s_tdbg_on=on;}
 void fx_repaint(void){s_full=1;s_repaint=1;s_dirty_n=0;}
+/* ⚠️ v2.4.4 审计结论(第三方评审发现, 已核实): 本函数开头的 s_full=1 使下面的
+ * 矩形合并与"局部重绘"分支变成【死代码】—— 消费端 fxtk_frame() 里 `else if (s_full)`
+ * 排在脏区分支之前, 而本函数是全项目唯一往 s_dirty[] 写数据的地方, 于是永远走不到合并结果。
+ * 现状: 任何一次请求都退化为【整帧重绘】(所以不会残影, 但也没有任何脏区优化)。
+ * 这也是为什么当初加它是为了"杜绝残影": 局部路径历史上出过残影问题。
+ * 要真正启用脏区合并, 需要: ①去掉这里的 s_full=1 ②把合并结果交给 redraw_region 逐块重绘
+ * ③用连续多帧逐像素对比验证无残影(尤其滚动/悬停/光标闪烁/画布内控件移动)。 */
 void fx_repaint_rect(int x1,int y1,int x2,int y2)
-{ s_full=1;   /* 全量重绘, 杜绝残影 */
+{ s_full=1;   /* 见上方说明: 这一行让下面的合并逻辑当前不可达 */
     if (!s_drv) return;
     if (x1<0)x1=0;
     if (y1<0)y1=0;
