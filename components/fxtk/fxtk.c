@@ -750,7 +750,11 @@ if (s_ctx_open) { fx_reset_clip(); ctx_draw_abs(); } draw_debug_overlay(); fxtk_
 /* ================= 系统 API ================= */
 void fx_init(const fx_driver_t *drv)
 {
-    s_drv=drv; fxtk_draw_set_driver(drv);
+
+    /* v2.4.4 修复(评审 B8): 文档(docs/api.md, docs/guide.md 及英文版)一直教用户设 FXTK_AA=0|1|2,
+     * 但此前全仓库只有 demo-main/app.c 读它 —— 用户自己的应用照做无效。这里让框架自己读,
+     * 于是该开关对任何应用都成立(显式调用 fx_set_widget_aa 仍然优先, 因为在那之后执行)。 */
+    { const char *aa = getenv("FXTK_AA"); if (aa && aa[0]) fx_set_widget_aa(atoi(aa)); }    s_drv=drv; fxtk_draw_set_driver(drv);
     memset(&s_root,0,sizeof(s_root)); s_root.type=FX_W_PANEL; s_root.flags=FX_F_VISIBLE; s_root.bg=s_bg;
     memset(s_pool,0,sizeof(s_pool));
     fxtk_anim_reset();   /* v2.4.4: 四张动画槽表也清零, 避免地址复用后继承死控件状态 */

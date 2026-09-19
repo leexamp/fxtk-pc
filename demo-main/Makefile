@@ -102,7 +102,12 @@ sokol: fxtk_sim
 
 # ---- 渲染吞吐基准 (dummy 驱动, 无 vsync) ----
 #   SDL_VIDEODRIVER=dummy ./test/bench 1200 8 200
+# v2.4.4: 原先这里是 1200 帧 / 480x272 → 只跑到 84 个控件, 与 README 引用的口径不符
+# (README 写的是 1080P、2820 控件、102-130fps)。现在默认就跑那个口径; 想要快速冒烟用 bench-fast。
 bench: test/bench
+	SDL_VIDEODRIVER=dummy ./test/bench 4000 8 500 1920 1080
+
+bench-fast: test/bench
 	SDL_VIDEODRIVER=dummy ./test/bench 1200 8 200
 
 test/bench: test/bench.c $(CORE) $(HDRS) ../drivers/fxtk_sdl_driver.c app.c app_desktop.c raymarch.c gpu_raymarch.c
