@@ -79,6 +79,8 @@ static void te_backspace(fx_widget_t *w);
 static void te_move(fx_widget_t *w, int key);
 static void te_caret_from_xy(fx_widget_t *w, int x, int y);
 static void te_caret_scroll(fx_widget_t *w);
+static int te_chars_n(const char *s,int n);          /* v2.4.5: fx_set_title 改写文本框时要用 */
+static int te_grow(fx_widget_t *w,int need);         /* v2.4.5: 同上 */
 static int te_next_off(const char *s,int i);
 static void te_move_vert(fx_widget_t *w,int dir);
 static fx_widget_t *s_ctxpop,*s_ctx_te;
@@ -967,7 +969,37 @@ void fx_set_dark_theme(int dark)
 
 int fx_is_dark_theme(void) { return s_dark_theme; }
 fx_color_t fx_colorx_current(fx_colorx_t c) { return s_dark_theme ? c.dark : c.light; }
-void fx_set_title(fx_widget_t *w,const char *s){ if(!w)return; strncpy(w->title,s?s:"",sizeof(w->title)-1); w->title[sizeof(w->title)-1]=0; redraw_widget_now(w); }
+/* v2.4.5 修复: fx_set_title 此前【只写 w->title】, 而文本框绘制读的是
+ * fxtk_draw_textedit() 里的 `w->text_buf ? w->text_buf : w->title`。
+ * 创建文本框时 text_buf 必定被分配(见 fx_widget_new_impl), 于是 text_buf 永远优先 ——
+ * 对一个文本框调 fx_set_title 是【完全无效】的: 既不改显示, 也不改 fx_textedit_text(),
+ * 表现为"点按钮了但输入框内容不变"。同时公共 API 里只有 fx_textedit_text() 这个取值函数,
+ * 没有任何设值函数 ⇒ 应用无法用官方途径改写文本框内容(计算器/时钟此类程序直接卡死)。
+ * 现在对文本框把内容写进 text_buf(并同步 title 以便 fx_widget_title 仍返回真实内容),
+ * 非文本框保持原行为不变。 */
+void fx_set_title(fx_widget_t *w,const char *s)
+{
+    if(!w)return;
+    s = s ? s : "";
+    strncpy(w->title, s, sizeof(w->title)-1); w->title[sizeof(w->title)-1]=0;
+    if (w->type == FX_W_TEXTEDIT && w->text_buf) {
+        int ul = (int)strlen(s);
+        if (w->text_max > 0) {                     /* 与 te_insert 一致: 尊重字数上限(按字符, 不切断 UTF-8) */
+            if (te_chars_n(s, ul) > w->text_max) {
+                int i = 0, c = 0;
+                while (i < ul && c < w->text_max) { if (((unsigned char)s[i] & 0xC0) != 0x80) c++; i++; }
+                ul = i;
+            }
+        }
+        if (te_grow(w, ul + 1)) {                  /* OOM 时放弃本次改写, 不越界 */
+            memcpy(w->text_buf, s, (size_t)ul);
+            w->text_buf[ul] = 0;
+        }
+        w->caret = w->anchor = (int)strlen(w->text_buf);
+        te_caret_scroll(w);                        /* 内容变长时把光标滚进可视区 */
+    }
+    redraw_widget_now(w);
+}
 void fx_set_color_w(fx_widget_t *w,fx_color_t c){ if(!w)return; w->bg=c; redraw_widget_now(w); }
 void fx_set_value(fx_widget_t *w,int v){ if(!w)return;
 if (v<0)v=0;
@@ -1007,10 +1039,18 @@ static void te_caret_scroll(fx_widget_t *w){
     const char *txt=w->text_buf?w->text_buf:w->title;
     int len=(int)strlen(txt);
     int aw=(w->x2-w->x1+1)-12, lh=22;
+    /* v2.4.5 加固: 原循环在 acc+cw>aw 成立而 j>start 不成立(即"当前字符就超宽, 但
+     * 这一行还没放下任何字符")时会走 continue, 此时 i2 不动、line 不动 ⇒ 死循环。
+     * 只要 aw<=0 就必然触发: 例如驱动未初始化(fx_layout 见 s_drv 为空直接 return,
+     * 控件坐标停在 0 → aw = -11), 或控件被挤到退化尺寸。
+     * 现在: ①aw<=0 直接放弃滚动计算; ②每次迭代强制推进 i2, 保证循环一定终止。 */
+    if (aw <= 0 || len <= 0) return;
     int line=0, start=0, acc=0, i2=0;
     while(i2<len){
         if(txt[i2]=='\n'){ if(w->caret<=i2)break; line++; i2++; start=i2; acc=0; continue; }
         int j=te_next(txt,i2);
+        if (j <= i2) j = i2 + 1;                 /* 强制前进, 杜绝零推进 */
+        if (j > len) j = len;
         int cw=fx_text_width_n(txt+i2,j-i2);
         if (acc+cw>aw && j>start){ if(w->caret<=i2)break; line++; start=i2; acc=0; continue; }
         acc+=cw; i2=j;

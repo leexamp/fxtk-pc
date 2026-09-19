@@ -4,6 +4,30 @@
 
 > 本轮针对「对外表述」与「入门第一公里」的集中整改，全部改动可用 `make` + `make test` + `make golden` 复核。
 
+### ★ 用户可见修复：`fx_set_title` 对文本框是空操作（计算器/时钟这类程序直接不能用）
+
+- **现象**：点按钮后输入框内容不变。计算器这类"按钮改显示"的程序看着完全没反应。
+- **根因**：`fx_set_title()` 只写 `w->title`，而 `fxtk_draw_textedit()` 读的是
+  `w->text_buf ? w->text_buf : w->title`。文本框在创建时**必定**分配 `text_buf`
+  （见 `fx_widget_new_impl`），于是 `text_buf` 永远优先 ——
+  对文本框调 `fx_set_title` 既不改显示、也不改 `fx_textedit_text()`，**完全是空操作**。
+  与此同时公共 API 里只有取值函数 `fx_textedit_text()`，**没有任何设值函数** ⇒
+  应用无法用官方途径改写文本框内容，只能去改私有字段。
+- **修复**：`fx_set_title()` 对 `FX_W_TEXTEDIT` 改写 `text_buf`（并同步 `title`，使
+  `fx_widget_title()` 仍返回真实内容）；尊重 `text_max`（按字符截断、不切断 UTF-8），
+  走 `te_grow` 扩容且 OOM 时放弃改写，末尾把光标移到文本尾并调用 `te_caret_scroll()`。
+  非文本框行为逐字不变。
+- **回归测试**：`headless_test.c` 新增用例 `[17]`，覆盖改写生效、`fx_widget_title` 一致、
+  超长内容自动扩容（399 字符，跨过初始 128 容量）、清空、以及按钮行为不变。
+
+### 附带修复：`te_caret_scroll()` 的死循环隐患
+
+补上 `fx_set_title` 的调用后暴露：该函数的换行循环在 `acc+cw>aw` 成立而 `j>start` 不成立时
+会走 `continue`，此时 `i2` 与 `line` 都不推进 ⇒ **死循环**。只要 `aw <= 0` 就必然触发
+（例如驱动未初始化时 `fx_layout()` 见 `s_drv` 为空直接 return，控件坐标停在 0 使 `aw = -11`；
+控件被挤到退化尺寸同理）。现改为：`aw<=0` 直接放弃滚动计算，且每次迭代强制推进 `i2`，
+保证循环一定终止。
+
 - **★ 幽灵 API 真正补上实现**：`fx_textedit_set_readonly` 此前只有声明（见下方 v2.4.4 条目的订正），
   现在补上定义 —— 调用者不再 undefined reference。运行时行为已实测：
   `set(1)` 置 bit9、`set(0)` 清除、重复调用幂等、非 TEXTEDIT 类型与空指针安全返回。

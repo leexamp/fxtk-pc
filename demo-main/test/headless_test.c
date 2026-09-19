@@ -509,5 +509,47 @@ int main(void) {
         printf("  [info] 全程 push_pixels 累计像素 = %ld (离屏画布路径若跑到, 这里应 > 0)\n", s_push_total);
     }
 
+    {   /* ===== v2.4.5: fx_set_title 对文本框必须真的生效 =====
+         * 回归背景: fx_set_title 原先只写 w->title, 而 fxtk_draw_textedit() 读的是
+         * `w->text_buf ? w->text_buf : w->title` —— 文本框创建时 text_buf 必被分配,
+         * 于是 text_buf 永远优先, fx_set_title 对文本框是【完全无效】的:
+         * 显示不变、fx_textedit_text() 也不变。表现为"点按钮了但输入框内容没变化"
+         * (计算器/时钟这类靠按钮改显示的程序直接不能用)。这组断言把它钉住。 */
+        printf("[17] fx_set_title 对文本框 (v2.4.5 修复)\n");
+        fx_widget_t *te = fx_widget_new_impl(FX_W_TEXTEDIT,
+                             (fx_attr_t[]){ pixel("10,10","300,40"), name("te17"), title("0"), FX_ATTR_END });
+        if (!te) {
+            printf("  [FAIL] 文本框创建失败\n"); fails++;
+        } else {
+            fx_set_title(te, "123");
+            if (strcmp(fx_textedit_text(te), "123") == 0) printf("  [ok]   fx_set_title 改到了文本框内容\n");
+            else { printf("  [FAIL] 文本框内容为 \"%s\", 期望 \"123\"\n", fx_textedit_text(te)); fails++; }
+
+            if (strcmp(fx_widget_title(te), "123") == 0) printf("  [ok]   fx_widget_title 与内容一致\n");
+            else { printf("  [FAIL] fx_widget_title=\"%s\"\n", fx_widget_title(te)); fails++; }
+
+            /* 连续改写 + 超长扩容(初始容量 128) */
+            char *big = (char*)malloc(400);
+            if (big) {
+                memset(big, '7', 399); big[399] = 0;
+                fx_set_title(te, big);
+                if (strlen(fx_textedit_text(te)) == 399) printf("  [ok]   超长内容自动扩容 (399 字符)\n");
+                else { printf("  [FAIL] 扩容后长度=%zu, 期望 399\n", strlen(fx_textedit_text(te))); fails++; }
+                free(big);
+            }
+            fx_set_title(te, "");                                  /* 清空 */
+            if (fx_textedit_text(te) && fx_textedit_text(te)[0] == 0) printf("  [ok]   清空生效\n");
+            else { printf("  [FAIL] 清空失败\n"); fails++; }
+
+            /* 非文本框行为不变 */
+            fx_widget_t *bt = fx_button_new(pixel("10,50","100,80"), name("b17"), title("Go"));
+            fx_set_title(bt, "Stop");
+            if (strcmp(fx_widget_title(bt), "Stop") == 0) printf("  [ok]   按钮行为不变\n");
+            else { printf("  [FAIL] 按钮标题=\"%s\"\n", fx_widget_title(bt)); fails++; }
+
+            fx_delete(fx_wptr(te)); fx_delete(fx_wptr(bt));   /* fx_delete 收属性, 用 fx_wptr 包装指针 */
+        }
+    }
+
     printf("== done: %s (%d fail) ==\n", fails ? "FAIL" : "PASS", fails);    return fails ? 1 : 0;
 }
