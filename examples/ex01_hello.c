@@ -15,7 +15,7 @@ static void apply_theme(void)
         fx_set_color_w(ws[i], bg);   /* 先改控件 */
         fx_set_fgcolor(ws[i], fg);
     }
-    fx_set_bg(bg);   /* 最后改窗口: 全屏重绘压轴, 不被脏区降级 */
+    fx_set_bg(bg);   /* 最后改窗口: 触发全屏重绘 */
 }
 static void on_btn(fx_widget_t *w, void *ud) {
     s_n++;

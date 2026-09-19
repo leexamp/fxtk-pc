@@ -976,10 +976,21 @@ if (w->value!=(int16_t)v){ w->value=(int16_t)v; redraw_widget_now(w); } }
 int fx_get_value(const fx_widget_t *w){return w?w->value:0;}
 void fx_set_cb(fx_widget_t *w,fx_cb_t cb,void *ud){ if(!w)return; w->cb=cb; w->ud=ud; }
 void fx_set_visible(fx_widget_t *w,int vis){ if(!w)return;
-if (vis)w->flags|=FX_F_VISIBLE; else w->flags&=(uint8_t)~FX_F_VISIBLE; fx_layout(); fx_repaint(); }
+if (vis)w->flags|=FX_F_VISIBLE; else w->flags&=(uint16_t)~FX_F_VISIBLE; fx_layout(); fx_repaint(); }
 int fx_widget_type(const fx_widget_t *w){return w?w->type:FX_W_NONE;}
 const char *fx_widget_title(const fx_widget_t *w){return w?w->title:NULL;}
 const char *fx_textedit_text(fx_widget_t *w){ if(!w)return NULL; return w->text_buf ? w->text_buf : w->title; }
+/* v2.4.5: 补上声明已久的实现(此前只有 fxtk.h 声明 + docs 记载, 无定义 —— 调用者必然 undefined reference)。
+ * 只读由 fx_frame()/ctx_do() 里的 `flags & FX_F_READONLY` 判定, 覆盖输入/退格/删除/剪切/粘贴/清空。
+ * 注: flags 是 uint16_t, 故掩码用 (uint16_t) 而非周边旧代码的 (uint8_t) —— 后者会保留 bit9 无法清除。 */
+void fx_textedit_set_readonly(fx_widget_t *w,int ro){
+    if (!w || w->type != FX_W_TEXTEDIT) return;
+    uint16_t next = ro ? (uint16_t)(w->flags | FX_F_READONLY)
+                       : (uint16_t)(w->flags & (uint16_t)~FX_F_READONLY);
+    if (next == w->flags) return;
+    w->flags = next;
+    redraw_widget_now(w);
+}
 void fx_set_fgcolor_w(fx_widget_t *w, fx_color_t c){ if(!w)return; w->fg=c; redraw_widget_now(w); }
 void fx_widget_rect(const fx_widget_t *w,int *x1,int *y1,int *x2,int *y2){ if(!w)return;
 if (x1)*x1=w->x1;

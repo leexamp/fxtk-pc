@@ -1,8 +1,8 @@
 # fxtk — a tiny, delightful C GUI framework
 
 <p align="center">
-  <b>A single-frame, dirty-rect-redraw, attribute-macro-driven GUI for embedded & desktop</b><br>
-  <small>Pure C · zero allocations in the hot path · 480×272 responsive design · one header of API</small>
+  <b>A single 377 KB binary with zero third-party DLLs — one header, desktop (sokol/OpenGL) and ESP32 (pure CPU)</b><br>
+  <small>Pure C · attribute-macro-driven UI · 480×272 responsive design · one header of API</small>
 </p>
 
 <p>
@@ -14,6 +14,14 @@
 
 > **English edition.** The Chinese docs live in `README.md` / `docs/`; English sources use an `_en`
 > suffix (`docs_en/`, `demo-main/app_en.c`, ...) so both languages sit side by side.
+> **[→ 中文版 README](../README.md)**
+
+> Verify it yourself: `cd demo-main && make && ldd ./fxtk_sim` — system libs only, no `SDL2.dll`,
+> no `libwinpthread`.
+
+> Note: the framework contains dirty-rect merging code, but it is currently **bypassed by `s_full=1`
+> and therefore inactive** — every repaint request is promoted to a full-frame redraw (so there is no
+> ghosting, but also no dirty-rect optimisation). See the `fx_repaint_rect()` comment in `fxtk.c`.
 
 ![canvas demo](screenshot_aa.png)
 ![gradient](screenshot_gradient.png)
@@ -26,7 +34,7 @@
 - **Immediate-mode canvas + retained widgets** — draw anything pixel-by-pixel, or compose declarative controls.
 - **Responsive by default** — author on a 480×272 baseline; the whole UI scales to any window (with a
   sane 1.6× cap so it stays crisp).
-- **Cross-platform almost for free** — SDL on PC, `fx_driver_t` abstraction for bare-metal/ESP32.
+- **Cross-platform almost for free** — sokol (OpenGL) on PC, `fx_driver_t` abstraction for bare-metal/ESP32.
 - **Tiny footprint** — optional widget compilation (`-DFXTK_WIDGET_XXX=0`) plus `tools/autotrim.sh`
   drop unused code out (a hello-world example goes 100KB→88KB).
 - **Feature-dense but honest** — AA (scanline), gradient fill, offscreen buffers, GPU raymarching,
@@ -62,9 +70,13 @@ make test            # 9/9 headless assertions, no SDL/window/font
 make canvas_08_files # the cross-platform file-browser example
 ```
 
-Dependencies: **SDL2 / SDL2_ttf / SDL2_image, EGL / GLES2 / X11** (Linux). Windows cross via
-`build_win_cross.sh`; the PC simulator only needs SDL. CI (`.github/workflows/ci.yml`) builds + tests
-on Linux and cross-compiles for Windows.
+Dependencies (Linux, **default sokol backend — no SDL2 needed**):
+`libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev`. Only the legacy `make fxtk_sim_sdl`
+and the headless targets (`make test` / `make bench` / `make golden`, which use SDL's `dummy`
+video driver) need `libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev`. Windows is cross-compiled
+into a **single exe with no third-party DLLs** via `build_win_sokol.sh`.
+CI (`.github/workflows/ci.yml`) builds + tests on Linux, cross-builds for Windows, and
+smoke-checks the ESP32 path.
 
 ## Small binaries (v2.3)
 

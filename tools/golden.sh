@@ -41,7 +41,11 @@ for src in examples/canvas/canvas_*.c; do
   n=$((n+1))
   if [ "$UPDATE" = "1" ]; then cp "$TMP/$name.png" "$GOLD/$name.png"; echo "  ✏️  更新 $name.png"; continue; fi
   if [ ! -f "$GOLD/$name.png" ]; then echo "  ⚠ 缺参考图 $name.png (先跑 --update)"; fail=1; continue; fi
-  /tmp/imgdiff "$TMP/$name.png" "$GOLD/$name.png" "$TMP/${name}_diff.png" "$TOL" | sed "s/^/  $name:/" || fail=1
+  # 注意: 不能写成 `imgdiff ... | sed ... || fail=1` —— 管道的退出码是 sed 的(恒为 0),
+  # 会把 imgdiff 的失败吞掉, 于是"有差异"时仍打印 ✅ 通过并以 0 退出(v2.4.5 修复)。
+  # 这里先把输出写文件、单独取退出码, 再统一加前缀, 保证 fail 一定被置位。
+  /tmp/imgdiff "$TMP/$name.png" "$GOLD/$name.png" "$TMP/${name}_diff.png" "$TOL" >"$TMP/$name.diff.txt" 2>&1 || fail=1
+  sed "s/^/  $name:/" "$TMP/$name.diff.txt"
 done
 
 if [ "${GOLDEN_SKIP_DEMO:-0}" != "1" ]; then
@@ -53,7 +57,9 @@ if [ "${GOLDEN_SKIP_DEMO:-0}" != "1" ]; then
     n=$((n+1))
     if [ "$UPDATE" = "1" ]; then cp "$TMP/demo_p$p.png" "$GOLD/demo_p$p.png"; echo "  ✏️  更新 demo_p$p.png"; continue; fi
     if [ ! -f "$GOLD/demo_p$p.png" ]; then echo "  ⚠ 缺参考图 demo_p$p.png"; fail=1; continue; fi
-    /tmp/imgdiff "$TMP/demo_p$p.png" "$GOLD/demo_p$p.png" "$TMP/demo_p${p}_diff.png" "$TOL" | sed "s/^/  demo_p$p:/" || fail=1
+    # 同画布循环: 见上方注释 —— 管道会吞掉 imgdiff 的退出码。
+    /tmp/imgdiff "$TMP/demo_p$p.png" "$GOLD/demo_p$p.png" "$TMP/demo_p${p}_diff.png" "$TOL" >"$TMP/demo_p$p.diff.txt" 2>&1 || fail=1
+    sed "s/^/  demo_p$p:/" "$TMP/demo_p$p.diff.txt"
   done
 fi
 

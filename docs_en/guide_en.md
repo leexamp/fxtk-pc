@@ -596,7 +596,7 @@ if (fxtk_fps() >= 30 && n < cap) {
 ```
 
 - `fx_widget_fix(w, x, y)`: switch to **fixed-coordinate mode** (`FX_POS_FIXED`); subsequent `fx_layout()` (triggered by resize/new widget) will not reset it with ox/oy, and it records the movement reference point.
-- The widget pool size comes from `FX_MAX_WIDGETS`: **16384 on PC** (default) and **4096 on ESP32** — the two targets have diverged (see the README). `fxtk_widget_count()` returns the live count; `-DFX_MAX_WIDGETS=N` overrides.
+- The widget pool size comes from `FX_MAX_WIDGETS`: **8192 on PC** (default) and **4096 on ESP32** — the two targets have diverged (see the README). `fxtk_widget_count()` returns the live count; `-DFX_MAX_WIDGETS=N` overrides.
 - For dynamic widgets, cache pointers in an array to avoid a linear `fx_find` scan every frame.
 
 ### 10.3 Deleting Widgets
@@ -700,7 +700,7 @@ int w = fxtk_text_width_size(16, "Large font");   /* measure width */
 1. **Static content**: don't use `anim(1)`; when it changes, call `fx_repaint_rect` manually.
 2. **Animated content**: use an `anim(1)` canvas; avoid `fx_find` every frame inside it (cache pointers).
 3. **Many particles/primitives**: draw into a small offscreen image then scale it up with `fx_draw_image` (GPU blit), e.g. the particle page's 2x downscaled buffer.
-4. **Dynamically adding widgets**: bounded by `FX_MAX_WIDGETS` (16384 on PC); add only when the frame rate is comfortable (≥30fps).
+4. **Dynamically adding widgets**: bounded by `FX_MAX_WIDGETS` (8192 on PC); add only when the frame rate is comfortable (≥30fps).
 5. **Text**: identical text/color auto-runs the texture cache; avoid concatenating volatile strings that become keys.
 
 ---
@@ -884,7 +884,7 @@ const char *r = gpu_raymarch_renderer();       /* return the renderer name */
   they look degenerate; `./build_dbg.sh` (or `make fxtk_sim_dbg`) compiles the probes in and logs a
   self-test line at startup.
 - **The two targets have diverged**: PC is not constrained by ESP32 resource limits — the same source
-  builds with `FX_MAX_WIDGETS`/`FX_MAX_SCROLL_STATES`/`FX_MAX_EXTRA_WIDGETS` = 16384/64/64 on PC and
+  builds with `FX_MAX_WIDGETS`/`FX_MAX_SCROLL_STATES`/`FX_MAX_EXTRA_WIDGETS` = 8192/64/64 on PC and
   4096/8/8 on ESP32. Only API/syntax and rendered output are kept in sync.
 - Font scale now matches SDL_ttf (`stbtt_ScaleForMappingEmToPixels`), and the widget-layer SDF
   anti-aliasing is **on by default** (`FXTK_AA=0` disables; A/B cost measured at ~1.6%).

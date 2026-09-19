@@ -1,5 +1,43 @@
 # Changelog
 
+## v2.4.5（文档与可用性整改）
+
+> 本轮针对「对外表述」与「入门第一公里」的集中整改，全部改动可用 `make` + `make test` + `make golden` 复核。
+
+- **★ 幽灵 API 真正补上实现**：`fx_textedit_set_readonly` 此前只有声明（见下方 v2.4.4 条目的订正），
+  现在补上定义 —— 调用者不再 undefined reference。运行时行为已实测：
+  `set(1)` 置 bit9、`set(0)` 清除、重复调用幂等、非 TEXTEDIT 类型与空指针安全返回。
+- **★ 消除 `FX_F_READONLY` 宏重定义**：删除 `fxtk_internal.h` 里那份 `0x20` 定义（它与 `FX_F_NOANIM` 撞位，
+  又与公共头 `fxtk.h` 的 `(1<<9)` 冲突）。此前**每次编译喷 4 条 redefined warning**，现已为 0。
+- **掩码宽度修正**：`fx_set_visible` 的 `(uint8_t)~FX_F_VISIBLE` 改为 `(uint16_t)` —— `flags` 字段是
+  `uint16_t`，原写法在清除高位标志（如 bit9）时会失效。
+- **首屏换成可验证的事实**：README 中文版与 `docs_en/README_en.md` 的自述从
+  「单帧、脏区重绘」改为「377KB 单文件、零第三方动态库」，并给出可当场复核的命令
+  `make && ldd ./fxtk_sim`。同时把 Linux 体积从 372KB 更正为实测 **377KB**（385,912 B）。
+- **英文版终于被链接到**：`docs_en/README_en.md` 内容一直都在，但 GitHub 只渲染根目录 `README.md`，
+  英文受众看不到入口。现已在中文 README 顶部加醒目的英文版指引，并让英文版反向链回中文版。
+- **修正入门第一公里的依赖错误**：`docs/quickstart.md` 与 `docs_en/quickstart_en.md` 此前教用户
+  `apt install libsdl2-dev ...`，而**默认构建早已换成 sokol，需要的是 X11/GL**。现在改为
+  `libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev`，并说明只有 `--sdl` 与无头目标才需要 SDL2。
+- **`FX_MAX_WIDGETS` 文档全量对齐**：8192（PC）此前只在中文 `api.md`/`guide.md`/`desktop.md` 更新过，
+  中英其余 6 处仍是旧的 16384（英文版一条没改）。现已全部对齐。
+- **`.bss` 口径更正**：`docs/internals.md` 曾写「16384 ≈ 5MB BSS」。实测 PC/sokol 版 `.bss` 为
+  **14.77MB**，最大项是驱动的顶点/索引缓冲（`s_vb[VB_MAX]` 8MB + `s_ib[IB_MAX]` 2MB），控件池只占约 2.6MB。
+  中英 internals 均已补充完整账目，并说明 `.bss` 按需分页（极简应用常驻 7.3MB / 完整演示 32.9MB）。
+- **README 的 CI／金图矛盾消除**：此前 README 同时写着「金图不在 CI 里跑」和「CI 里跑的就是这个」，
+  且宣称「容差 0」。事实是 **CI 会跑**，但用 `GOLDEN_TOL=1` 并跳过演示页。现已统一为准确表述。
+- **★ 修复 `tools/golden.sh` 的静默通过缺陷**：两处比对写成
+  `imgdiff ... | sed "s/^/  x:/" || fail=1`，而**管道的退出码是 `sed` 的（恒为 0）**，
+  脚本又没开 `pipefail` —— 于是 `imgdiff` 报"有差异"（退出码 1）时 `fail` **不会被置位**，
+  脚本仍打印 `✅ 金图回归通过: N 张全部一致` 并以 **0 退出**。这是"门禁假绿"：
+  真正的不一致会被印在日志里，却不会让 CI 变红。现已改为先把输出落盘、单独取退出码。
+  修复后立即**暴露出一个既有问题**（见下条）。
+- **⚠️ 遗留待办：`test/golden/demo_p1.png` 与当前代码不一致（8.22% 像素差，最大通道差 255）**。
+  已在 v2.4.5 之前的 `HEAD`（8044d41）上复现，**与本次改动无关**（我的改动产出的 p1 与干净树逐像素相同）。
+  该页在 CI 中被 `GOLDEN_SKIP_DEMO=1` 跳过，所以从未被拦住。未在本次改动中刷新参考图 ——
+  **需要先判定这是"刻意改动"还是"渲染回归"**：若是前者用 `make golden-update` 刷新即可；
+  若是后者，这正是被上面那个静默通过缺陷盖住的问题。本地跑完整 `make golden` 现在会如实报 ❌。
+
 ## v2.4（开发中）
 
 > 路线图见 `docs/ROADMAP_v2.4.md`。目标：sokol 自裁剪后端（替代实验性 SDL2）+ GPU 全局抗锯齿
@@ -33,7 +71,11 @@
 - **★ 崩溃（已修）**：空下拉框点击 → SIGFPE。`fxtk_extra.c` 弹层高度计算量纲/顺序错误：`n==0` 时把上一行刚设的最小高度抹成 0
   → 负高度弹层 → `ex_draw_list` 里 `(ch-2)*(ch-2)/total` 除零。并给 `draw_canvas_only` 补上与正常路径一致的几何门槛
   （退化矩形此前只在这条路径上畅通，是崩溃能藏住的原因）。
-- **★ 幽灵 API（已修）**：`fx_textedit_set_readonly` 只有声明没有定义，调用者必然 undefined reference。已补实现 + `FX_F_READONLY`。
+- **★ 幽灵 API（v2.4.5 才真正修复）**：`fx_textedit_set_readonly` 只有声明没有定义，调用者必然 undefined reference。
+  **订正**：v2.4.4 此处曾记为「已修」，实际只补了 `fxtk_internal.h` 里一个 `FX_F_READONLY` 宏，
+  **实现一行都没加**，链接仍然失败——是一次未经验证的假修复。v2.4.5 补上真实实现，并删除那个重复宏定义
+  （它定义为 `0x20`，与 `FX_F_NOANIM` 撞位、又与公共头 `fxtk.h` 的 `(1<<9)` 不一致，导致每次编译喷重定义 warning）。
+  同时把 `fx_set_visible` 里 `(uint8_t)~FX_F_VISIBLE` 的掩码宽度改为 `(uint16_t)`（`flags` 是 `uint16_t`，原写法无法清除 bit9）。
 - **★ CI 结构性失败（已修）**：canvas 渲染步骤漏 `fxtk_backends.c`（v2.4.3 起 widgets 调用 `fx_time_ms`/`fx_log`）→ 链接必败；
   warnings 步骤缺 `working-directory: demo-main` → 路径必败。两条都是"红着的门禁"，已修。
 - **★ 二进制入库（已修）**：`your_app/` 的 exe 与 `.so` 曾被 tracked，而 `package_release.sh` 用 `git archive` 打「纯源码」包

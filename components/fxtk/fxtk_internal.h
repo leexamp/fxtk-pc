@@ -12,7 +12,8 @@
 /* v2.3.1: 允许 -DFX_MAX_WIDGETS=n 覆盖 (此前源内硬定义, 命令行 -D 会被它覆盖) */
 #ifndef FX_MAX_WIDGETS
 /* v2.4.3: 控件池上限。4096 是 ESP 视角的取值; 两端已分化 —— PC 上它是能被真实触发的上限
- * (演示压测页会顶满, 之后新控件直接创建失败)。PC 放宽到 16384(单控件约 320B ≈ 5MB 静态池, 在 .bss 里),
+ * (演示压测页会顶满, 之后新控件直接创建失败)。PC 取 8192(单控件 328B ≈ 2.6MB 静态池, 在 .bss 里;
+ * 注意 .bss 按需分页, 未触碰的页不计常驻内存 —— 极简应用实测常驻约 7.3MB, 见 docs/internals.md),
  * ESP32 保持 4096; 两端都可用 -DFX_MAX_WIDGETS=N 覆盖。 */
 #if !defined(FX_MAX_WIDGETS)
 #  if defined(ESP_PLATFORM)
@@ -27,8 +28,10 @@
 #define FX_F_PRESSED  0x02
 #define FX_F_ANIM     0x04
 #define FX_F_BUF      0x08
-#define FX_F_NOANIM   0x10
-#define FX_F_READONLY 0x20   /* v2.4.4: 只读文本编辑(此前只有判断、没有入口) */   /* v2.4.3: 该控件显式关闭动画(anim(0)), 优先于全局开关 */
+#define FX_F_NOANIM   0x10   /* v2.4.3: 该控件显式关闭动画(anim(0)), 优先于全局开关 */
+/* 0x20 空闲。特别注意: FX_F_READONLY 定义在公共头 fxtk.h ((1<<9)) —— 此处曾重复定义为 0x20,
+ * 既与 FX_F_NOANIM 撞位、又与公共头不一致(每次编译喷重定义 warning), v2.4.5 已删除该重复定义。
+ * 凡新增内部标志请从 0x20 起取, 并避开公共头已占用的 1<<7/1<<8/1<<9。 */
 
 #define FX_POS_PIXEL   0
 #define FX_POS_PERCENT 1
