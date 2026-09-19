@@ -4,6 +4,47 @@
 
 > 本轮针对「对外表述」与「入门第一公里」的集中整改，全部改动可用 `make` + `make test` + `make golden` 复核。
 
+### ★ CI 三个 job 全红的根因：`*.sh` 在 git 里没有可执行位
+
+用户报"无法 PR，CI 三个 job 全红"。逐条查下去，**三个失败里有两个是同一个根因**：
+
+- **`esp32-smoke` → exit 126**：CI 用 `./tools/esp32_smoke.sh` 直呼，而该文件在 git 里是
+  `100644`（无 `+x`），于是 `Permission denied`。**这个 job 从引入起就没绿过。**
+- **`windows-cross` → exit 126**：`build_win_sokol.sh` 第 35 行调用 `../tools/autotrim.sh`，
+  同样因为缺 `+x` 而 `权限不够`。`--autotrim` 一旦真正生效（见上一节修复），这个洞立刻暴露。
+- **`linux` → exit 1**：见下条，是另一个独立缺陷。
+
+**为什么本地一直跑得通**：开发机所在文件系统上这些文件恰好是 `755`，而 git 索引里是 `644`
+—— `git ls-files -s` 才能看出差别，`ls -la` 看不出来。这是个**只在干净检出/CI 上复现**的坑。
+
+修复：把仓库内全部 18 个 `*.sh` 在 git 索引里置为 `100755`。
+验证（在**全新 clone** 上跑 CI 原样命令）：
+
+| 命令 | 修复前 | 修复后 |
+|---|---|---|
+| `./tools/esp32_smoke.sh` | **126** | **0** ✅ |
+| `./tools/golden.sh`（GOLDEN_SKIP_DEMO=1 GOLDEN_TOL=1） | **126** | **0**（10 张全一致）✅ |
+| `bash ./build_win_sokol.sh --autotrim` | **126** | **0**（单 exe 442KB）✅ |
+
+### ★ CI canvas 渲染步骤缺 `fxtk_backends.c`（CHANGELOG 曾谎称已修）
+
+`linux` job 的 `Headless-render canvas examples` 步骤编译时漏了 `fxtk_backends.c`，
+而 v2.4.3 起 `fxtk_widgets.c` / `fxtk_draw.c` 会调用 `fx_log` / `fx_time_ms`，于是：
+
+```
+fxtk_widgets.c:(.text+0x1673): undefined reference to `fx_log'
+fxtk_widgets.c:(.text+0x1854): undefined reference to `fx_time_ms'
+```
+
+v2.4.4 的审计条目写着「CI 结构性失败（已修）：canvas 渲染步骤漏 `fxtk_backends.c`」——
+**但那行一直没补**，与「幽灵 API」是同一类"记成已修、实际没动"的问题。
+现补上，并在全新 clone 上跑通全部 7 个画布示例 × 2 种分辨率。
+
+### 附带：CI 步骤名与行为不符
+
+原 `Cross-build an example` 步骤其实编的还是 demo，**一个 example 都没编**；
+且 `--autotrim` 被当成目标名 → 静默编出英文版。现如实命名并补上英文 demo 的交叉编译。
+
 ### ★ 用户可见修复：`fx_set_title` 对文本框是空操作（计算器/时钟这类程序直接不能用）
 
 - **现象**：点按钮后输入框内容不变。计算器这类"按钮改显示"的程序看着完全没反应。
