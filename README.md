@@ -33,7 +33,10 @@
 - **不想再打包几十 MB 的运行库**：Windows 版是一个 exe 出门（`objdump` 里只有系统 DLL，没有 `SDL2.dll`、没有 `libwinpthread`）。
 - **拷过去就能跑**：图片解码（PNG/JPEG/BMP/GIF/TGA/PNM）、PNG 截图、剪贴板、文件对话框、随机数、时间、偏好持久化全在框架内，无外部依赖。
 - **两端一套 API**：PC 默认接 sokol(OpenGL)，ESP32 走纯 CPU；两端只保证"语法一致 + 渲染效果一致"，PC 端不迁就嵌入式资源约束。
-- **自带验证体系**：`make test`（真假后端各跑一遍）、`make golden`（金图逐像素回归）、`make esp32-smoke`（无需 ESP-IDF）、`make bench`。
+- **自带验证体系**：`make test`（同一套断言在**真实 OS 服务**与 **stub 确定性后端**各跑一遍）、
+  `make golden`（金图逐像素回归）、`make esp32-smoke`（假 IDF 头做语法级检查）、`make bench`。
+  **如实说明覆盖边界**：`make test` 用的是无头假驱动，它**不渲染像素**（`push_pixels` 是空实现），
+  因此单元测试验的是逻辑与几何计数，**像素级正确性靠 `make golden` 的金图**；而金图目前**不在 CI 里跑**。
 - **能改得动**：所有控件的颜色/圆角/留白集中在 `fxtk_tokens.h`，换风格只改一个文件。
 
 ## v2.4 新增
@@ -49,7 +52,7 @@
 - **后端服务层** `fxtk_backends.h`:随机(PCG32 可复现)/时间/路径/文件/图片解码(PNG·JPEG·BMP·GIF·TGA·PNM)/
   PNG 编码/剪贴板/文件对话框/偏好/能力协商;`-DFXTK_BACKEND_STUB` 提供确定性变体。
 - **canvas 变换栈** `fx_canvas_push_affine/pop_affine` + `fx_fill_quad`:push 后矩形填充变实心四边形、图片走透视。
-- **验证体系**:`make test`(双后端)/ `make golden`(金图, 进 CI)/ `make esp32-smoke`(进 CI)/ `make bench`;
+- **验证体系**:`make test`(真实/stub 两种 OS 服务后端, 无头假驱动、不含像素断言)/ `make golden`(金图逐像素; **注意目前不在 CI 里**)/ `make esp32-smoke`(语法级)/ `make bench`;
   截图 `fx_screenshot()` 走驱动的 `read_pixels`, 零外部依赖。
 - 注意:控件层 SDF 抗锯齿**默认开启**(`s_widget_aa = 1`);要对比或排查观感用 `fx_set_widget_aa(0/1/2)`
   —— 它在"画布 + 文字 + quadwarp 混排"场景下有一个已知缺陷正在修(详见 CHANGELOG v2.4.1)。

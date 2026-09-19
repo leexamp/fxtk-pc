@@ -1,4 +1,14 @@
-/**
+/* v2.4.4 覆盖边界(如实标注, 评审 B7) —— 请勿把本文件当成"像素级已验证":
+ *   · 本文件用【无头假驱动】直接驱动核心库, 不初始化窗口/字体;
+ *   · 假驱动的 push_pixels 是空实现 → 【没有任何像素断言】, 验的是逻辑、计数与几何(如 s_fill_px 面积);
+ *   · 像素级正确性由 test/golden 的金图(容差 0)负责 —— 但金图目前不在 CI 里跑;
+ *   · 未覆盖: 除少数几个之外的绘图图元、全部图像绘制/变换(含 fx_draw_image_quad/rot)、
+ *     list/drop、滚动、textedit 的多数路径、焦点管理、fx_poll、fx_set_aa/fx_set_widget_aa 的实际输出。
+ * 补齐计划(下一步):
+ *   ① 让假驱动把 push_pixels 真正写进一块内存帧缓冲(它已经能收到像素与数量);
+ *   ② 用 fx_screenshot 或直接读该缓冲做逐像素断言: 填充矩形中心色、圆角切角处、线宽、quad warp 四角;
+ *   ③ 把 golden 纳入 CI(需要一条无头 GL/软件渲染路径)。
+ *//**
  * headless_test.c — 无窗口单元测试
  *
  * 用假驱动的 fx_driver_t 直接驱动核心库, 不初始化 SDL/窗口/字体:
@@ -14,7 +24,8 @@
  *       test/headless_test.c -o test/headless_test -lm
  *   ./test/headless_test
  * 另有一份 -DFXTK_BACKEND_STUB 变体 (make test 会一并运行)。
- */
+ 
+*/
 #include "fxtk.h"
 #include "fxtk_desktop.h"
 #include "fxtk_image.h"
