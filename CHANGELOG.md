@@ -37,6 +37,19 @@
   该页在 CI 中被 `GOLDEN_SKIP_DEMO=1` 跳过，所以从未被拦住。未在本次改动中刷新参考图 ——
   **需要先判定这是"刻意改动"还是"渲染回归"**：若是前者用 `make golden-update` 刷新即可；
   若是后者，这正是被上面那个静默通过缺陷盖住的问题。本地跑完整 `make golden` 现在会如实报 ❌。
+- **★ CI 三个 job 全红的根因：`*.sh` 在 git 里没有可执行位** —— 仓库内全部 18 个 `*.sh`
+  在 git 索引里是 `100644`。CI 用 `./tools/esp32_smoke.sh` / `./tools/golden.sh` 直呼 →
+  `Permission denied`（**exit 126**）；`build_win_sokol.sh` 调 `../tools/autotrim.sh` 同理。
+  **本地复现不出来**：开发机文件系统上这些文件恰好是 755，只有 `git ls-files -s` 看得出差别。
+  现全部置为 `100755`（纯 mode 变更）。修复后 `esp32-smoke` 与 `windows-cross` 转绿。
+- **★ canvas 渲染步骤缺 `fxtk_backends.c`**（v2.4.4 曾声称已修，实际那行一直没补）：
+  v2.4.3 起 widgets 会调用 `fx_log`/`fx_time_ms`，缺它必然
+  `undefined reference to fx_log`。现补上，7 个画布示例 × 2 分辨率在全新 clone 上全过。
+- **★ Warnings 报告步骤引用旧路径**：仍写 `fxtk_sdl_driver.c` / `main_linux.c`，而这两个文件
+  v2.4.0 已移到 `drivers/`，于是长期停在 `cc1: fatal error: No such file or directory`，
+  自己打印 "report would be meaningless" 后 `exit 1` —— 一个"非阻塞"报告成了硬失败，
+  **告警数统计从未真正跑过**。现改用 `../drivers/` 前缀，实测退出码 0、72 条 advisory。
+- **附带修正步骤名**：原 `Cross-build an example` 其实编的还是 demo，一个 example 都没编。
 
 ## v2.4（开发中）
 
