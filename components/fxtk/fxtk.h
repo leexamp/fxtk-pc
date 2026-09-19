@@ -5,7 +5,7 @@
 #define FXTK_H
 
 /* 框架版本 (发布标记) */
-#define FXTK_VERSION "2.4"   /* 窗口标题/文档统一取此值, 避免各处手写版本号漂移 */
+#define FXTK_VERSION "2.4.4"   /* 窗口标题/文档统一取此值, 避免各处手写版本号漂移 */
 
 #include <stdint.h>
 #include <stddef.h>

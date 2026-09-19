@@ -44,6 +44,7 @@ jobs:
           echo "headless canvas render OK"
 
       - name: Warnings report (non-blocking)
+        working-directory: demo-main
         run: |
           set +e
           gcc -O2 -Wall -Wextra -o /dev/null -I. -I../components/fxtk \
@@ -85,10 +86,10 @@ jobs:
         run: bash ./setup_win_cross.sh
 
       - name: Cross-build demo (uses vendored third_party/SDL2-win)
-        run: cd demo-main && bash ./build_win_cross.sh app
+        run: cd demo-main && bash ./build_win_sokol.sh   # v2.4.4: 改验【真正发布】的单 exe 路径(原先验的是被废弃的 SDL 交叉路径, 产物还要带 3 个 SDL DLL)
 
       - name: Cross-build an example
-        run: cd demo-main && bash ./build_win_cross.sh ex05_scroll
+        run: cd demo-main && bash ./build_win_sokol.sh --autotrim   # 顺带验控件裁剪开关在 Windows 路径也成立
 
   # v2.4: ESP32 侧接口级编译冒烟 (不需要 ESP-IDF 工具链; 抓隐式声明等"侥幸编过"的问题)
   esp32-smoke:

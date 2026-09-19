@@ -567,3 +567,16 @@ fx_fill_rect(rw2 - 3, ty, rw2, ty + th);
 }
 
 #endif
+
+/* v2.4.4 修复(评审 A5): 四张动画槽表(s_ta_/s_bt_/s_pa_)按裸指针匹配却从不清理 ——
+ * fx_init 只 memset 控件池, 这些指针留着 → 地址复用后新控件继承死控件的动画状态
+ * (新按钮继承别人的按下渐变、新标签页继承别人的换页进度)。这里给统一复位入口。 */
+void fxtk_anim_reset(void)
+{
+    memset(s_ta_w, 0, sizeof s_ta_w); memset(s_ta_t0, 0, sizeof s_ta_t0); memset(s_ta_sel, 0, sizeof s_ta_sel);
+    memset(s_bt_w, 0, sizeof s_bt_w); memset(s_bt_v, 0, sizeof s_bt_v);
+    memset(s_bt_t0, 0, sizeof s_bt_t0); memset(s_bt_goal, 0, sizeof s_bt_goal);
+    memset(s_pa_w, 0, sizeof s_pa_w); memset(s_pa_from, 0, sizeof s_pa_from);
+    memset(s_pa_disp, 0, sizeof s_pa_disp); memset(s_pa_to, 0, sizeof s_pa_to);
+    memset(s_pa_t0, 0, sizeof s_pa_t0); memset(s_pa_init, 0, sizeof s_pa_init);
+}

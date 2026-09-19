@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>   /* v2.4.4: SIGPIPE/sigaction(剪贴板写入保护) */
 #include <stdarg.h>
 #include <time.h>
 
@@ -528,10 +529,19 @@ static void png_sink_write(void *ctx, void *data, int size)
 int fx_img_save_png(const char *path, const unsigned char *px, int w, int h, int channels)
 {
     if (!path || !px || w <= 0 || h <= 0 || (channels != 3 && channels != 4)) return 0;
-    if (!fx_file_write(path, "", 0, 0)) return 0;      /* 清空/创建目标 */
-    png_sink_t sink; sink.path = path; sink.failed = 0;
-    int ok = stbi_write_png_to_func(png_sink_write, &sink, w, h, channels, px, w * channels);
-    return ok && !sink.failed;
+    /* v2.4.4 修复(评审 A8): 原先【先清空目标文件再编码】—— 编码失败时旧文件已被毁,
+     * 用户会得到 0 字节 PNG。改为先编码到内存, 成功后再一次性写文件
+     * (仍走 fx_file_write, 保持 stub 内存 FS 与真实 FS 行为一致; 失败时目标文件原样未动)。 */
+    {
+        extern unsigned char *stbi_write_png_to_mem(const unsigned char *px, int stride,
+                                                   int x, int y, int n, int *out_len);
+        int len = 0;
+        unsigned char *mem = stbi_write_png_to_mem(px, w * channels, w, h, channels, &len);
+        if (!mem || len <= 0) { if (mem) free(mem); return 0; }
+        int okw = fx_file_write(path, mem, len, 0);
+        free(mem);
+        return okw ? 1 : 0;
+    }
 }
 
 /* ================= 剪贴板 ================= */
@@ -613,7 +623,14 @@ int fx_clip_set(const char *text)
     snprintf(full, sizeof(full), "%s 2>/dev/null", cmd);
     FILE *p = popen(full, "w");
     if (!p) return 0;
+    /* v2.4.4 修复(评审 A7): 工具(xclip/wl-copy)提前退出时, 向管道写入会触发 SIGPIPE,
+     * 默认动作是【直接杀掉整个 GUI 进程】。这里在写入期间临时忽略 SIGPIPE 并复原 ——
+     * 不改宿主的全局信号处置(库不该悄悄改它), 同时仍如实返回 pclose 的结果。 */
+    struct sigaction old_sa, ign_sa;
+    int have_sa = (sigaction(SIGPIPE, NULL, &old_sa) == 0);
+    if (have_sa) { memset(&ign_sa, 0, sizeof ign_sa); ign_sa.sa_handler = SIG_IGN; sigaction(SIGPIPE, &ign_sa, NULL); }
     fwrite(text, 1, strlen(text), p);
+    if (have_sa) sigaction(SIGPIPE, &old_sa, NULL);
     return pclose(p) == 0;
 }
 
@@ -902,15 +919,22 @@ int fx_reveal_file(const char *path) { (void)path; return 0; }
 #include <sys/wait.h>
 static int fx_spawn(const char *prog, const char *arg1, const char *arg2)
 {
+    /* v2.4.4 修复(评审 A7): 原先 fork 之后从不 waitpid → 每次 fx_open_url/fx_reveal_file
+     * 都留一个僵尸进程。改用【双 fork】: 中间子进程立刻 exit 并由父进程 wait 掉,
+     * 真正的孙进程被 init 收养 —— 从根上不产生僵尸, 也不需要动宿主的 SIGCHLD 处置。 */
     pid_t p = fork();
     if (p < 0) return 0;
-    if (p == 0) {                                  /* 子进程：尽力而为，失败不污染父进程 */
+    if (p == 0) {                                  /* 中间子进程 */
+        pid_t p2 = fork();
+        if (p2 < 0) _exit(127);
+        if (p2 > 0) _exit(0);                      /* 立刻退出, 由父进程回收 */
         setsid();
         if (arg2) execlp(prog, prog, arg1, arg2, (char *)0);
         else      execlp(prog, prog, arg1, (char *)0);
         _exit(127);
     }
-    return 1;                                      /* 不等结果：打开浏览器是"发射后不管" */
+    { int st; waitpid(p, &st, 0); }                /* 回收中间进程: 不留僵尸 */
+    return 1;                                      /* 不等孙进程: 打开浏览器是"发射后不管" */
 }
 int fx_open_url(const char *url)
 {

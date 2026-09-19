@@ -13808,9 +13808,12 @@ _SOKOL_PRIVATE void _sapp_x11_on_keypress(XEvent* event) {
         extern char *setlocale(int, const char *);
         extern char *XSetLocaleModifiers(const char *);
         setlocale(6 /*LC_ALL*/, "");
-        XSetLocaleModifiers("@im=fcitx");
+        /* v2.4.4(D6): 原先无条件写 "@im=fcitx" —— 会【覆盖用户的 XMODIFIERS】, 把 ibus/其他输入法模块钉死。
+         * 现在: 用户设了 XMODIFIERS 就传空串(让 XIM 按环境变量选模块), 没设才退回 fcitx 这个常见默认值。 */
+        { extern char *getenv(const char *); const char *xim = getenv("XMODIFIERS");
+          XSetLocaleModifiers((xim && xim[0]) ? "" : "@im=fcitx"); }
         _sapp_xim = XOpenIM((Display*)sapp_x11_get_display(), NULL, NULL, NULL);
-        fprintf(stderr, "[sokol][xim] XOpenIM=%s\n", _sapp_xim ? "ok" : "FAIL");
+        if (getenv("FXTK_IMEDBG")) fprintf(stderr, "[sokol][xim] XOpenIM=%s\n", _sapp_xim ? "ok" : "FAIL");
         if (_sapp_xim) {
             /* 用 XIMPreeditPosition 而不是 PreeditNothing: 后者输入法只能自己猜位置(候选窗乱放),
              * 前者配合 XNSpotLocation 就能把候选窗精确贴到我们上报的光标处(本项目本地修改)。 */
@@ -13831,8 +13834,8 @@ _SOKOL_PRIVATE void _sapp_x11_on_keypress(XEvent* event) {
                                       XNClientWindow, (Window)sapp_x11_get_window(),
                                       XNFocusWindow, (Window)sapp_x11_get_window(), NULL);
             }
-            if (_sapp_xic) { XSetICFocus(_sapp_xic); fprintf(stderr, "[sokol][xim] XIC=ok\n"); }
-            else fprintf(stderr, "[sokol][xim] XIC=FAIL\n");
+            if (_sapp_xic) { XSetICFocus(_sapp_xic); if (getenv("FXTK_IMEDBG")) fprintf(stderr, "[sokol][xim] XIC=ok\n"); }
+            else if (getenv("FXTK_IMEDBG")) fprintf(stderr, "[sokol][xim] XIC=FAIL\n");
         }
     }
     if (_sapp_xic) {

@@ -996,37 +996,24 @@ static int clip_tool(void)
     }
     return s_clip_tool;
 }
+/* v2.4.4 修复(第三方评审 B4, 已核实): 剪贴板委托给后端服务层。
+ * 原先这里只有 xsel/xclip/wl-copy —— 全是 X11 工具, Windows 上必然失败(且无 _WIN32 分支),
+ * 于是 Windows 单 exe 的系统剪贴板不可用, 而 fxtk_backends.c 里写好的
+ * OpenClipboard + CF_UNICODETEXT 反倒成了【零调用者的死代码】。
+ * 现在统一走 fx_clip_set/fx_clip_get: POSIX 仍是 xsel/xclip/wl-copy(带进程内兜底),
+ * Windows 走真正的系统剪贴板。s_clip 保留为兜底副本。 */
 static void drv_clip_set(const char *s)
 {
+    extern int fx_clip_set(const char *text);
     if (!s) s = "";
-    snprintf(s_clip, sizeof(s_clip), "%s", s);
-    const char *cmd = NULL;
-    switch (clip_tool()) {
-    case 1: cmd = "xsel --clipboard --input 2>/dev/null"; break;
-    case 2: cmd = "xclip -selection clipboard 2>/dev/null"; break;
-    case 3: cmd = "wl-copy 2>/dev/null"; break;
-    default: return;                    /* 无工具: 只用进程内缓冲 */
-    }
-    FILE *p = popen(cmd, "w");
-    if (p) { fputs(s_clip, p); pclose(p); }
+    snprintf(s_clip, sizeof(s_clip), "%s", s);          /* 进程内副本: 后端不可用时仍能自洽 */
+    fx_clip_set(s_clip);                                 /* 交给后端(Windows=系统剪贴板) */
 }
 static const char *drv_clip_get(void)
 {
-    const char *cmd = NULL;
-    switch (clip_tool()) {
-    case 1: cmd = "xsel --clipboard --output 2>/dev/null"; break;
-    case 2: cmd = "xclip -selection clipboard -o 2>/dev/null"; break;
-    case 3: cmd = "wl-paste --no-newline 2>/dev/null"; break;
-    default: return s_clip;             /* 无工具: 返回上次 set 的内容 */
-    }
-    FILE *p = popen(cmd, "r");
-    if (p) {
-        size_t n = fread(s_clip, 1, sizeof(s_clip) - 1, p);
-        pclose(p);
-        s_clip[n] = 0;
-        while (n && (s_clip[n-1] == '\n' || s_clip[n-1] == '\r')) s_clip[--n] = 0;
-    }
-    return s_clip;
+    extern int fx_clip_get(char *buf, int cap);
+    if (fx_clip_get(s_clip, (int)sizeof(s_clip)) > 0) return s_clip;   /* 后端可用: 用系统剪贴板 */
+    return s_clip;                                       /* 后端不可用: 退回上次 set 的内容 */
 }
 /* v2.4 P4: 旋转贴图 —— 之前是空实现, 于是图形页那两张旋转图片在 sokol 后端整块消失
  * (与 SDL 版一眼可见的差别)。现在直接用 P4 的 GPU 真透视四边形: 旋转是仿射特例(权重恒 1),
@@ -1306,7 +1293,8 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
                 fprintf(stderr,
                     "[stat] %dx%d fps=%d 控件=%d | 顶点=%d 命令=%d 纹理槽=%d 文本纹理=%d/淘汰%d | "
                     "排队 max=%.1fms avg=%.2fms(%d) 合并=%ld 深度max=%d | 整帧 max=%.1fms avg=%.2fms | "
-                    "像素 max=%.1fms 面积=%.0fpx/帧 次数=%.1f/帧 | 提交 max=%.1fms avg=%.2fms | 图片/帧 max=%d 溢出=%d\n",
+                    "像素 max=%.1fms 面积=%.0fpx/帧 次数=%.1f/帧 | 提交 max=%.1fms avg=%.2fms | 图片/帧 max=%d 溢出=%d | "
+                    "SDF max=%d 抗锯齿档=%d\n",
                     s_w, s_h, s_fps, fxtk_widget_count(), s_vb_n, s_cmd_n, s_tex_n,
                     fxtk_text_created, fxtk_text_evicted,
                     s_lat_us_max / 1000.0, s_lat_n ? s_lat_us_sum / 1000.0 / s_lat_n : 0.0, s_lat_n, s_merge_n, s_depth_max,

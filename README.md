@@ -33,7 +33,11 @@
 - **不想再打包几十 MB 的运行库**：Windows 版是一个 exe 出门（`objdump` 里只有系统 DLL，没有 `SDL2.dll`、没有 `libwinpthread`）。
 - **拷过去就能跑**：图片解码（PNG/JPEG/BMP/GIF/TGA/PNM）、PNG 截图、剪贴板、文件对话框、随机数、时间、偏好持久化全在框架内，无外部依赖。
 - **两端一套 API**：PC 默认接 sokol(OpenGL)，ESP32 走纯 CPU；两端只保证"语法一致 + 渲染效果一致"，PC 端不迁就嵌入式资源约束。
-- **自带验证体系**：`make test`（真假后端各跑一遍）、`make golden`（金图逐像素回归）、`make esp32-smoke`（无需 ESP-IDF）、`make bench`。
+- **自带验证体系**：`make test`（同一套断言在**真实 OS 服务**与 **stub 确定性后端**各跑一遍）、
+  `make golden`（金图逐像素回归）、`make esp32-smoke`（假 IDF 头做语法级检查）、`make bench`。
+  **如实说明覆盖边界**：`make test` 用的是无头假驱动，它**不渲染帧缓冲**（`push_pixels` 只累计像素数），
+  但 v2.4.4 起已补上**颜色/几何契约断言**（验证"框架让驱动画了什么"）与离屏画布推送计数；
+  **逐像素正确性仍靠 `make golden` 的金图**，而金图目前**不在 CI 里跑**。
 - **能改得动**：所有控件的颜色/圆角/留白集中在 `fxtk_tokens.h`，换风格只改一个文件。
 
 ## v2.4 新增
@@ -49,9 +53,9 @@
 - **后端服务层** `fxtk_backends.h`:随机(PCG32 可复现)/时间/路径/文件/图片解码(PNG·JPEG·BMP·GIF·TGA·PNM)/
   PNG 编码/剪贴板/文件对话框/偏好/能力协商;`-DFXTK_BACKEND_STUB` 提供确定性变体。
 - **canvas 变换栈** `fx_canvas_push_affine/pop_affine` + `fx_fill_quad`:push 后矩形填充变实心四边形、图片走透视。
-- **验证体系**:`make test`(双后端)/ `make golden`(金图, 进 CI)/ `make esp32-smoke`(进 CI)/ `make bench`;
+- **验证体系**:`make test`(真实/stub 两种 OS 服务后端, 无头假驱动、不含像素断言)/ `make golden`(金图逐像素; **注意目前不在 CI 里**)/ `make esp32-smoke`(语法级)/ `make bench`;
   截图 `fx_screenshot()` 走驱动的 `read_pixels`, 零外部依赖。
-- 注意:控件层 SDF 抗锯齿目前**默认关闭**(`s_widget_aa = 0`), 可用 `fx_set_widget_aa(1)` 或 `FXTK_AA=1` 开启
+- 注意:控件层 SDF 抗锯齿**默认开启**(`s_widget_aa = 1`);要对比或排查观感用 `fx_set_widget_aa(0/1/2)`
   —— 它在"画布 + 文字 + quadwarp 混排"场景下有一个已知缺陷正在修(详见 CHANGELOG v2.4.1)。
 
 ## 已知限制
@@ -60,9 +64,10 @@
   XIM 支持(惰性 `XOpenIM`/`XCreateIC` + `setlocale` + `XSetLocaleModifiers` + **事件循环里的 `XFilterEvent`** +
   `Xutf8LookupString`),现在 fcitx5/ibus 等输入法在 sokol 版可正常组字。实测(本机 fcitx5 + rime):
   输入框里打 `nihao` → 上屏"你好" ✓。
-- **控件层 SDF 抗锯齿默认关闭**(`s_widget_aa = 0`):它在"画布 + 文字 + quadwarp 混排"场景下有一个已知缺陷
-  (实心填充退化成边界环),定位中。想试可 `fx_set_widget_aa(1)` 或 `FXTK_AA=1`。
-  `OpenClipboard` 版本,尚未做(应用内复制/粘贴也不可用)。
+- **控件层 SDF 抗锯齿是默认开启的**(`s_widget_aa = 1`)：v2.4.1 曾因"画布 + 文字 + quadwarp 混排"下
+  实心填充退化成边界环而临时默认关闭, v2.4.2 修好混排后**已恢复默认开启**，逻辑见 `fxtk_draw.c`。
+  需要对比性能或排查观感时可用 `fx_set_widget_aa(0/1/2)`；注意 `FXTK_AA=0|1|2` 这个环境变量
+  **只由演示程序 `demo-main/app.c` 读取**，你自己的应用里设它不生效（请直接调 `fx_set_widget_aa`）。
 
 ## 两个目标端：已分化，只要求"语法一致 + 效果一致"
 
@@ -89,7 +94,8 @@
   **带动画的滚动**（目标值逐帧逼近，静止时零重绘）、滚动条拖拽（含自绘画布）、焦点管理
 - **渲染**：`fx_image_*` 24bit 表面、旋转贴图、图像后处理（翻转/灰度/染色/亮度）、
   多线程软件 Raymarching（SDF 软阴影/AO/雾）＋ 可选 GPU(GLSL) 通道
-- **性能**：脏区合并重绘、GPU 顶点批、行级持久线程池光追；1080P 压测页 2820 控件约 102–130 fps
+- **性能**：GPU 顶点批、行级持久线程池光追；1080P 压测页 2820 控件约 102–130 fps（实测区间）
+  - 说明：代码里有脏区矩形合并的实现，但当前**被 `s_full=1` 旁路、不生效**，每次请求都是整帧重绘 —— 详见 `fxtk.c` 中 `fx_repaint_rect()` 的注释
 - **工程化**：统一 Makefile（单一源清单）、无头单测、金图回归、GitHub CI（Linux + Windows 交叉 + ESP32 冒烟）
 - **体积裁剪**：`-DFXTK_WIDGET_XXX=0` 编译期裁掉用不到的控件（受限平台用）；`tools/autotrim.sh` 自动扫描并生成开关
 - **跨平台文件 API**：`fx_fs_pick_dir()` / `fx_fs_list()`，演示里是完整的文件浏览器
@@ -97,19 +103,22 @@
 ## 目录结构
 
 ```
-components/fxtk/   核心库 (fxtk.c/draw/widgets/font/effects + 头文件)
-drivers/           后端驱动 (sokol 驱动 + stb 文本层 + 各自的 main；SDL2 驱动为遗留对照) ← 读代码从这看
-components/fxtk/   ← 框架本体
-your_app/          ← 想写自己的应用就从这里开始(最小示例 + build.sh；不参与主构建)
-demo-main/         PC 演示与工具链 (12 页演示 app / GPU 光追 / examples / Makefile)
-demo-main/Makefile 统一构建 (demo / examples / test 单一源清单)
-demo-main/test/     无头单元测试 (无需 SDL/窗口)
-.github/            CI (Linux 构建 + 测试 + Windows 交叉)
-docs/              文档 (quickstart / guide / api / desktop / effects / examples / internals)
+components/fxtk/   框架本体 (fxtk.c/draw/widgets/effects/extra/backends + 头文件；读代码先看这里)
+drivers/           后端驱动 (sokol 驱动 + stb 文本层 + 应用外壳 + 各自的 main；SDL2 驱动为遗留对照)
+your_app/          从这里开始写你自己的应用 (最小示例 + build.sh/build_win.sh；不参与主构建)
+demo-main/         PC 演示与工具链 (12 页演示 app / GPU 光追 / examples / 统一 Makefile)
+demo-main/test/    无头单元测试与基准 (无需窗口)
 examples/          独立示例 ex01~ex18
-examples/canvas/    画布学习教程 canvas_01~canvas_07
-screenshot_*.png    v2.2 画布/抗锯齿/渐变示意图
-LICENSE            MIT 许可
+examples/canvas/   画布学习教程 (canvas_01 ~ canvas_10)
+third_party/       vendored 依赖 (sokol 头文件 1.9MB，含本项目为 X11 输入法所做的本地修改；stb 在 components/fxtk/vendor)
+docs/              中文文档 (quickstart / guide / api / desktop / effects / examples / internals / backends)
+docs_en/           英文文档 (结构与 docs/ 对应)
+test/golden/       金图回归参考图 (逐像素比对，容差 0)
+tools/             开发工具 (autotrim / esp32_smoke / golden / package_release)
+.github/           CI (Linux 构建 + 测试 + Windows 交叉)
+screenshot_*.png   画布/抗锯齿/渐变示意图
+CHANGELOG.md       按版本记录变更 (含根因与实测数字)
+LICENSE            MIT 许可 (第三方许可见各 vendored 文件头部)
 ```
 
 ## 快速开始 (Linux)

@@ -307,7 +307,7 @@ static void unlink_free(fx_widget_t *w)
     if (s_ctx_te==w) s_ctx_te=NULL;
     if (s_ctxpop==w) { s_ctxpop=NULL; s_ctx_open=0; }
     /* v2.3.1: 池地址复用会让新控件继承旧状态, 一并回收 */
-    for (int i = 0; i < 8; i++)
+    for (int i = 0; i < FX_MAX_SCROLL_STATES; i++)
         if (s_scroll_pool[i].w == w) memset(&s_scroll_pool[i], 0, sizeof(s_scroll_pool[i]));
     fxtk_extra_forget(w);   /* v2.3.1: 清 list/drop 模块按指针索引的槽位 (防池复用悬垂) */
     if (w->text_buf) { free(w->text_buf); w->text_buf=NULL; }
@@ -545,13 +545,14 @@ redraw_widget_now(te); return; }
  * 状态检测靠"记住上一帧的 value", 因此完全不碰输入路径(改动面最小)。 */
 #define FX_PAGE_WIPE_MS 220u
 typedef struct { fx_widget_t *w; int prev; uint32_t t0; } fx_wipe_t;
-static fx_wipe_t s_wipe[8];
+#define FX_WIPE_SLOTS 8   /* v2.4.4: 原先散落 4 处硬编码 8 */
+static fx_wipe_t s_wipe[FX_WIPE_SLOTS];
 static float fx_page_wipe(fx_widget_t *w)   /* 返回揭示进度 0..1(1=无动画) */
 {
     if (!fx_widget_anim_ok(w)) return 1.0f;
     int k = -1;
-    for (int i = 0; i < 8; i++) if (s_wipe[i].w == w) { k = i; break; }
-    if (k < 0) for (int i = 0; i < 8; i++) if (!s_wipe[i].w) { s_wipe[i].w = w; s_wipe[i].prev = w->value; s_wipe[i].t0 = (uint32_t)fx_time_ms(); k = i; break; }
+    for (int i = 0; i < FX_WIPE_SLOTS; i++) if (s_wipe[i].w == w) { k = i; break; }
+    if (k < 0) for (int i = 0; i < FX_WIPE_SLOTS; i++) if (!s_wipe[i].w) { s_wipe[i].w = w; s_wipe[i].prev = w->value; s_wipe[i].t0 = (uint32_t)fx_time_ms(); k = i; break; }
     if (k < 0) return 1.0f;
     if (s_wipe[k].prev != w->value) { s_wipe[k].prev = w->value; s_wipe[k].t0 = (uint32_t)fx_time_ms(); }
     uint32_t el = (uint32_t)fx_time_ms() - s_wipe[k].t0;
@@ -567,7 +568,7 @@ static void fx_page_wipe_clip(fx_widget_t *w, int x1, int y1, int x2, int y2, fl
     int wpx = (x2 - x1 + 1);
     int span = (int)(wpx * p);
     int k = -1;
-    for (int i = 0; i < 8; i++) if (s_wipe[i].w == w) { k = i; break; }
+    for (int i = 0; i < FX_WIPE_SLOTS; i++) if (s_wipe[i].w == w) { k = i; break; }
     int from_left = (k >= 0 && s_wipe[k].prev <= w->value);
     if (from_left) *ox1 = x1 + (wpx - span);            /* 从右侧展开(往右切页) */
     else           { *ox2 = x1 + span - 1; }            /* 从左侧展开(往左切页) */
@@ -706,6 +707,9 @@ static void redraw_region(int x1,int y1,int x2,int y2)
 { fx_set_color(s_bg); fx_fill_rect(x1,y1,x2,y2); draw_widget(&s_root,x1,y1,x2,y2); }
 static void draw_canvas_only(fx_widget_t *w)
 {
+    /* v2.4.4: 与 draw_widget_inner 一致地做几何门槛 —— 此前这条路径只查可见标志, 退化矩形
+     * (x2<x1 之类)在正常绘制时被跳过, 在这里却畅通, 这是"空下拉崩溃"能藏住的原因之一。 */
+    if (w->x1 > w->x2 || w->y1 > w->y2) return;
     if (!(w->flags & FX_F_VISIBLE)) return;
 
     /* v2.4.3 动画: 除 canvas 外, 任何带 FX_F_ANIM 的可见控件也把自身矩形标脏, 让核心本帧重绘它。
@@ -746,9 +750,15 @@ if (s_ctx_open) { fx_reset_clip(); ctx_draw_abs(); } draw_debug_overlay(); fxtk_
 /* ================= 系统 API ================= */
 void fx_init(const fx_driver_t *drv)
 {
-    s_drv=drv; fxtk_draw_set_driver(drv);
+
+    /* v2.4.4 修复(评审 B8): 文档(docs/api.md, docs/guide.md 及英文版)一直教用户设 FXTK_AA=0|1|2,
+     * 但此前全仓库只有 demo-main/app.c 读它 —— 用户自己的应用照做无效。这里让框架自己读,
+     * 于是该开关对任何应用都成立(显式调用 fx_set_widget_aa 仍然优先, 因为在那之后执行)。 */
+    { const char *aa = getenv("FXTK_AA"); if (aa && aa[0]) fx_set_widget_aa(atoi(aa)); }    s_drv=drv; fxtk_draw_set_driver(drv);
     memset(&s_root,0,sizeof(s_root)); s_root.type=FX_W_PANEL; s_root.flags=FX_F_VISIBLE; s_root.bg=s_bg;
     memset(s_pool,0,sizeof(s_pool));
+    fxtk_anim_reset();   /* v2.4.4: 四张动画槽表也清零, 避免地址复用后继承死控件状态 */
+    memset(s_wipe, 0, sizeof s_wipe);
     s_pressed=NULL; s_touch_prev=0; s_repaint=1; s_autorepaint=0;
     /* v2.3.1: 重初始化时清干净全部悬垂状态 (旧代码残留 ctx 弹层/滚轮目标/滚动池,
      * 重新 fx_init 后弹层指向已清零槽位而失效) */
@@ -882,8 +892,15 @@ else if (s_repaint && s_dirty_n > 0) {
 uint16_t fx_width(void){return s_drv?s_drv->width:0;} uint16_t fx_height(void){return s_drv?s_drv->height:0;}
 void fx_set_autorepaint(int on){s_autorepaint=on;} void fx_set_touch_debug(int on){s_tdbg_on=on;}
 void fx_repaint(void){s_full=1;s_repaint=1;s_dirty_n=0;}
+/* ⚠️ v2.4.4 审计结论(第三方评审发现, 已核实): 本函数开头的 s_full=1 使下面的
+ * 矩形合并与"局部重绘"分支变成【死代码】—— 消费端 fxtk_frame() 里 `else if (s_full)`
+ * 排在脏区分支之前, 而本函数是全项目唯一往 s_dirty[] 写数据的地方, 于是永远走不到合并结果。
+ * 现状: 任何一次请求都退化为【整帧重绘】(所以不会残影, 但也没有任何脏区优化)。
+ * 这也是为什么当初加它是为了"杜绝残影": 局部路径历史上出过残影问题。
+ * 要真正启用脏区合并, 需要: ①去掉这里的 s_full=1 ②把合并结果交给 redraw_region 逐块重绘
+ * ③用连续多帧逐像素对比验证无残影(尤其滚动/悬停/光标闪烁/画布内控件移动)。 */
 void fx_repaint_rect(int x1,int y1,int x2,int y2)
-{ s_full=1;   /* 全量重绘, 杜绝残影 */
+{ s_full=1;   /* 见上方说明: 这一行让下面的合并逻辑当前不可达 */
     if (!s_drv) return;
     if (x1<0)x1=0;
     if (y1<0)y1=0;

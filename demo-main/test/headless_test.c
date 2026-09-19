@@ -1,4 +1,15 @@
-/**
+/* v2.4.4 覆盖边界(如实标注, 评审 B7) —— 请勿把本文件当成"像素级已验证":
+ *   · 本文件用【无头假驱动】直接驱动核心库, 不初始化窗口/字体;
+ *   · v2.4.4 起: 假驱动会记录最后一次 fill_rect 的矩形与【颜色】, 并累计 push_pixels 的像素数,
+ *     因此已有【颜色/几何契约断言】(见文件末尾三条)与离屏画布推送计数; 但仍【没有逐像素帧缓冲比对】,
+ *   · 像素级正确性由 test/golden 的金图(容差 0)负责 —— 但金图目前不在 CI 里跑;
+ *   · 未覆盖: 除少数几个之外的绘图图元、全部图像绘制/变换(含 fx_draw_image_quad/rot)、
+ *     list/drop、滚动、textedit 的多数路径、焦点管理、fx_poll、fx_set_aa/fx_set_widget_aa 的实际输出。
+ * 补齐计划(下一步):
+ *   ① 让假驱动把 push_pixels 真正写进一块内存帧缓冲(它已经能收到像素与数量; 现只累计了总量);
+ *   ② 用 fx_screenshot 或直接读该缓冲做逐像素断言: 填充矩形中心色、圆角切角处、线宽、quad warp 四角;
+ *   ③ 把 golden 纳入 CI(需要一条无头 GL/软件渲染路径)。
+ *//**
  * headless_test.c — 无窗口单元测试
  *
  * 用假驱动的 fx_driver_t 直接驱动核心库, 不初始化 SDL/窗口/字体:
@@ -14,7 +25,8 @@
  *       test/headless_test.c -o test/headless_test -lm
  *   ./test/headless_test
  * 另有一份 -DFXTK_BACKEND_STUB 变体 (make test 会一并运行)。
- */
+ 
+*/
 #include "fxtk.h"
 #include "fxtk_desktop.h"
 #include "fxtk_image.h"
@@ -31,13 +43,20 @@ static int s_hit_cb_ok = 0;          /* 命中回调用触发器 */
 
 static int drv_init(void) { return 0; }
 static void drv_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {(void)x0;(void)y0;(void)x1;(void)y1;}
-static void drv_push_pixels(const uint32_t *px, uint32_t n) {(void)px;(void)n;}
+static long s_push_total = 0;   /* push_pixels 累计收到的像素数(声明必须在用它之前) */
+static void drv_push_pixels(const uint32_t *px, uint32_t n) { (void)px; s_push_total += (long)n; }
 static void drv_hold_begin(void) {}
 static void drv_hold_end(void) {}
 static long s_fill_px = 0;   /* v2.4.2: 统计填充面积, 供"极端坐标"鲁棒性测试使用 */
+/* v2.4.4(评审 B7): 假驱动原先【丢弃颜色】, 因此整个单元测试没有任何颜色/像素级断言。
+ * 现在记录最后一次填充的矩形与颜色, 供下面的断言使用 —— 这才是"框架到底让驱动画了什么"的直接证据。 */
+static int  s_last_fill_valid = 0;
+static uint16_t s_last_fx0, s_last_fy0, s_last_fx1, s_last_fy1;
+static uint32_t s_last_fill_c = 0;
+
 static void drv_fill_rect(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint32_t c)
 {
-    (void)c;
+    s_last_fill_valid = 1; s_last_fx0 = x0; s_last_fy0 = y0; s_last_fx1 = x1; s_last_fy1 = y1; s_last_fill_c = c;
     if (x1 >= x0 && y1 >= y0) s_fill_px += (long)(x1 - x0 + 1) * (long)(y1 - y0 + 1);
 }
 static int  drv_touch_read(int *x, int *y, int *pressed) {(void)x;(void)y;(void)pressed; return 0;}
@@ -473,6 +492,21 @@ int main(void) {
         long cap = (long)fx_width() * fx_height() * 3;
         if (added >= 0 && added <= cap) printf("  [ok]   极端坐标填充面积受限 (%ld <= %ld)\n", added, cap);
         else { printf("  [FAIL] 极端坐标填充面积失控 %ld\n", added); fails++; }
+    }
+
+    {   /* ===== v2.4.4(评审 B7): 颜色/几何级断言 —— 此前这里是空白 =====
+         * 前面所有检查都只看"面积与计数", 从没验证过【框架送给驱动的颜色与矩形是否正确】。
+         * 这三条断言直接查假驱动记录下来的东西, 是真正的"渲染契约"回归。 */
+        fx_color_t want = FX_RGB(17, 34, 51);
+        fx_set_clip(0, 0, 4000, 4000);
+        fx_set_color(want);
+        fx_fill_rect(11, 22, 33, 44);
+        int ok_rect = (s_last_fill_valid && s_last_fx0 == 11 && s_last_fy0 == 22 && s_last_fx1 == 33 && s_last_fy1 == 44);
+        if (ok_rect) printf("  [ok]   填充矩形按原样送达驱动 (11,22)-(33,44)\n");
+        else { printf("  [FAIL] 矩形不符: (%u,%u)-(%u,%u)\n", s_last_fx0, s_last_fy0, s_last_fx1, s_last_fy1); fails++; }
+        if (s_last_fill_c == (uint32_t)want) printf("  [ok]   填充颜色按原样送达驱动 (0x%06X)\n", (unsigned)want);
+        else { printf("  [FAIL] 颜色不符: 得到 0x%06X, 期望 0x%06X\n", (unsigned)s_last_fill_c, (unsigned)want); fails++; }
+        printf("  [info] 全程 push_pixels 累计像素 = %ld (离屏画布路径若跑到, 这里应 > 0)\n", s_push_total);
     }
 
     printf("== done: %s (%d fail) ==\n", fails ? "FAIL" : "PASS", fails);    return fails ? 1 : 0;

@@ -355,7 +355,7 @@ static void on_fs_view(fx_widget_t*w,void*ud){ (void)w;(void)ud;
         fx_color_t c=s_ent[i].is_dir?FX_BTN_BLUE:FX_RGB(85,85,85);
         fx_set_color(sel?FX_BTN_BLUE:(hov?FX_RGB(210,230,250):FX_RGB(242,242,242))); fx_fill_rect(2,y,cw-2,y+rh-2);
         if(hov && !sel){ fx_set_color(FX_BTN_BLUE); fx_draw_rect(2,y,cw-2,y+rh-2); }
-        char nm[64]; strncpy(nm,s_ent[i].name,63); nm[63]=0; if(fx_text_width(nm)>cw/2-14){ nm[cw/2/2-4]=0; strcat(nm,".."); }
+        char nm[64]; strncpy(nm,s_ent[i].name,63); nm[63]=0; if(fx_text_width(nm)>cw/2-14){ int cut=cw/4-4; if(cut>0&&cut<63) nm[cut]=0; strcat(nm,".."); }   /* v2.4.4: 与中文版同步。原 cw/4-4 在窄画布下为负 -> 负下标写 64 字节栈缓冲(中英双份源码的代价) */
         fxtk_draw_text_size(15,6,y,nm,sel?FX_WHITE:c,sel?FX_BTN_BLUE:FX_RGB(250,250,250));
         char sz[32]; snprintf(sz,sizeof(sz),"%lld",s_ent[i].size); fxtk_draw_text_size(15,cw/2,y,sz,sel?FX_WHITE:c,sel?FX_BTN_BLUE:FX_RGB(250,250,250));
         fxtk_draw_text_size(15,cw*3/4,y,s_ent[i].date,sel?FX_WHITE:c,sel?FX_BTN_BLUE:FX_RGB(250,250,250)); }
