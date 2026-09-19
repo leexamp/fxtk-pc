@@ -51,7 +51,7 @@
 - **canvas 变换栈** `fx_canvas_push_affine/pop_affine` + `fx_fill_quad`:push 后矩形填充变实心四边形、图片走透视。
 - **验证体系**:`make test`(双后端)/ `make golden`(金图, 进 CI)/ `make esp32-smoke`(进 CI)/ `make bench`;
   截图 `fx_screenshot()` 走驱动的 `read_pixels`, 零外部依赖。
-- 注意:控件层 SDF 抗锯齿目前**默认关闭**(`s_widget_aa = 0`), 可用 `fx_set_widget_aa(1)` 或 `FXTK_AA=1` 开启
+- 注意:控件层 SDF 抗锯齿**默认开启**(`s_widget_aa = 1`);要对比或排查观感用 `fx_set_widget_aa(0/1/2)`
   —— 它在"画布 + 文字 + quadwarp 混排"场景下有一个已知缺陷正在修(详见 CHANGELOG v2.4.1)。
 
 ## 已知限制
@@ -60,9 +60,10 @@
   XIM 支持(惰性 `XOpenIM`/`XCreateIC` + `setlocale` + `XSetLocaleModifiers` + **事件循环里的 `XFilterEvent`** +
   `Xutf8LookupString`),现在 fcitx5/ibus 等输入法在 sokol 版可正常组字。实测(本机 fcitx5 + rime):
   输入框里打 `nihao` → 上屏"你好" ✓。
-- **控件层 SDF 抗锯齿默认关闭**(`s_widget_aa = 0`):它在"画布 + 文字 + quadwarp 混排"场景下有一个已知缺陷
-  (实心填充退化成边界环),定位中。想试可 `fx_set_widget_aa(1)` 或 `FXTK_AA=1`。
-  `OpenClipboard` 版本,尚未做(应用内复制/粘贴也不可用)。
+- **控件层 SDF 抗锯齿是默认开启的**(`s_widget_aa = 1`)：v2.4.1 曾因"画布 + 文字 + quadwarp 混排"下
+  实心填充退化成边界环而临时默认关闭, v2.4.2 修好混排后**已恢复默认开启**，逻辑见 `fxtk_draw.c`。
+  需要对比性能或排查观感时可用 `fx_set_widget_aa(0/1/2)`；注意 `FXTK_AA=0|1|2` 这个环境变量
+  **只由演示程序 `demo-main/app.c` 读取**，你自己的应用里设它不生效（请直接调 `fx_set_widget_aa`）。
 
 ## 两个目标端：已分化，只要求"语法一致 + 效果一致"
 
@@ -98,19 +99,22 @@
 ## 目录结构
 
 ```
-components/fxtk/   核心库 (fxtk.c/draw/widgets/font/effects + 头文件)
-drivers/           后端驱动 (sokol 驱动 + stb 文本层 + 各自的 main；SDL2 驱动为遗留对照) ← 读代码从这看
-components/fxtk/   ← 框架本体
-your_app/          ← 想写自己的应用就从这里开始(最小示例 + build.sh；不参与主构建)
-demo-main/         PC 演示与工具链 (12 页演示 app / GPU 光追 / examples / Makefile)
-demo-main/Makefile 统一构建 (demo / examples / test 单一源清单)
-demo-main/test/     无头单元测试 (无需 SDL/窗口)
-.github/            CI (Linux 构建 + 测试 + Windows 交叉)
-docs/              文档 (quickstart / guide / api / desktop / effects / examples / internals)
+components/fxtk/   框架本体 (fxtk.c/draw/widgets/effects/extra/backends + 头文件；读代码先看这里)
+drivers/           后端驱动 (sokol 驱动 + stb 文本层 + 应用外壳 + 各自的 main；SDL2 驱动为遗留对照)
+your_app/          从这里开始写你自己的应用 (最小示例 + build.sh/build_win.sh；不参与主构建)
+demo-main/         PC 演示与工具链 (12 页演示 app / GPU 光追 / examples / 统一 Makefile)
+demo-main/test/    无头单元测试与基准 (无需窗口)
 examples/          独立示例 ex01~ex18
-examples/canvas/    画布学习教程 canvas_01~canvas_07
-screenshot_*.png    v2.2 画布/抗锯齿/渐变示意图
-LICENSE            MIT 许可
+examples/canvas/   画布学习教程 (canvas_01 ~ canvas_10)
+third_party/       vendored 依赖 (sokol 头文件 1.9MB，含本项目为 X11 输入法所做的本地修改；stb 在 components/fxtk/vendor)
+docs/              中文文档 (quickstart / guide / api / desktop / effects / examples / internals / backends)
+docs_en/           英文文档 (结构与 docs/ 对应)
+test/golden/       金图回归参考图 (逐像素比对，容差 0)
+tools/             开发工具 (autotrim / esp32_smoke / golden / package_release)
+.github/           CI (Linux 构建 + 测试 + Windows 交叉)
+screenshot_*.png   画布/抗锯齿/渐变示意图
+CHANGELOG.md       按版本记录变更 (含根因与实测数字)
+LICENSE            MIT 许可 (第三方许可见各 vendored 文件头部)
 ```
 
 ## 快速开始 (Linux)

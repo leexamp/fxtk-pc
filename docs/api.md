@@ -305,7 +305,7 @@ int fx_backend_pick_file(char *out,int cap,const char *title,const char *ext_csv
 
 | 宏 | 作用 | PC 默认 | ESP32 默认 |
 |---|---|---|---|
-| `FX_MAX_WIDGETS` | 控件池 | **16384** | 4096 |
+| `FX_MAX_WIDGETS` | 控件池 | **8192** | 4096 |
 | `FX_MAX_SCROLL_STATES` | 并发滚动状态 | **64** | 8 |
 | `FX_MAX_EXTRA_WIDGETS` | 列表/下拉等扩展控件槽 | **64** | 8 |
 | `FX_MAX_SCROLL_STATES` 之外 | 均可 `-D` 覆盖 | | |

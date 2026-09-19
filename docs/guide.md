@@ -608,7 +608,7 @@ if (fxtk_fps() >= 30 && n < cap) {
 ```
 
 - `fx_widget_fix(w, x, y)`：切到**固定坐标模式**（`FX_POS_FIXED`），后续 `fx_layout()`（resize/新建控件触发）不会用 ox/oy 复位它，同时记录移动基准点。
-- 控件池上限由 `FX_MAX_WIDGETS` 决定：**PC 端默认 16384**、ESP32 端默认 4096（两端已分化，见 README「两个目标端」）；
+- 控件池上限由 `FX_MAX_WIDGETS` 决定：**PC 端默认 8192**、ESP32 端默认 4096（两端已分化，见 README「两个目标端」）；
   `fxtk_widget_count()` 查当前存活数。用 `-DFX_MAX_WIDGETS=N` 可覆盖。
 - 动态控件建议用指针数组缓存，避免每帧 `fx_find` 线性扫描。
 
@@ -713,7 +713,7 @@ int w = fxtk_text_width_size(16, "大字号");   /* 测宽 */
 1. **静态内容**不要 `anim(1)`；变化时手动 `fx_repaint_rect`。
 2. **动画内容**用 `anim(1)` canvas，内部避免每帧 `fx_find`（缓存指针）。
 3. **大量粒子/图元**：画到小离屏图再 `fx_draw_image` 放大（GPU blit），如粒子页 2x 缩小缓冲。
-4. **动态加控件**：受 `FX_MAX_WIDGETS` 限制（PC 默认 16384），帧率富余（≥30fps）再加，防止失控。
+4. **动态加控件**：受 `FX_MAX_WIDGETS` 限制（PC 默认 8192），帧率富余（≥30fps）再加，防止失控。
 5. **文字**：相同文本/颜色会自动走纹理缓存，避免拼接易变字符串为键。
 
 ---
@@ -1034,7 +1034,7 @@ sokol_app 没有剪贴板 API，驱动现在这样实现：优先调用系统工
 ## 4. 两个目标端已分化（重要）
 
 PC 端**不再迁就 ESP32 的资源约束**，只保证 **API/语法一致 + 渲染效果一致**：
-`FX_MAX_WIDGETS` / `FX_MAX_SCROLL_STATES` / `FX_MAX_EXTRA_WIDGETS` 在 PC 上分别是 **16384 / 64 / 64**，
+`FX_MAX_WIDGETS` / `FX_MAX_SCROLL_STATES` / `FX_MAX_EXTRA_WIDGETS` 在 PC 上分别是 **8192 / 64 / 64**，
 在 ESP32 上仍是 **4096 / 8 / 8**，两端都可用 `-D` 覆盖；池满会**明确告警**并提示改哪个宏。
 
 ## 5. 其它 v2.4.3 修复
