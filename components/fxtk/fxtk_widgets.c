@@ -573,10 +573,21 @@ fx_fill_rect(rw2 - 3, ty, rw2, ty + th);
  * (新按钮继承别人的按下渐变、新标签页继承别人的换页进度)。这里给统一复位入口。 */
 void fxtk_anim_reset(void)
 {
+    /* v2.4.5 修复: 每张表的声明都在 `#if FXTK_WIDGET_XXX` 之内, 而本函数在守卫之外。
+     * 原实现无条件 memset 全部四张表 ⇒ 只要裁掉 TAB/BUTTON/PROGRESS 中任意一个, 就会引用
+     * 未声明的数组而编译失败(报错形如 's_pa_w undeclared' / 's_bt_t0 undeclared'),
+     * 也就是 **-DFXTK_WIDGET_XXX=0 这个功能整体不可用**。现按各自守卫包裹。
+     * 注: 函数本身必须保持无条件存在 —— fxtk.c 的 fx_init() 会无条件调用它。 */
+#if FXTK_WIDGET_TAB
     memset(s_ta_w, 0, sizeof s_ta_w); memset(s_ta_t0, 0, sizeof s_ta_t0); memset(s_ta_sel, 0, sizeof s_ta_sel);
+#endif
+#if FXTK_WIDGET_BUTTON
     memset(s_bt_w, 0, sizeof s_bt_w); memset(s_bt_v, 0, sizeof s_bt_v);
     memset(s_bt_t0, 0, sizeof s_bt_t0); memset(s_bt_goal, 0, sizeof s_bt_goal);
+#endif
+#if FXTK_WIDGET_PROGRESS
     memset(s_pa_w, 0, sizeof s_pa_w); memset(s_pa_from, 0, sizeof s_pa_from);
     memset(s_pa_disp, 0, sizeof s_pa_disp); memset(s_pa_to, 0, sizeof s_pa_to);
     memset(s_pa_t0, 0, sizeof s_pa_t0); memset(s_pa_init, 0, sizeof s_pa_init);
+#endif
 }
