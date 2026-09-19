@@ -706,6 +706,9 @@ static void redraw_region(int x1,int y1,int x2,int y2)
 { fx_set_color(s_bg); fx_fill_rect(x1,y1,x2,y2); draw_widget(&s_root,x1,y1,x2,y2); }
 static void draw_canvas_only(fx_widget_t *w)
 {
+    /* v2.4.4: 与 draw_widget_inner 一致地做几何门槛 —— 此前这条路径只查可见标志, 退化矩形
+     * (x2<x1 之类)在正常绘制时被跳过, 在这里却畅通, 这是"空下拉崩溃"能藏住的原因之一。 */
+    if (w->x1 > w->x2 || w->y1 > w->y2) return;
     if (!(w->flags & FX_F_VISIBLE)) return;
 
     /* v2.4.3 动画: 除 canvas 外, 任何带 FX_F_ANIM 的可见控件也把自身矩形标脏, 让核心本帧重绘它。

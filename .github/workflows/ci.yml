@@ -44,6 +44,7 @@ jobs:
           echo "headless canvas render OK"
 
       - name: Warnings report (non-blocking)
+        working-directory: demo-main
         run: |
           set +e
           gcc -O2 -Wall -Wextra -o /dev/null -I. -I../components/fxtk \

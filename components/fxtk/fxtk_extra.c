@@ -198,7 +198,9 @@ static void ex_drop_cb(fx_widget_t *w, void *ud)
             int avail=up?up_avail:down_avail;
             if (H>avail)H=avail;
             if (H<ex_rh(s)+2)H=ex_rh(s)+2;
-            if (H>s->n*ch)H=s->n*ch;
+            /* v2.4.4 修复(崩溃): 原写法在 n==0 时把上一行刚建立的最小高度抹成 0 →
+             * 负高度弹层 → ex_draw_list 里 (ch-2)*(ch-2)/total 除零 → SIGFPE。 */
+            if (s->n > 0 && H > s->n * ch) H = s->n * ch;
             int bh=ex_rh(s)+10;
             if (bh>ch)bh=ch; int yb=y1+bh; int py1=up?y1-2-H:yb+2;
             ex_slot_t *ps=ex_get(s_pop);

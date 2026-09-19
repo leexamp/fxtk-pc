@@ -40,3 +40,8 @@ demo-main/test/headless_test_stub
 demo-main/test/bench
 demo-main/test/rt_resize
 demo-main/test/render_canvas
+
+# your_app 构建产物(不应入库: package_release 用 git archive 打"纯源码"包)
+your_app/your_app
+your_app/libfxtk*.so
+your_app/dist/
