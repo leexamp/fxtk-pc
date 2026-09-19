@@ -10,10 +10,18 @@ void fxtk_put_px(int x, int y, uint32_t c);   /* fxtk_draw.c */
 void fx_draw_image_rot(fx_image_t *img, int cx, int cy, int angle_deg, int scale_pct)
 {
     extern int fxtk_image_rot_gpu(const fx_image_t*,int,int,int,int,double);
-    if (fxtk_image_rot_gpu(img,cx,cy,scale_pct,scale_pct,(double)angle_deg)) return;   /* v2: GPU旋转 */
-
-
+    /* v2.4.4 修复(第三方评审 B3 + 一处更硬的错):
+     * ① 判空必须在使用之前 —— 原先把 GPU 钩子调用放在判空前面, 空指针会先进驱动。
+     * ② 钩子的 dw/dh 语义是【目标尺寸】(两个驱动都是 dst={...,dw,dh} / emit_quad(dx..dx+dw)),
+     *    而这里原先传的是 scale_pct/scale_pct(百分比!) → GPU 把 90 当成 90x90 像素、
+     *    CPU 路径当 90%, 同一参数两种结果, 非方图还会丢长宽比 —— 直接破坏"两端渲染一致"的承诺。
+     *    现按与 CPU 路径相同的含义换算成目标尺寸再传。 */
     if (!img || !img->px || scale_pct <= 0) return;
+    int dw = (int)(img->w * scale_pct / 100.0f + 0.5f);
+    int dh = (int)(img->h * scale_pct / 100.0f + 0.5f);
+    if (dw < 1) dw = 1;
+    if (dh < 1) dh = 1;
+    if (fxtk_image_rot_gpu(img, cx, cy, dw, dh, (double)angle_deg)) return;   /* v2: GPU旋转 */
     float rad = (float)angle_deg * 3.14159265f / 180.0f;
     float cs = cosf(rad), sn = sinf(rad);
     float sc = scale_pct / 100.0f;
