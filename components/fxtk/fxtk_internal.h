@@ -161,3 +161,4 @@ void fxtk_draw_image(fx_widget_t *w);
 
 /* v2.4.3: 该控件是否应播放动画(全局开 且 未用 anim(0) 显式关闭) */
 int fx_widget_anim_ok(fx_widget_t *w);
+void fxtk_anim_reset(void);   /* v2.4.4: 复位四张动画槽表(fx_init 时调用) */

@@ -307,7 +307,7 @@ static void unlink_free(fx_widget_t *w)
     if (s_ctx_te==w) s_ctx_te=NULL;
     if (s_ctxpop==w) { s_ctxpop=NULL; s_ctx_open=0; }
     /* v2.3.1: 池地址复用会让新控件继承旧状态, 一并回收 */
-    for (int i = 0; i < 8; i++)
+    for (int i = 0; i < FX_MAX_SCROLL_STATES; i++)
         if (s_scroll_pool[i].w == w) memset(&s_scroll_pool[i], 0, sizeof(s_scroll_pool[i]));
     fxtk_extra_forget(w);   /* v2.3.1: 清 list/drop 模块按指针索引的槽位 (防池复用悬垂) */
     if (w->text_buf) { free(w->text_buf); w->text_buf=NULL; }
@@ -545,13 +545,14 @@ redraw_widget_now(te); return; }
  * 状态检测靠"记住上一帧的 value", 因此完全不碰输入路径(改动面最小)。 */
 #define FX_PAGE_WIPE_MS 220u
 typedef struct { fx_widget_t *w; int prev; uint32_t t0; } fx_wipe_t;
-static fx_wipe_t s_wipe[8];
+#define FX_WIPE_SLOTS 8   /* v2.4.4: 原先散落 4 处硬编码 8 */
+static fx_wipe_t s_wipe[FX_WIPE_SLOTS];
 static float fx_page_wipe(fx_widget_t *w)   /* 返回揭示进度 0..1(1=无动画) */
 {
     if (!fx_widget_anim_ok(w)) return 1.0f;
     int k = -1;
-    for (int i = 0; i < 8; i++) if (s_wipe[i].w == w) { k = i; break; }
-    if (k < 0) for (int i = 0; i < 8; i++) if (!s_wipe[i].w) { s_wipe[i].w = w; s_wipe[i].prev = w->value; s_wipe[i].t0 = (uint32_t)fx_time_ms(); k = i; break; }
+    for (int i = 0; i < FX_WIPE_SLOTS; i++) if (s_wipe[i].w == w) { k = i; break; }
+    if (k < 0) for (int i = 0; i < FX_WIPE_SLOTS; i++) if (!s_wipe[i].w) { s_wipe[i].w = w; s_wipe[i].prev = w->value; s_wipe[i].t0 = (uint32_t)fx_time_ms(); k = i; break; }
     if (k < 0) return 1.0f;
     if (s_wipe[k].prev != w->value) { s_wipe[k].prev = w->value; s_wipe[k].t0 = (uint32_t)fx_time_ms(); }
     uint32_t el = (uint32_t)fx_time_ms() - s_wipe[k].t0;
@@ -567,7 +568,7 @@ static void fx_page_wipe_clip(fx_widget_t *w, int x1, int y1, int x2, int y2, fl
     int wpx = (x2 - x1 + 1);
     int span = (int)(wpx * p);
     int k = -1;
-    for (int i = 0; i < 8; i++) if (s_wipe[i].w == w) { k = i; break; }
+    for (int i = 0; i < FX_WIPE_SLOTS; i++) if (s_wipe[i].w == w) { k = i; break; }
     int from_left = (k >= 0 && s_wipe[k].prev <= w->value);
     if (from_left) *ox1 = x1 + (wpx - span);            /* 从右侧展开(往右切页) */
     else           { *ox2 = x1 + span - 1; }            /* 从左侧展开(往左切页) */
@@ -752,6 +753,8 @@ void fx_init(const fx_driver_t *drv)
     s_drv=drv; fxtk_draw_set_driver(drv);
     memset(&s_root,0,sizeof(s_root)); s_root.type=FX_W_PANEL; s_root.flags=FX_F_VISIBLE; s_root.bg=s_bg;
     memset(s_pool,0,sizeof(s_pool));
+    fxtk_anim_reset();   /* v2.4.4: 四张动画槽表也清零, 避免地址复用后继承死控件状态 */
+    memset(s_wipe, 0, sizeof s_wipe);
     s_pressed=NULL; s_touch_prev=0; s_repaint=1; s_autorepaint=0;
     /* v2.3.1: 重初始化时清干净全部悬垂状态 (旧代码残留 ctx 弹层/滚轮目标/滚动池,
      * 重新 fx_init 后弹层指向已清零槽位而失效) */

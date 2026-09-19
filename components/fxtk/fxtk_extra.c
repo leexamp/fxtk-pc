@@ -247,7 +247,9 @@ void fxtk_extra_forget(const fx_widget_t *w)
 {
 #if FXTK_WIDGET_LIST || FXTK_WIDGET_DROP
     if (!w) return;
-    for (int i = 0; i < 8; i++)
+    /* v2.4.4 修复(评审 A2): 原先硬编码 8, 而池是 FX_MAX_EXTRA_WIDGETS(PC 上 64)
+     * → 第 8 槽之后永不回收: 槽位泄漏、strdup 的条目泄漏、地址复用后新 list 继承死控件的 items/sel。 */
+    for (int i = 0; i < FX_MAX_EXTRA_WIDGETS; i++)
         if (s_ex[i].w == w) memset(&s_ex[i], 0, sizeof(ex_slot_t));
 #endif
 }
