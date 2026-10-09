@@ -81,6 +81,14 @@ static void sdl_fill_rect(uint16_t x0,uint16_t y0,uint16_t x1,uint16_t y1,uint32
     if (rq_has && color != rq_color) flush_rects();   /* 颜色变化 → 先冲刷旧批 */
     if (rq_n >= RQ_MAX) flush_rects();
     rq_has = 1; rq_color = color;
+    /* v2.5: 与批尾矩形同列范围且纵向紧邻(或同行范围且横向紧邻) → 合并为一个矩形。
+     * 同色不透明填充可交换/幂等, 合并后覆盖像素集合不变(金图容差 0 安全)。 */
+    if (rq_n > 0) {
+        SDL_Rect *p = &rq[rq_n-1];
+        int rw=(int)(x1-x0+1), rh=(int)(y1-y0+1);
+        if (p->x==(int)x0 && p->w==rw && p->y+p->h==(int)y0){ p->h+=rh; return; }
+        if (p->y==(int)y0 && p->h==rh && p->x+p->w==(int)x0){ p->w+=rw; return; }
+    }
     rq[rq_n].x=(int)x0; rq[rq_n].y=(int)y0;
     rq[rq_n].w=(int)(x1-x0+1); rq[rq_n].h=(int)(y1-y0+1);
     rq_n++;
@@ -176,6 +184,7 @@ static void sdl_apply_size(int w,int h)
     if (h<120)h=120;
     win_w=w;win_h=h;
     if (w==s_width&&h==s_height)return;
+    flush_pixels(); flush_batch();   /* v2.5: 销毁旧 target/帧缓冲前先落盘滞留批 */
     s_width=w;s_height=h;
     fx_sdl_driver.width=(uint16_t)s_width;fx_sdl_driver.height=(uint16_t)s_height;
     fb_w=0; fb_h=0;   /* 置 0 让 fb_ensure 按新尺寸重分配 fb_rgba (否则 resize 后软件像素全被丢弃而空白) */
@@ -263,6 +272,7 @@ void sdl_handle_events(void)
 static int sdl_read_pixels(uint32_t *dst,int w,int h)
 {
     if(!renderer||!dst||w<=0||h<=0)return 0;
+    flush_pixels(); flush_batch();   /* v2.5: 回读前先把滞留的矩形/顶点/像素批全部落盘 */
     return SDL_RenderReadPixels(renderer,NULL,SDL_PIXELFORMAT_ARGB8888,dst,w*4)==0;
 }
 fx_driver_t fx_sdl_driver={

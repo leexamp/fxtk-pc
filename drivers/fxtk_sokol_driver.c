@@ -147,8 +147,12 @@ void fxtk_sokol_note_frame(uint32_t us)      /* main 在 fx_poll + fxtk_sokol_fr
     s_frame_us_sum += us;
 }
 
-/* 当前 set_window 状态 (软件像素按行推送) */
+/* 当前 set_window 状态 (软件像素按行推送)
+ * v2.5: 热路径不再用 cur_idx%cur_w / cur_idx/cur_w 求坐标(每像素一次取模一次除法),
+ * 改为增量游标 (cur_px_x, cur_px_y) —— 凡是 cur_idx 归零的地方必须同步归零游标。 */
 static uint16_t cur_x0, cur_y0, cur_w; static uint32_t cur_idx = 0;
+static int cur_px_x = 0, cur_px_y = 0;
+static void cur_reset(void) { cur_idx = 0; cur_px_x = cur_x0; cur_px_y = cur_y0; }
 
 /* 图片上传用纹理 (blit_img) */
 /* 图片上传用纹理【池】。
@@ -269,14 +273,21 @@ static inline uint32_t rgba_pack(uint32_t rgb)
     return 0xFF000000u | ((rgb & 0xFFu) << 16) | (rgb & 0xFF00u) | ((rgb >> 16) & 0xFFu);
 }
 
-/* 像素坐标 → NDC (在 CPU 侧算好, 免掉 uniform block 及其名字查找/420pack 扩展等一整类坑) */
+/* 像素坐标 → NDC (在 CPU 侧算好, 免掉 uniform block 及其名字查找/420pack 扩展等一整类坑)
+ * v2.5 乘法化: 顶点热路径原来每个顶点做两次 float 除法(x/rw, y/rh), 改为预存 2/w、2/h 后纯乘法。
+ * 仅在窗口尺寸变化时重算(drv_init / fxtk_sokol_apply_size), 每帧数万个顶点各省 2 次除法。 */
+static float s_ndc_sx = 2.0f / 480.0f, s_ndc_sy = 2.0f / 272.0f;
+static void ndc_update(void)
+{
+    s_ndc_sx = 2.0f / (float)(s_w > 0 ? s_w : 1);
+    s_ndc_sy = 2.0f / (float)(s_h > 0 ? s_h : 1);
+}
 static void vtx_push_sdf(float x, float y, float u, float v, uint32_t c,
                         float s0, float s1, float s2, float s3)
 {
     if (s_vb_n >= VB_MAX) return;
-    float rw = (float)(s_w > 0 ? s_w : 1), rh = (float)(s_h > 0 ? s_h : 1);
-    s_vb[s_vb_n].x = x / rw * 2.0f - 1.0f;
-    s_vb[s_vb_n].y = y / rh * 2.0f - 1.0f;
+    s_vb[s_vb_n].x = x * s_ndc_sx - 1.0f;
+    s_vb[s_vb_n].y = y * s_ndc_sy - 1.0f;
     s_vb[s_vb_n].u = u; s_vb[s_vb_n].v = v;
     s_vb[s_vb_n].s0 = s0; s_vb[s_vb_n].s1 = s1; s_vb[s_vb_n].s2 = s2; s_vb[s_vb_n].s3 = s3;
     s_vb[s_vb_n].rgba = rgba_pack(c);
@@ -286,11 +297,10 @@ static void vtx_push_sdf(float x, float y, float u, float v, uint32_t c,
 static void vtx_push(float x, float y, float u, float v, uint32_t c)
 {
     if (s_vb_n >= VB_MAX) return;
-    float rw = (float)(s_w > 0 ? s_w : 1), rh = (float)(s_h > 0 ? s_h : 1);
-    s_vb[s_vb_n].x = x / rw * 2.0f - 1.0f;
+    s_vb[s_vb_n].x = x * s_ndc_sx - 1.0f;
     /* sokol 的默认视口是 top-left 原点(内部会翻转), 因此 NDC 的 +1 对应窗口【下边】:
      * 屏幕 y=0 必须映射到 NDC -1。实测踩坑: 原写法让整幅画面上下颠倒。 */
-    s_vb[s_vb_n].y = y / rh * 2.0f - 1.0f;
+    s_vb[s_vb_n].y = y * s_ndc_sy - 1.0f;
     s_vb[s_vb_n].u = u; s_vb[s_vb_n].v = v;
     s_vb[s_vb_n].s0 = 0.0f; s_vb[s_vb_n].s1 = 0.0f; s_vb[s_vb_n].s2 = 0.0f; s_vb[s_vb_n].s3 = 0.0f;
     /* 顶点色字节序(2026-09 修正, 这条以前写错了):
@@ -476,6 +486,7 @@ static int drv_init(void)
     sg_setup(&desc);
 
     s_w = sapp_width(); s_h = sapp_height();
+    ndc_update();
     s_smp_nearest = sg_make_sampler(&(sg_sampler_desc){
         .min_filter = SG_FILTER_NEAREST, .mag_filter = SG_FILTER_NEAREST,
         .wrap_u = SG_WRAP_CLAMP_TO_EDGE, .wrap_v = SG_WRAP_CLAMP_TO_EDGE, .label = "fxtk-nearest" });
@@ -698,29 +709,31 @@ static int drv_init(void)
 
 static void drv_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
 {
-    cur_x0 = x0; cur_y0 = y0; cur_w = (uint16_t)(x1 - x0 + 1); cur_idx = 0;
+    cur_x0 = x0; cur_y0 = y0; cur_w = (uint16_t)(x1 - x0 + 1); cur_reset();
 }
 
 static void drv_push_pixels(const uint32_t *px, uint32_t n)
 {
     fb_ensure();
     if (!s_fb || !cur_w) return;
+    /* 增量游标: 坐标按行推进, 消掉原实现每像素的 % 和 / (文本/画布推送一次可达数万像素) */
+    int x = cur_px_x, y = cur_px_y;
+    const int xe = cur_x0 + cur_w;
     for (uint32_t i = 0; i < n; i++) {
-        int x = cur_x0 + (int)(cur_idx % cur_w);
-        int y = cur_y0 + (int)(cur_idx / cur_w);
+        int cx = x, cy = y;
+        if (++x >= xe) { x = cur_x0; y++; }
         cur_idx++;
-        if (x < 0 || y < 0 || x >= s_fb_w || y >= s_fb_h) continue;
-        s_fb[(size_t)y * s_fb_w + x] = 0xFF000000u | (px[i] & 0xFFFFFFu);
-        if (!s_dirty) { s_dx0 = s_dx1 = x; s_dy0 = s_dy1 = y; s_dirty = 1; }
+        if ((unsigned)cx >= (unsigned)s_fb_w || (unsigned)cy >= (unsigned)s_fb_h) continue;
+        s_fb[(size_t)cy * s_fb_w + cx] = 0xFF000000u | (px[i] & 0xFFFFFFu);
+        if (!s_dirty) { s_dx0 = s_dx1 = cx; s_dy0 = s_dy1 = cy; s_dirty = 1; }
         else {
-            if (x < s_dx0) s_dx0 = x;
-            if (x > s_dx1) s_dx1 = x;
-            if (y < s_dy0) s_dy0 = y;
-            if (y > s_dy1) s_dy1 = y;
-            if (s_dx1 >= s_fb_w) s_dx1 = s_fb_w - 1;
-            if (s_dy1 >= s_fb_h) s_dy1 = s_fb_h - 1;
+            if (cx < s_dx0) s_dx0 = cx;
+            if (cx > s_dx1) s_dx1 = cx;
+            if (cy < s_dy0) s_dy0 = cy;
+            if (cy > s_dy1) s_dy1 = cy;
         }
     }
+    cur_px_x = x; cur_px_y = y;
 }
 
 static void drv_hold_begin(void) {}
@@ -1178,6 +1191,22 @@ static void canvas_ensure(void)
     s_need_clear = 1;
 }
 
+/* ---- v2.5 GL 状态去重 ----
+ * 命令循环原来对每条命令无条件 sg_apply_pipeline + sg_apply_bindings + sg_apply_scissor_rect。
+ * sokol GL 后端内部: pipeline 有缓存, bindings 只做了部分缓存(仍要走校验+属性循环),
+ * 而 scissor 是【每次都直发 glScissor】。相邻命令又大多共享同一管线/纹理/裁剪(批合并后的常态),
+ * 因此在驱动层缓存"最近一次真正下发"的状态, 相同即跳过。
+ * 安全性: GL 端顶点/纹理绑定挂在全局共享 VAO 与纹理单元缓存上, pass 内除这三个入口外没有
+ * 别的代码触碰这些状态; 每个 sg_begin_pass 会把 scissor 重置为全幅(见 sokol_gfx.h),
+ * 所以缓存必须在每个 pass 开始后复位。id 为 0 即 SG_INVALID_ID, 真实资源 id 永不为 0。 */
+static uint32_t s_g_pip = 0, s_g_vb = 0, s_g_ib = 0, s_g_view = 0, s_g_smp = 0;
+static int s_g_sc_x = -1, s_g_sc_y = 0, s_g_sc_w = 0, s_g_sc_h = 0;
+static void glstate_reset(void)
+{
+    s_g_pip = s_g_vb = s_g_ib = s_g_view = s_g_smp = 0;
+    s_g_sc_x = -1;
+}
+
 void fxtk_sokol_frame(int fb_w, int fb_h)
 {
     uint32_t t_sub0 = now_us();
@@ -1208,6 +1237,7 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
             .clear_value = { 0.0f, 0.0f, 0.0f, 1.0f } } },
         .attachments = { .colors[0] = s_canvas_attach } });
     s_need_clear = 0;
+    glstate_reset();          /* pass 开始: sokol 已把 GL scissor 重置为全幅, 缓存作废 */
 
     for (int i = 0; i < s_cmd_n; i++) {
         cmd_t *c = &s_cmd[i];
@@ -1218,6 +1248,7 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
             int cx2 = c->cx2 > s_w - 1 ? s_w - 1 : c->cx2;
             int cy2 = c->cy2 > s_h - 1 ? s_h - 1 : c->cy2;
             if (cx2 < cx1 || cy2 < cy1) continue;
+            int scw = cx2 - cx1 + 1, sch = cy2 - cy1 + 1;
             /* 【v2.4 关键修正】裁剪矩形是"屏幕坐标(左上原点)", 而本 pass 是【离屏 render target】:
              * sokol 对 render target pass 的原点是左下(GL 约定), 只有 swapchain pass 才是左上。
              * 之前这里传 origin_top_left=true → 裁剪框在垂直方向被镜像, 于是"控件自己的紧裁剪"
@@ -1229,7 +1260,11 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
              * 传 true 会让裁剪框垂直镜像 → 控件用自己的紧裁剪时被整块裁掉(圆角填充全消失)。
              * 四种组合实测: (x,y,true)=0px, (x,y,false)=8784px 全中, (x,H-y-h,false)=0px,
              * (x,H-y-h,true)=8784px 全中 —— 等价的两组正好互为镜像, 选直接写法。 */
-            sg_apply_scissor_rect(cx1, cy1, cx2 - cx1 + 1, cy2 - cy1 + 1, false);
+            /* v2.5 去重: sokol 对 scissor 无缓存, 相邻命令裁剪区相同则省下这次 glScissor */
+            if (cx1 != s_g_sc_x || cy1 != s_g_sc_y || scw != s_g_sc_w || sch != s_g_sc_h) {
+                sg_apply_scissor_rect(cx1, cy1, scw, sch, false);
+                s_g_sc_x = cx1; s_g_sc_y = cy1; s_g_sc_w = scw; s_g_sc_h = sch;
+            }
         }
         if (c->pip == 2) {
             /* 光追: 视口=目标矩形, 用整屏 blit 四边形(NDC), fs 依据 u_rect 反推局部像素 */
@@ -1240,26 +1275,41 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
             u[2] = (float)w; u[3] = (float)h;
             u[4] = c->time;
             sg_apply_pipeline(s_pip_raymarch);
+            s_g_pip = s_pip_raymarch.id;   /* 同步状态去重缓存 */
             sg_apply_uniforms(0, &(sg_range){ u, sizeof(u) });
             sg_apply_viewport(c->cx1, c->cy1, w, h, true);
             sg_bindings rb = {0};
             rb.vertex_buffers[0] = s_blit_vb;
             rb.index_buffer = s_blit_ib;
             sg_apply_bindings(&rb);
+            s_g_vb = s_blit_vb.id; s_g_ib = s_blit_ib.id; s_g_view = 0; s_g_smp = 0;
             sg_draw(0, 6, 1);
             sg_apply_viewport(0, 0, s_w, s_h, true);   /* 复原, 免得影响后续命令 */
             continue;
         }
-        sg_apply_pipeline(c->pip == 0 ? s_pip_solid :
-                          (c->pip == 3 ? s_pip_sdf : (c->pip == 4 ? s_pip_quad : s_pip_tex)));
-        sg_bindings b = {0};
-        b.vertex_buffers[0] = s_vbuf;
-        b.index_buffer = s_ibuf;
+        sg_pipeline p = (c->pip == 0 ? s_pip_solid :
+                         (c->pip == 3 ? s_pip_sdf : (c->pip == 4 ? s_pip_quad : s_pip_tex)));
+        /* v2.5 去重修正(关键): sokol 在 sg_apply_pipeline 内会把 applied_bindings_and_uniforms
+         * 清零(sokol_gfx.h:25030), sg_draw 时校验 required == applied(25370) ——
+         * 因此【只要真的下发了管线, 就必须重新 sg_apply_bindings】, 否则相邻命令"管线变、绑定集不变"
+         * (典型: solid 与 sdf 都是无纹理同 vb/ib)会跳过绑定 → 校验层 panic 中止。
+         * 仅当未下发管线时才允许按绑定键去重。 */
+        int pip_changed = 0;
+        if (p.id != s_g_pip) { sg_apply_pipeline(p); s_g_pip = p.id; pip_changed = 1; }
+        uint32_t vw = 0, sm = 0;
         if ((c->pip == 1 || c->pip == 4) && c->tex >= 0) {
-            b.views[0] = s_tex[c->tex].view;
-            b.samplers[0] = s_tex[c->tex].smp;
+            vw = s_tex[c->tex].view.id; sm = s_tex[c->tex].smp.id;
         }
-        sg_apply_bindings(&b);
+        /* v2.5 去重: vb/ib/纹理/采样器与上条命令相同则整个 sg_apply_bindings 跳过
+         * (sokol 内部虽有部分缓存, 但每次仍要走校验 + 逐属性比较) */
+        if (pip_changed || s_vbuf.id != s_g_vb || s_ibuf.id != s_g_ib || vw != s_g_view || sm != s_g_smp) {
+            sg_bindings b = {0};
+            b.vertex_buffers[0] = s_vbuf;
+            b.index_buffer = s_ibuf;
+            if (vw) { b.views[0].id = vw; b.samplers[0].id = sm; }
+            sg_apply_bindings(&b);
+            s_g_vb = s_vbuf.id; s_g_ib = s_ibuf.id; s_g_view = vw; s_g_smp = sm;
+        }
         sg_draw(c->first, c->count, 1);   /* 索引绘制: base_element = 索引偏移 ✓ */
     }
     sg_end_pass();
@@ -1269,6 +1319,7 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
         .action = { .colors[0] = { .load_action = SG_LOADACTION_CLEAR,
                                    .clear_value = { 0.0f, 0.0f, 0.0f, 1.0f } } },
         .swapchain = sglue_swapchain() });
+    glstate_reset();          /* swapchain pass 开始: scissor 已被 sokol 重置, 缓存作废 */
     sg_apply_scissor_rect(0, 0, s_w, s_h, true);   /* 整屏 blit 不受之前命令的裁剪影响 */
     sg_apply_pipeline(s_pip_tex);
     sg_bindings bb = {0};
@@ -1349,6 +1400,7 @@ void fxtk_sokol_apply_size(int w, int h)
     if (h < 120) h = 120;
     if (w == s_w && h == s_h) return;
     s_w = w; s_h = h;
+    ndc_update();
     fx_sokol_driver.width = (uint32_t)s_w;
     fx_sokol_driver.height = (uint32_t)s_h;
     free(s_fb); s_fb = NULL; s_fb_w = s_fb_h = 0; s_dirty = 0;
