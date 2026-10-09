@@ -571,26 +571,37 @@ static int fx_dbg_on(void)
 #if FXTK_DEBUG_LOG
     return 1;
 #else
-    return getenv("FXTK_RECTDBG") != NULL;
+    /* v2.5 性能: getenv 每次调用都线性扫环境变量表, 而该函数在图元热路径上
+     * 每帧被调用数百万次(fx_rect_dbg 的入口)。环境变量是启动期开关, 缓存一次即可。 */
+    static int s_dbg = -1;
+    if (s_dbg < 0) s_dbg = getenv("FXTK_RECTDBG") != NULL;
+    return s_dbg;
 #endif
 }
 
-static void fx_rect_dbg(const char *who, int x1, int y1, int x2, int y2);   /* 前置声明 */
+static void fx_rect_dbg_impl(const char *who, int x1, int y1, int x2, int y2);   /* 冷路径(取证开启时才执行) */
 
-static void fx_rect_dbg_r(const char *who, int x1, int y1, int x2, int y2, int r)
+/* v2.5 性能: 取证开关已缓存, 把"关"时的早退内联到调用点 —— 这两个函数在图元热路径上
+ * 每帧被调用数百万次, 原来每次都是一个完整函数调用 + getenv。 */
+static inline void fx_rect_dbg(const char *who, int x1, int y1, int x2, int y2)
 {
-    if (r < -512 || r > 512) {   /* 半径异常: 单独报一次 */
-        if (fx_dbg_on())
-            fprintf(stderr, "[rectdbg] %s(%d,%d,%d,%d) r=%d 半径异常\n", who, x1, y1, x2, y2, r);
-    }
-    fx_rect_dbg(who, x1, y1, x2, y2);
+    if (!fx_dbg_on()) return;
+    fx_rect_dbg_impl(who, x1, y1, x2, y2);
 }
 
-static void fx_rect_dbg(const char *who, int x1, int y1, int x2, int y2)
+static inline void fx_rect_dbg_r(const char *who, int x1, int y1, int x2, int y2, int r)
+{
+    if (!fx_dbg_on()) return;
+    if (r < -512 || r > 512) {   /* 半径异常: 单独报一次 */
+        fprintf(stderr, "[rectdbg] %s(%d,%d,%d,%d) r=%d 半径异常\n", who, x1, y1, x2, y2, r);
+    }
+    fx_rect_dbg_impl(who, x1, y1, x2, y2);
+}
+
+static void fx_rect_dbg_impl(const char *who, int x1, int y1, int x2, int y2)
 {
     static char seen[64][48];
     static int nseen = 0;
-    if (!fx_dbg_on()) return;
     long w = (long)x2 - x1 + 1, h = (long)y2 - y1 + 1;
     if (w < 0) w = -w;
     if (h < 0) h = -h;
@@ -772,25 +783,61 @@ void fx_fill_rect(int x1, int y1, int x2, int y2)
             fxtk_put_px(x, y, s_color);
 }
 
-static int isqrt(int n)
+/* v2.5 性能: sqrtf 一次到位 + ±1 校正(校正循环几乎从不执行, 且用 64 位比较防溢出)。
+ * IEEE sqrt 是正确舍入的, 与 floor(sqrt(n)) 最多差 1, 校正后与原二分查找结果逐位相同。 */
+static inline int isqrt(int n)
 {
     if (n <= 0) return 0;
-    int lo = 0, hi = 65536;
-    while (lo < hi) {
-        int mid = (lo + hi + 1) / 2;
-        if (mid * mid <= n) lo = mid; else hi = mid - 1;
-    }
-    return lo;
+    int r = (int)sqrtf((float)n);
+    while ((long)(r + 1) * (r + 1) <= (long)n) r++;
+    while ((long)r * r > (long)n) r--;
+    return r;
 }
 
-static void round_cut(int y, int y1, int y2, int r, int *lcut, int *rcut)
+/* v2.5 性能: 圆角每行裁剪量只取决于 (r, 行序号) —— 压测页每帧上百万次 fx_fill_rect_round
+ * 的半径高度重复(按钮/输入框固定几个值), 小半径整列缓存后命中零 sqrt。
+ * 缓存值由同一 isqrt 算出, 与现算逐位相同。 */
+#define FX_RCUT_MAX 64
+static uint8_t s_rcut[FX_RCUT_MAX + 1][FX_RCUT_MAX];   /* [r][i]: 距最近直边第 i 行(i<r)的裁剪量 */
+static uint8_t s_rcut_ok[FX_RCUT_MAX + 1];
+static const uint8_t *rcut_table(int r)
 {
-    *lcut = 0; *rcut = 0;
-    int dy;
-    if (y - y1 < r) dy = r - (y - y1);
-    else if (y2 - y < r) dy = r - (y2 - y);
-    else return;
-    *lcut = *rcut = r - isqrt(r * r - dy * dy);
+    if (r > FX_RCUT_MAX) return NULL;
+    if (!s_rcut_ok[r]) {
+        for (int i = 0; i < r; i++) { int dy = r - i; s_rcut[r][i] = (uint8_t)(r - isqrt(r * r - dy * dy)); }
+        s_rcut_ok[r] = 1;
+    }
+    return s_rcut[r];
+}
+/* 与 round_cut 同语义(上下重叠区优先取上缘公式), 命中表时 O(1) */
+static inline int row_cut(int y, int y1, int y2, int r, const uint8_t *cuts)
+{
+    int i;
+    if (y - y1 < r) i = y - y1;
+    else if (y2 - y < r) i = y2 - y;
+    else return 0;
+    if (cuts) return cuts[i];
+    { int dy = r - i; return r - isqrt(r * r - dy * dy); }
+}
+
+/* v2.5 性能: 连续相同 (lc,rc) 的边缘行纵向合并为一次驱动调用。
+ * 与逐行 fx_draw_hline 像素完全一致(同一 x 区间、连续行区间与裁剪求交等价于逐行判定);
+ * 无驱动 fill_rect 钩子或离屏绘制时回退逐行路径(语义不变)。 */
+static inline void hline_span(int x1, int x2, int ya, int yb)
+{
+    if (!s_offing && s_drv && s_drv->fill_rect) {
+        if (x1 > x2) { int t = x1; x1 = x2; x2 = t; }
+        if (x1 < s_clip_x1) x1 = s_clip_x1;
+        if (x2 > s_clip_x2) x2 = s_clip_x2;
+        if (x1 > x2) return;
+        if (yb < s_clip_y1 || ya > s_clip_y2) return;
+        if (ya < s_clip_y1) ya = s_clip_y1;
+        if (yb > s_clip_y2) yb = s_clip_y2;
+        s_drv->fill_rect((uint16_t)(x1 + s_ox), (uint16_t)(ya + s_oy),
+                         (uint16_t)(x2 + s_ox), (uint16_t)(yb + s_oy), s_color);
+        return;
+    }
+    for (int y = ya; y <= yb; y++) fx_draw_hline(x1, x2, y);
 }
 
 /* 渐变填充: 从 c1 到 c2 线性过渡 (vertical=1 上下, 0 左右), 逐行/逐列画 */
@@ -844,15 +891,25 @@ void fx_fill_rect_round(int x1, int y1, int x2, int y2, int r)
      * (2816 控件压测实测该函数占 40% 自身耗时)。像素结果与逐行版本完全一致。 */
     int my1 = y1 + r, my2 = y2 - r;
     if (my1 <= my2) fx_fill_rect(x1, my1, x2, my2);
-    for (int y = y1; y < my1; y++) {
-        int lc, rc;
-        round_cut(y, y1, y2, r, &lc, &rc);
-        fx_draw_hline(x1 + lc, x2 - rc, y);
-    }
-    for (int y = my2 + 1; y <= y2; y++) {
-        int lc, rc;
-        round_cut(y, y1, y2, r, &lc, &rc);
-        fx_draw_hline(x1 + lc, x2 - rc, y);
+    /* v2.5: 相邻行裁剪量相同 → 合并成一段提交(对圆角上缘 isqrt 平台期尤其有效),
+     * 每行裁剪量查表(小半径)零 sqrt; 像素与逐行 fx_draw_hline 完全一致, 驱动调用数约减半。 */
+    const uint8_t *cuts = rcut_table(r);
+    for (int band = 0; band < 2; band++) {
+        int ya = band ? my2 + 1 : y1, yb = band ? y2 : my1 - 1;
+        int run_y = ya, run_c = -1;
+        for (int y = ya; y <= yb; y++) {
+            /* v2.5 性能: band0 每行必命中 row_cut 上缘分支(i=y-y1), band1 必命中下缘分支(i=y2-y)
+             * (r 已夹到 h/2, 另一分支与"直边返回0"在本 band 内不可达) → 每行省两次比较。
+             * 取值与 row_cut 逐项相等, 发出的矩形序列不变。 */
+            int i = band ? (y2 - y) : (y - y1);
+            int c;
+            if (cuts) c = cuts[i];
+            else { int dy = r - i; c = r - isqrt(r * r - dy * dy); }
+            if (c == run_c) continue;
+            if (run_c >= 0) hline_span(x1 + run_c, x2 - run_c, run_y, y - 1);
+            run_y = y; run_c = c;
+        }
+        if (run_c >= 0) hline_span(x1 + run_c, x2 - run_c, run_y, yb);
     }
 }
 

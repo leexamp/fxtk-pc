@@ -45,3 +45,7 @@ demo-main/test/render_canvas
 your_app/your_app
 your_app/libfxtk*.so
 your_app/dist/
+
+# 会话工作数据(memory 等)与本地回收站, 不入库
+.workbuddy/
+.Trash-0/

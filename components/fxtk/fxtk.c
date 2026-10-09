@@ -49,6 +49,7 @@ static int s_wheel_acc = 0;
 static int s_sx1000 = 1000, s_sy1000 = 1000;
 
 static void redraw_widget_now(fx_widget_t *w);
+static void layout_one(fx_widget_t *c);   /* v2.5: 单控件布局(创建时增量用), 定义在布局区 */
 int fxtk_fps(void);
 static int s_fpsdbg_on = 0;   /* 左下角 FPS 调试信息, 默认关 (demo 才开) */
 void fxtk_set_fps_debug(int on) { s_fpsdbg_on = on ? 1 : 0; }
@@ -281,9 +282,19 @@ fx_widget_t *fx_widget_new_impl(int type, fx_attr_t attrs[])
         if (w->text_buf) { memcpy(w->text_buf, w->title, 127); w->text_buf[127]=0; }
         w->caret = w->anchor = (int)strlen(w->text_buf ? w->text_buf : "");
     }
-    if (type == FX_W_TAB) { int n=1; 
+    if (type == FX_W_TAB) { int n=1;
     for(const char *p=w->title; *p; p++) if (*p==',') n++; w->lines=(int16_t)n; }
-    fx_layout(); fx_repaint();
+    w->title_tw = -1;   /* v2.5: 标题宽度缓存初始失效 */
+    /* v2.5 性能: 只布局新控件自身(它还没有子件)。全量 fx_layout 对每个新控件都是 O(n) 重算,
+     * 批量建控件(压测页)时是 O(n²); 单件布局与全量重算结果一致(同样的输入参数),
+     * 不可见祖先下的新控件与 fx_layout 一样保持零矩形(等 fx_set_visible 触发全量)。 */
+    if (s_drv) {
+        int anc_vis = 1;
+        for (fx_widget_t *p = w->parent; p; p = p->parent)
+            if (!(p->flags & FX_F_VISIBLE)) { anc_vis = 0; break; }
+        if (anc_vis) layout_one(w);
+    }
+    fx_repaint();
     if (type == FX_W_CANVAS && fxtk_aa()) fx_canvas_enable_buf(w);   /* v2.2: 开抗锯齿的画布自动离屏, 以便边缘混合 */
     return w;
 }
@@ -291,7 +302,9 @@ fx_widget_t *fx_widget_new_impl(int type, fx_attr_t attrs[])
 fx_widget_t *fx_find(const char *n)
 {
     if (!n) return NULL;
-    for (int i = 0; i < FX_MAX_WIDGETS; i++)
+    /* v2.5 性能: 只扫到高水位 —— 存活控件不会出现在 s_pool_high 之上(分配时单调抬升),
+     * 池上限 8192 时每次查找少扫数千个空槽。 */
+    for (int i = 0; i < s_pool_high; i++)
         if (s_pool[i].type != FX_W_NONE && s_pool[i].name[0] && strcmp(s_pool[i].name, n)==0) return &s_pool[i];
     return NULL;
 }
@@ -376,6 +389,38 @@ void fxtk_apply_fit(fx_widget_t *w){   /* 绘制期幂等fit: 从父+设计坐�
     w->y1=(int16_t)(cy-nh/2); w->y2=(int16_t)(w->y1+nh-1);
 }
 static void layout_children(fx_widget_t *p);
+/* v2.5: 单控件布局(从 layout_children 循环体原样提取, 供"创建时只布局新控件"复用) */
+static void layout_one(fx_widget_t *c)
+{
+    fx_widget_t *p = c->parent;
+    if (!p) return;
+    switch (c->pos_mode) {
+    case FX_POS_PIXEL:
+        c->x1=(int16_t)(p->x1+(int32_t)c->ox1*s_sx1000/1000); c->y1=(int16_t)(p->y1+(int32_t)c->oy1*s_sy1000/1000);
+        c->x2=(int16_t)(p->x1+(int32_t)c->ox2*s_sx1000/1000); c->y2=(int16_t)(p->y1+(int32_t)c->oy2*s_sy1000/1000);
+        break;
+    case FX_POS_PERCENT: {
+        int pw=p->x2-p->x1+1, ph=p->y2-p->y1+1;
+        c->x1=(int16_t)(p->x1+(int32_t)pw*c->px1/1000); c->y1=(int16_t)(p->y1+(int32_t)ph*c->py1/1000);
+        c->x2=(int16_t)(p->x1+(int32_t)pw*c->px2/1000-1); c->y2=(int16_t)(p->y1+(int32_t)ph*c->py2/1000-1);
+        break; }
+    case FX_POS_FIXED: break;   /* 弹层: 保留直写坐标 */
+    case FX_POS_GRID: {
+        fx_widget_t *g=c->grid_ref;
+        /* v2.3.1: grid 晚于子件创建时布局期重解析 (旧逻辑只在创建瞬间解析一次,
+         * 先子后父/名字打错 → 子件永远停在 (0,0,0,0) 且无任何提示) */
+        if (!g && c->gname) {
+            g = c->grid_ref = fx_find(c->gname);
+            if (!g) fx_log(FX_LOG_WARN, "grid '%s' 不存在(控件 '%s')", c->gname, c->name);
+        }
+        if (g && g->lines>0 && g->rows>0) {
+            int cw=(g->x2-g->x1+1)/g->rows, ch=(g->y2-g->y1+1)/g->lines;
+            c->x1=(int16_t)(g->x1+(c->gc1-1)*cw); c->y1=(int16_t)(g->y1+(c->gr1-1)*ch);
+            c->x2=(int16_t)(g->x1+c->gc2*cw-1); c->y2=(int16_t)(g->y1+c->gr2*ch-1);
+        } break; }
+    }
+    clamp_ctrl(c);
+}
 void fx_layout(void)
 {
     if (!s_drv) return;
@@ -388,32 +433,7 @@ static void layout_children(fx_widget_t *p)
 {
     for (fx_widget_t *c=p->child; c; c=c->sibling) {
         if (!(c->flags & FX_F_VISIBLE)) continue;
-        switch (c->pos_mode) {
-        case FX_POS_PIXEL:
-            c->x1=(int16_t)(p->x1+(int32_t)c->ox1*s_sx1000/1000); c->y1=(int16_t)(p->y1+(int32_t)c->oy1*s_sy1000/1000);
-            c->x2=(int16_t)(p->x1+(int32_t)c->ox2*s_sx1000/1000); c->y2=(int16_t)(p->y1+(int32_t)c->oy2*s_sy1000/1000);
-            break;
-        case FX_POS_PERCENT: {
-            int pw=p->x2-p->x1+1, ph=p->y2-p->y1+1;
-            c->x1=(int16_t)(p->x1+(int32_t)pw*c->px1/1000); c->y1=(int16_t)(p->y1+(int32_t)ph*c->py1/1000);
-            c->x2=(int16_t)(p->x1+(int32_t)pw*c->px2/1000-1); c->y2=(int16_t)(p->y1+(int32_t)ph*c->py2/1000-1);
-            break; }
-        case FX_POS_FIXED: break;   /* 弹层: 保留直写坐标 */
-        case FX_POS_GRID: {
-            fx_widget_t *g=c->grid_ref;
-            /* v2.3.1: grid 晚于子件创建时布局期重解析 (旧逻辑只在创建瞬间解析一次,
-             * 先子后父/名字打错 → 子件永远停在 (0,0,0,0) 且无任何提示) */
-            if (!g && c->gname) {
-                g = c->grid_ref = fx_find(c->gname);
-                if (!g) fx_log(FX_LOG_WARN, "grid '%s' 不存在(控件 '%s')", c->gname, c->name);
-            }
-            if (g && g->lines>0 && g->rows>0) {
-                int cw=(g->x2-g->x1+1)/g->rows, ch=(g->y2-g->y1+1)/g->lines;
-                c->x1=(int16_t)(g->x1+(c->gc1-1)*cw); c->y1=(int16_t)(g->y1+(c->gr1-1)*ch);
-                c->x2=(int16_t)(g->x1+c->gc2*cw-1); c->y2=(int16_t)(g->y1+c->gr2*ch-1);
-            } break; }
-        }
-        clamp_ctrl(c);
+        layout_one(c);
         layout_children(c);
     }
 }
@@ -902,7 +922,10 @@ void fx_repaint(void){s_full=1;s_repaint=1;s_dirty_n=0;}
  * 要真正启用脏区合并, 需要: ①去掉这里的 s_full=1 ②把合并结果交给 redraw_region 逐块重绘
  * ③用连续多帧逐像素对比验证无残影(尤其滚动/悬停/光标闪烁/画布内控件移动)。 */
 void fx_repaint_rect(int x1,int y1,int x2,int y2)
-{ s_full=1;   /* 见上方说明: 这一行让下面的合并逻辑当前不可达 */
+{ if (s_full) return;   /* v2.5 性能: s_full=1 时本帧必整帧重绘, 下面的脏区合并纯属空转
+                         * (fx_poll 的 s_full 分支先于脏区分支消费并把 s_dirty_n 清零)。
+                         * 压测页每帧数千万次调用几乎全部落在这个早退上。 */
+  s_full=1;   /* 见上方说明: 这一行让下面的合并逻辑当前不可达 */
     if (!s_drv) return;
     if (x1<0)x1=0;
     if (y1<0)y1=0;
@@ -982,6 +1005,7 @@ void fx_set_title(fx_widget_t *w,const char *s)
     if(!w)return;
     s = s ? s : "";
     strncpy(w->title, s, sizeof(w->title)-1); w->title[sizeof(w->title)-1]=0;
+    w->title_tw = -1;   /* v2.5: 标题变了, 宽度缓存失效 */
     if (w->type == FX_W_TEXTEDIT && w->text_buf) {
         int ul = (int)strlen(s);
         if (w->text_max > 0) {                     /* 与 te_insert 一致: 尊重字数上限(按字符, 不切断 UTF-8) */

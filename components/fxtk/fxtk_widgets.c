@@ -18,18 +18,29 @@ static float fx_ease_out(float t) { if (t <= 0.0f) return 0.0f; if (t >= 1.0f) r
 #include <stdio.h>
 
 void fxtk_apply_fit(fx_widget_t *w);
-static fx_color_t darken(fx_color_t c)
+static inline fx_color_t darken(fx_color_t c)
 {
     uint32_t r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
     return (fx_color_t)((r / 2) << 16 | (g / 2) << 8 | (b / 2));
 }
 
-static fx_color_t btn_mix(fx_color_t a, fx_color_t b, int t)
+static inline fx_color_t btn_mix(fx_color_t a, fx_color_t b, int t)
 {   /* t: 0~256, b 的占比 */
     int ar=(a>>16)&255, ag=(a>>8)&255, ab=a&255;
     int br=(b>>16)&255, bg=(b>>8)&255, bb=b&255;
     int r=(ar*(256-t)+br*t+128)>>8, g=(ag*(256-t)+bg*t+128)>>8, bl=(ab*(256-t)+bb*t+128)>>8;
     return (fx_color_t)((r<<16)|(g<<8)|bl);
+}
+/* v2.5 性能: 标题宽度缓存 —— 压测页几千个按钮每帧各自哈希查表量同一串文字的宽度。
+ * 标题只能经 fx_set_title/控件创建改写(两处都已把缓存置 -1 失效), 字体在启动期装载,
+ * 因此 (title, 字号) 不变时宽度必然不变。 */
+static inline int widget_title_w(fx_widget_t *w, int fs)
+{
+    if (w->title_tw < 0 || w->title_tw_fs != fs) {
+        w->title_tw = fxtk_text_width_size(fs, w->title);
+        w->title_tw_fs = fs;
+    }
+    return w->title_tw;
 }
 #if FXTK_WIDGET_BUTTON
 /* v2.4.3 动画: 按钮按下/松开的压暗量缓动(80ms)。
@@ -73,29 +84,37 @@ void fxtk_draw_button(fx_widget_t *w)
     int r = FX_TOK_RADIUS_BTN;
     if (r > ch/2) r = ch/2; if (r > cw/2) r = cw/2;
     int amt = button_press_amt(w, pr);
-    fx_set_color(amt ? btn_mix(w->bg, FX_BLACK, amt) : w->bg);
+    /* v2.5 性能: 压暗底色只算一次(填充与文字底色复用), 横线端点 x1+r/x2-r 复用局部变量 */
+    fx_color_t body = amt ? btn_mix(w->bg, FX_BLACK, amt) : w->bg;
+    int xa = w->x1 + r, xb = w->x2 - r;
+    fx_set_color(body);
     fx_fill_rect_round(w->x1, w->y1, w->x2, w->y2, r);
     if (!pr) {
         fx_set_color(btn_mix(w->bg, FX_WHITE, 90));          /* 顶高光 */
-        fx_draw_hline(w->x1 + r, w->x2 - r, w->y1 + 1);
+        fx_draw_hline(xa, xb, w->y1 + 1);
         fx_set_color(btn_mix(w->bg, FX_BLACK, 60));          /* 底阴影 */
-        fx_draw_hline(w->x1 + r, w->x2 - r, w->y2 - 1);
+        fx_draw_hline(xa, xb, w->y2 - 1);
     } else {
         fx_set_color(btn_mix(w->bg, FX_BLACK, 90));          /* 按下: 顶变阴影=内凹 */
-        fx_draw_hline(w->x1 + r, w->x2 - r, w->y1 + 1);
+        fx_draw_hline(xa, xb, w->y1 + 1);
     }
-    fx_set_color(pr ? FX_TOK_EDGE_DOWN : btn_mix(w->bg, FX_BLACK, FX_TOK_BTN_EDGE_MIX));   /* 1px 同系深边(加深以提高分离度) */
-    fx_draw_hline(w->x1 + r, w->x2 - r, w->y1);
-    fx_draw_hline(w->x1 + r, w->x2 - r, w->y2);
-    fx_draw_vline(w->x1, w->y1 + r, w->y2 - r);
-    fx_draw_vline(w->x2, w->y1 + r, w->y2 - r);
+    /* v2.5 性能: 描边色与底色相同且中间带存在(2r<ch)时, 4 条边落点已被填充覆盖 → 跳过(像素等价)。
+     * 2r==ch 时竖线会画到填充未覆盖的行, 不可跳过。 */
+    fx_color_t edge = pr ? FX_TOK_EDGE_DOWN : btn_mix(w->bg, FX_BLACK, FX_TOK_BTN_EDGE_MIX);   /* 1px 同系深边(加深以提高分离度) */
+    if (edge != body || 2 * r >= ch) {
+        fx_set_color(edge);
+        fx_draw_hline(xa, xb, w->y1);
+        fx_draw_hline(xa, xb, w->y2);
+        fx_draw_vline(w->x1, w->y1 + r, w->y2 - r);
+        fx_draw_vline(w->x2, w->y1 + r, w->y2 - r);
+    }
     if (w->title[0]) {
         int fs = w->lines > 0 ? w->lines : 0;
         int th = fs > 0 ? fs + 4 : 18;
-        int tw = fxtk_text_width_size(fs, w->title);
+        int tw = widget_title_w(w, fs);
         /* v2.4.2: 按下时按钮整体压暗了, 但文字块的底色还是原来的 w->bg → 文字后面留一块"旧色"的方块
          * (用户反馈"按下按钮后字体背景颜色未及时改变")。让文字底色跟随按下态一起变。 */
-        fx_color_t lbl_bg = amt ? btn_mix(w->bg, FX_BLACK, amt) : w->bg;
+        fx_color_t lbl_bg = body;
         if (fs <= 0) fx_draw_text_c(w->x1 + (cw-tw)/2 + pr, w->y1 + (ch-18)/2 + pr,
                           w->title, w->fg, lbl_bg);
         else fxtk_draw_text_size(fs, w->x1 + (cw-tw)/2 + pr, w->y1 + (ch-th)/2 + pr,
@@ -111,7 +130,7 @@ void fxtk_draw_label(fx_widget_t *w)
     if (!w->title[0]) return;
     int fs = w->lines > 0 ? w->lines : 0;
     int cw = w->x2-w->x1+1, ch = w->y2-w->y1+1;
-    int tw = fxtk_text_width_size(fs, w->title);
+    int tw = widget_title_w(w, fs);
     int th = fs > 0 ? fs + 4 : 18;
     int x = w->x1;
     if (w->rows == 1) x = w->x1 + (cw - tw) / 2;

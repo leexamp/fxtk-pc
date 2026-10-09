@@ -95,6 +95,8 @@ struct fx_widget {
     const char *gname;   /* v2.3.1: grid 引用名 (须指向静态字符串, 如字面量), 供 fx_layout 晚绑定重解析 */
     char name[24];
     char title[128];
+    int title_tw;       /* v2.5: 标题渲染宽度缓存 (-1=失效); 只在 fx_set_title/创建时失效 */
+    int title_tw_fs;    /* 缓存对应的字号 (lines) */
     char *text_buf; int text_cap;
     int caret, anchor, text_max;
     int16_t scroll_y, content_h;  /* 滚动偏移 / 内容总高 */  /* 光标/选区锚点/字数上限(0=无限) */  /* TEXTEDIT 动态文本 (可无限长) */

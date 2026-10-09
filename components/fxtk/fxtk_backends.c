@@ -333,8 +333,10 @@ int fx_dir_create(const char *path) { (void)path; return 1; }
 int fx_file_exists(const char *path)
 {
     if (!path) return 0;
-    FILE *f = fopen(path, "rb");
-    if (f) { fclose(f); return 1; }
+    /* v2.4.5 性能: 单次存在性检查即可 —— 原实现先 fopen 再 access, 最坏 3 次系统调用
+     * (fopen 失败 → open+close 落空 + access)。语义完全等价: fopen 成功 ⇒ 路径存在 ⇒
+     * access(F_OK)==0; access!=0 ⇒ 路径不存在 ⇒ fopen 必失败。返回真值与旧实现逐点一致。
+     * (该函数在 fx_dir_create 的兜底分支每 prefs 保存/加载都会走到。) */
 #if defined(_WIN32)
     return _access(path, 0) == 0;
 #else
@@ -658,6 +660,7 @@ int fx_clip_get(char *buf, int cap)
 #define PREFS_MAX 64
 static struct { char k[32]; char v[160]; } s_prefs[PREFS_MAX];
 static int s_prefs_n = 0;
+static int s_prefs_dirty = 0;   /* v2.4.5: 脏标记 —— fx_prefs_save 只在有变更时才真正写盘 */
 
 static int prefs_find(const char *key)
 {
@@ -675,6 +678,7 @@ int fx_prefs_set(const char *key, const char *val)
         snprintf(s_prefs[i].k, sizeof(s_prefs[i].k), "%s", key);
     }
     snprintf(s_prefs[i].v, sizeof(s_prefs[i].v), "%s", val ? val : "");
+    s_prefs_dirty = 1;
     return 1;
 }
 
@@ -693,6 +697,10 @@ int fx_prefs_get(const char *key, char *buf, int cap)
 
 int fx_prefs_save(void)
 {
+    /* v2.4.5 性能: 无变更时跳过落盘 —— 旧实现每次调用都重建 blob + 整文件重写,
+     * 若宿主在帧循环里周期性调 save 就是"每帧写盘"。键值内容与磁盘已一致时
+     * 重写结果相同, 跳过不改变任何可观察的键值行为; 返回 1 表示"状态已持久化"。 */
+    if (!s_prefs_dirty) return 1;
     char dir[512], path[600];
     if (!fx_dir_app(dir, sizeof(dir))) return 0;
     if (!fx_path_join(path, sizeof(path), dir, "fxtk_prefs.ini")) return 0;
@@ -700,7 +708,9 @@ int fx_prefs_save(void)
     int off = 0;
     for (int i = 0; i < s_prefs_n; i++)
         off += snprintf(blob + off, sizeof(blob) - (size_t)off, "%s=%s\n", s_prefs[i].k, s_prefs[i].v);
-    return fx_file_write(path, blob, off, 0);
+    int ok = fx_file_write(path, blob, off, 0);
+    if (ok) s_prefs_dirty = 0;
+    return ok;
 }
 
 int fx_prefs_load(void)
@@ -721,6 +731,7 @@ int fx_prefs_load(void)
         line = nl ? nl + 1 : NULL;
     }
     fx_file_free(blob);
+    s_prefs_dirty = 0;   /* v2.4.5: 刚与磁盘同步, 视为干净 (fx_prefs_set 会置脏, 这里复位) */
     return 1;
 }
 

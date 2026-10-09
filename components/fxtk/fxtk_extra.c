@@ -52,16 +52,20 @@ static void ex_draw_list(ex_slot_t *s, int cw, int ch)
     { if (lr > ch/2) lr = ch/2; if (lr > cw/2) lr = cw/2; }
     fx_set_color(s->w?s->w->bg:FX_WHITE); fx_fill_rect_round(0,0,cw-1,ch-1,lr);
     fx_set_color(FX_TOK_LIST_EDGE);       fx_draw_rect_round(0,0,cw-1,ch-1,lr);
-    int vis=(ch-2)/ex_rh(s);
+    /* v2.4.5 性能: 行高与触摸态在单次绘制内不变, 只算/只读一次 —— 原实现每个可见行
+     * 都调 ex_rh()(内部含 getenv("FXTK_COMPACT"))并重复 fx_touch_state, 行数多时开销可观。
+     * 两者都只是读全局快照, 提升后结果逐位一致。 */
+    int rh = ex_rh(s);
+    int mx,my,mp; fx_touch_state(&mx,&my,&mp); (void)mp;
+    int hov=-1; { int lx=mx-s->w->x1, ly=my-s->w->y1;
+    if (lx>=0&&lx<cw&&ly>=1&&ly<ch-1) hov=(ly-1)/rh+s->scroll; }
+    int vis=(ch-2)/rh;
     if (vis>s->n-s->scroll) vis=s->n-s->scroll;
     for(int i=0;i<vis;i++){
-        int idx=s->scroll+i, y=1+i*ex_rh(s);
+        int idx=s->scroll+i, y=1+i*rh;
         if (!s->items[idx]) continue;
-        int mx,my,mp; fx_touch_state(&mx,&my,&mp);
-        int hov=-1; { int lx=mx-s->w->x1, ly=my-s->w->y1;
-        if (lx>=0&&lx<cw&&ly>=1&&ly<ch-1) hov=(ly-1)/ex_rh(s)+s->scroll; }
         /* 行高亮: 内缩 2px 的圆角胶囊, 不再顶格贴住外框(与标签页选中态同一套语言) */
-        int hy0 = y, hy1 = y + ex_rh(s) - 1;
+        int hy0 = y, hy1 = y + rh - 1;
         int sel_or_hov = (idx==s->sel) ? 1 : (idx==hov ? 2 : 0);
         if (sel_or_hov) {
             int hr = FX_TOK_RADIUS_S; int hh = hy1 - hy0 + 1;
@@ -74,14 +78,12 @@ static void ex_draw_list(ex_slot_t *s, int cw, int ch)
                        idx==s->sel ? FX_TOK_ON_PRIMARY : FX_TOK_TEXT,
                        idx==s->sel ? FX_TOK_PRIMARY   : (idx==hov ? FX_TOK_LIST_HOVER : (s->w?s->w->bg:FX_WHITE)));
     }
-    { int mx,my,mp; fx_touch_state(&mx,&my,&mp); int hv=-1; int lx=mx-s->w->x1, ly=my-s->w->y1;
-    if (lx>=0&&lx<cw&&ly>=1&&ly<ch-1) hv=(ly-1)/ex_rh(s)+s->scroll;
-    if (hv!=s->hov){ s->hov=hv; fx_repaint_rect(s->w->x1,s->w->y1,s->w->x2,s->w->y2); } }
-    int total=s->n*ex_rh(s);
+    if (hov!=s->hov){ s->hov=hov; fx_repaint_rect(s->w->x1,s->w->y1,s->w->x2,s->w->y2); }
+    int total=s->n*rh;
     if (total>ch-2){
         int th=(ch-2)*(ch-2)/total;
         if (th<12)th=12;
-        int ty=1+(long)s->scroll*ex_rh(s)*(ch-2-th)/(total-(ch-2));
+        int ty=1+(long)s->scroll*rh*(ch-2-th)/(total-(ch-2));
         fx_set_color(FX_TOK_SCROLL_TRACK); fx_fill_rect(cw-4,1,cw-2,ch-2);
         fx_set_color(FX_TOK_SCROLL_THUMB); fx_fill_rect(cw-4,ty,cw-2,ty+th);
     }
@@ -92,15 +94,16 @@ static void ex_list_cb(fx_widget_t *w, void *ud)
     if (!s)return;
     int x1,y1,x2,y2; fx_widget_rect(w,&x1,&y1,&x2,&y2);
     int cw=x2-x1+1, ch=y2-y1+1;
-    int maxs=s->n-(ch-2)/ex_rh(s);
+    int rh=ex_rh(s);   /* v2.4.5: 单次回调内行高不变, 缓存 (原实现 5 次调用, 每次都 getenv) */
+    int maxs=s->n-(ch-2)/rh;
     if (maxs<0)maxs=0;
-    { int dy=fx_wheel_take(w); s->wacc+=dy; int dr=s->wacc/ex_rh(s); s->wacc-=dr*ex_rh(s); s->scroll-=dr; }
+    { int dy=fx_wheel_take(w); s->wacc+=dy; int dr=s->wacc/rh; s->wacc-=dr*rh; s->scroll-=dr; }
     if(s->scroll<0)s->scroll=0;
     if (s->scroll>maxs)s->scroll=maxs;
     int mx,my,mp; fx_touch_state(&mx,&my,&mp);
     int pr=(fx_pressed()==w);
     if (s->was_pr&&!pr&&mx>=x1&&mx<=x2&&my>=y1&&my<=y2){
-        int i=(my-y1-1)/ex_rh(s)+s->scroll;
+        int i=(my-y1-1)/rh+s->scroll;
         if (i>=0&&i<s->n){ s->sel=i;
         if (s->cb)s->cb(w,(void*)(intptr_t)i); }
     }
@@ -202,18 +205,19 @@ static void ex_drop_cb(fx_widget_t *w, void *ud)
         if(s->pop){ ex_close_pop(s); }
         else{
             ex_ensure_pop();
-            int H=s->n*ex_rh(s)+2;
+            int rh=ex_rh(s);   /* v2.4.5: 单次回调内行高不变, 缓存 */
+            int H=s->n*rh+2;
             int down_avail=(fx_height())-4-(y2+2);
             int up_avail=y1-6;
             int up=0;
             if (H>down_avail&&up_avail>down_avail)up=1;
             int avail=up?up_avail:down_avail;
             if (H>avail)H=avail;
-            if (H<ex_rh(s)+2)H=ex_rh(s)+2;
+            if (H<rh+2)H=rh+2;
             /* v2.4.4 修复(崩溃): 原写法在 n==0 时把上一行刚建立的最小高度抹成 0 →
              * 负高度弹层 → ex_draw_list 里 (ch-2)*(ch-2)/total 除零 → SIGFPE。 */
             if (s->n > 0 && H > s->n * ch) H = s->n * ch;
-            int bh=ex_rh(s)+10;
+            int bh=rh+10;
             if (bh>ch)bh=ch; int yb=y1+bh; int py1=up?y1-2-H:yb+2;
             ex_slot_t *ps=ex_get(s_pop);
             if (ps){

@@ -29,12 +29,18 @@ void fx_draw_image_rot(fx_image_t *img, int cx, int cy, int angle_deg, int scale
     int Rx = (int)(hw * fabsf(cs) + hh * fabsf(sn)) + 1;
     int Ry = (int)(hw * fabsf(sn) + hh * fabsf(cs)) + 1;
     float icx = img->w * 0.5f, icy = img->h * 0.5f;
+    /* v2.4.5 性能: 行不变量提升 —— j*sn / j*cs 每行只算一次(原先每像素 2 次乘法),
+     * img->w/h/px 提到局部(put_px 是外部调用, 编译器不敢缓存它们, 每像素重载)。
+     * 浮点运算顺序与原实现完全一致(同样的乘法, 只是少了重复), 输出逐位不变。 */
+    int iw = img->w, ih = img->h;
+    const uint32_t *ipx = img->px;
     for (int j = -Ry; j <= Ry; j++) {
+        float rj_sn = j * sn, rj_cs = j * cs;
         for (int i = -Rx; i <= Rx; i++) {
-            int sx = (int)((i * cs + j * sn) / sc + icx);
-            int sy = (int)((-i * sn + j * cs) / sc + icy);
-            if (sx < 0 || sy < 0 || sx >= img->w || sy >= img->h) continue;
-            fxtk_put_px(cx + i, cy + j, img->px[sy * img->w + sx]);
+            int sx = (int)((i * cs + rj_sn) / sc + icx);
+            int sy = (int)((-i * sn + rj_cs) / sc + icy);
+            if (sx < 0 || sy < 0 || sx >= iw || sy >= ih) continue;
+            fxtk_put_px(cx + i, cy + j, ipx[sy * iw + sx]);
         }
     }
 }
@@ -56,33 +62,40 @@ void fx_fill_polygon_rot(const int16_t *pts, int n, int cx, int cy, int angle_de
 void fx_image_flip_x(fx_image_t *img)
 {
     if (!img) return;
-    for (int y = 0; y < img->h; y++)
-        for (int x = 0; x < img->w / 2; x++) {
-            uint32_t *a = &img->px[y * img->w + x];
-            uint32_t *b = &img->px[y * img->w + img->w - 1 - x];
-            uint32_t t = *a; *a = *b; *b = t;
+    /* v2.4.5 性能: 行指针步进 + 双指针对撞 (原先每像素重算 y*w 与 w-1-x) */
+    int w = img->w, h = img->h;
+    for (int y = 0; y < h; y++) {
+        uint32_t *row = img->px + (size_t)y * w;
+        for (int x = 0, xr = w - 1; x < xr; x++, xr--) {
+            uint32_t t = row[x]; row[x] = row[xr]; row[xr] = t;
         }
+    }
 }
 
 void fx_image_flip_y(fx_image_t *img)
 {
     if (!img) return;
-    for (int y = 0; y < img->h / 2; y++)
-        for (int x = 0; x < img->w; x++) {
-            uint32_t *a = &img->px[y * img->w + x];
-            uint32_t *b = &img->px[(img->h - 1 - y) * img->w + x];
-            uint32_t t = *a; *a = *b; *b = t;
+    /* v2.4.5 性能: 整行对撞交换 (原先每像素重算两个 y*w 偏移) */
+    int w = img->w, h = img->h;
+    for (int y = 0, yb = h - 1; y < yb; y++, yb--) {
+        uint32_t *a = img->px + (size_t)y * w;
+        uint32_t *b = img->px + (size_t)yb * w;
+        for (int x = 0; x < w; x++) {
+            uint32_t t = a[x]; a[x] = b[x]; b[x] = t;
         }
+    }
 }
 
 void fx_image_grayscale(fx_image_t *img)
 {
     if (!img) return;
-    for (int i = 0; i < img->w * img->h; i++) {
-        uint32_t c = img->px[i];
+    int n = img->w * img->h;
+    uint32_t *px = img->px;   /* v2.4.5: 指针步进, 免去每像素的 img-> 重载与 w*h 重复判断 */
+    for (int i = 0; i < n; i++) {
+        uint32_t c = px[i];
         int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
         int y8 = (r * 77 + g * 150 + b * 29) >> 8;
-        img->px[i] = (uint32_t)((y8 << 16) | (y8 << 8) | y8);
+        px[i] = (uint32_t)((y8 << 16) | (y8 << 8) | y8);
     }
 }
 
@@ -91,30 +104,42 @@ void fx_image_tint(fx_image_t *img, fx_color_t color, int amount)
     if (!img || amount <= 0) return;
     if (amount > 255) amount = 255;
     int tr = (color >> 16) & 0xFF, tg = (color >> 8) & 0xFF, tb = color & 0xFF;
-    for (int i = 0; i < img->w * img->h; i++) {
-        uint32_t c = img->px[i];
-        int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
-        r = (r * (255 - amount) + tr * amount) / 255;
-        g = (g * (255 - amount) + tg * amount) / 255;
-        b = (b * (255 - amount) + tb * amount) / 255;
-        img->px[i] = (uint32_t)((r << 16) | (g << 8) | b);
+    /* v2.4.5 性能: 每通道 256 项 LUT —— 对固定的 amount/染色, 新值只取决于原通道值,
+     * 768 次预计算替代每像素 3 次(乘+除); LUT 用与原循环完全相同的公式, 输出逐位一致。 */
+    int inv = 255 - amount;
+    uint8_t lut_r[256], lut_g[256], lut_b[256];
+    for (int v = 0; v < 256; v++) {
+        lut_r[v] = (uint8_t)((v * inv + tr * amount) / 255);
+        lut_g[v] = (uint8_t)((v * inv + tg * amount) / 255);
+        lut_b[v] = (uint8_t)((v * inv + tb * amount) / 255);
+    }
+    int n = img->w * img->h;
+    uint32_t *px = img->px;
+    for (int i = 0; i < n; i++) {
+        uint32_t c = px[i];
+        px[i] = ((uint32_t)lut_r[(c >> 16) & 0xFF] << 16)
+              | ((uint32_t)lut_g[(c >> 8) & 0xFF] << 8)
+              |  (uint32_t)lut_b[c & 0xFF];
     }
 }
 
 void fx_image_brightness(fx_image_t *img, int delta)
 {
     if (!img) return;
-    for (int i = 0; i < img->w * img->h; i++) {
-        uint32_t c = img->px[i];
-        int r = ((c >> 16) & 0xFF) + delta;
-        int g = ((c >> 8) & 0xFF) + delta;
-        int b = (c & 0xFF) + delta;
-        if (r < 0) r = 0;
-        if (r > 255) r = 255;
-        if (g < 0) g = 0;
-        if (g > 255) g = 255;
-        if (b < 0) b = 0;
-        if (b > 255) b = 255;
-        img->px[i] = (uint32_t)((r << 16) | (g << 8) | b);
+    /* v2.4.5 性能: clamp(v+delta) 只取决于 v —— 一次 256 项 LUT 替代每像素 6 次比较 */
+    uint8_t lut[256];
+    for (int v = 0; v < 256; v++) {
+        int x = v + delta;
+        if (x < 0) x = 0;
+        if (x > 255) x = 255;
+        lut[v] = (uint8_t)x;
+    }
+    int n = img->w * img->h;
+    uint32_t *px = img->px;
+    for (int i = 0; i < n; i++) {
+        uint32_t c = px[i];
+        px[i] = ((uint32_t)lut[(c >> 16) & 0xFF] << 16)
+              | ((uint32_t)lut[(c >> 8) & 0xFF] << 8)
+              |  (uint32_t)lut[c & 0xFF];
     }
 }
