@@ -1,5 +1,55 @@
 # Changelog
 
+## v2.4.6（性能：两轮优化，1080P 压测 +62%）
+
+> 2026-10-09 · 两轮集中性能优化，同机同口径实测（`make bench`，1080P 压测页 2820 控件）：
+> **79.3 fps / poll 12.15ms → 128~132 fps / poll 7.41ms**（多次运行区间，提升约 +62%，poll 降约 39%）。
+> **无公开 API 变更、无渲染输出变化**，全部改动可用 `make test` + `make golden` 复核。
+
+### 核心层
+
+- **`round_cut` 圆角裁剪小半径查表**：原 gprof 24% 热点，小半径圆角直接查表生成。
+- **`isqrt` 二分改 `sqrtf` ±1 校正**：整数开方从二分循环改为浮点开方后 ±1 校正。
+- **控件创建增量布局**：O(n²) → O(n)（压测页每帧加控件的直接受益者）。
+- **控件池高水位扫描**：遍历到历史最高已用槽位即止，不再每帧扫满整个池。
+- **`fx_repaint_rect` 空转早退**：无有效区域时提前返回。
+- **按钮标题宽度缓存**、**调试开关 `getenv` 缓存**：热路径不再每次取环境变量、不再每次重测文字宽。
+- **圆角行纵向合并**减少驱动调用；**`hline_span` 内联与 band 分支特化**。
+- **按钮描边同底色跳过**：描边色与底色相同则不画（几何守卫保证像素等价）。
+
+### 文字 / 后端
+
+- **文字缓存命中路径去 `snprintf` + 1 项 MRU**：命中时不再格式化字符串。
+- **alpha 混合 `/255` 改无除法公式**：逐位等价。
+- **argb 缓冲静态复用**、**tint/brightness 256 项 LUT**、**flip 双指针**。
+- **prefs 脏标记**：免重复写盘；**`fx_file_exists` 改 `access()`**。
+- **列表行高缓存**：去掉每行 `getenv`。
+
+### 驱动
+
+- **sokol**：NDC 乘法化（每顶点省 2 次除法）、`push_pixels` 增量游标（去每像素除/模）、
+  GL 状态去重（pipeline / bindings / scissor）。
+- **SDL 假驱动**：同色矩形批合并 + 邻接并入；补齐 `read_pixels` / `resize` 的 flush 出口。
+
+### 修复：sokol 状态去重导致的启动崩溃（用户实测）
+
+- **现象**：`./build.sh` 启动即崩 `VALIDATE_DRAW_REQUIRED_BINDINGS_OR_UNIFORMS_MISSING`
+  （`sg_draw: call to sg_apply_bindings() ... missing after sg_apply_pipeline()`）。
+- **根因**：sokol 在 `sg_apply_pipeline()` 内会把「已应用绑定/UBO」掩码清零
+  （`sokol_gfx.h:25030`），`sg_draw` 时校验 `required == applied`（`25370`）；
+  而本轮的 bindings 去重只看绑定键（vb/ib/纹理/采样器），于是**相邻命令"管线变了、绑定集没变"**
+  （典型：solid 与 sdf 都是无纹理、共用同一 vb/ib）时 bindings 被跳过 → 校验失败 panic。
+- **修法**：新增 `pip_changed` 门闩 —— 只要真的下发过管线，本次就必须重新 `sg_apply_bindings`；
+  仅当未下发管线时才允许按绑定键去重。管线去重与 scissor 去重不受影响（同管线连续绘制仍是零重绑）。
+- 三处 `sg_apply_pipeline` 调用点已逐一核查，其余两处（光追、swapchain 整屏 blit）本就无条件重绑。
+
+### 验证口径
+
+- `make test` PASS（真实 + stub 双后端）。
+- `make golden` 逐像素容差 0 全过（`demo_p1` 除外 —— 本机 SDL 2.30 软渲染器与金图生成环境的
+  既有差异，纯 HEAD 可复现，与本轮改动无关）。
+- `make esp32-smoke` 通过。
+
 ## v2.4.5（文档与可用性整改）
 
 > 本轮针对「对外表述」与「入门第一公里」的集中整改，全部改动可用 `make` + `make test` + `make golden` 复核。
