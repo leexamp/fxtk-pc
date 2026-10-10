@@ -37,7 +37,13 @@
   #include <sys/types.h>
 #endif
 
-/* ---- 图片编解码: vendored stb, 只开需要的解码器 (体积) ---- */
+/* ---- 图片编解码: vendored stb, 只开需要的解码器 (体积) ----
+ * v2.5: 可编译期关掉 —— 各约省 20KB / 13KB(实测见 CHANGELOG)。
+ *   -DFXTK_NO_STB_IMAGE        不加载图片(纯 UI 程序用不到)
+ *   -DFXTK_NO_STB_IMAGE_WRITE  不导出 PNG
+ * 关掉后对应 API 变成【明确报不支持】(返回 0 + 一条 WARN 日志),
+ * 而不是静默返回 0 让人以为"文件坏了" —— 与"别把没实现的说成已实现"一致。 */
+#ifndef FXTK_NO_STB_IMAGE
 #define STBI_NO_STDIO
 #define STBI_NO_HDR
 #define STBI_NO_PSD
@@ -50,9 +56,13 @@
 #define STBI_ONLY_TGA
 #define STB_IMAGE_IMPLEMENTATION
 #include "vendor/stb/stb_image.h"
+#endif /* !FXTK_NO_STB_IMAGE */
+
+#ifndef FXTK_NO_STB_IMAGE_WRITE
 #define STBI_WRITE_NO_STDIO
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "vendor/stb/stb_image_write.h"
+#endif /* !FXTK_NO_STB_IMAGE_WRITE */
 
 /* ================= 能力与屏幕参数 ================= */
 
@@ -99,6 +109,37 @@ void  fx_backend_set_screen(int w, int h, float dpi_scale)
 int   fx_screen_w(void) { return s_scr_w; }
 int   fx_screen_h(void) { return s_scr_h; }
 float fx_dpi_scale(void) { return s_dpi; }
+
+/* ================= v2.5: UI 缩放 (HiDPI 正确性) =================
+ * 设计要点(改动前两个驱动各有一份, HiDPI 下都是错的):
+ *
+ * ① 【缩放按逻辑宽算 = 物理宽 / dpi】
+ *    旧式 `sc = phys_w * 100 / 480` 把"物理宽"当"逻辑宽"用。HiDPI 屏上物理宽
+ *    天然是逻辑宽的数倍 → 算出的 sc 也数倍大 → 随即被 cap(默认160)砍回去 →
+ *    最终 UI 只占屏幕宽度的一小部分。实测推演: 2560 物理 / dpi=2 → 逻辑 1280,
+ *    正确缩放 266(被 cap 到 160), 而旧式给出 533(也被 cap 到 160) —— 看似一样,
+ *    但下一步差在"乘不乘 dpi"。
+ *
+ * ② 【结果要乘回 dpi】
+ *    帧缓冲是物理像素, 所以最终绘制尺寸 = 逻辑缩放 × dpi。
+ *    与 ① 配对后: 逻辑 1280 + dpi2 → 160 × 2 = 320, UI 宽 480×3.2 = 1536 物理像素
+ *    = 768 逻辑点, 与"非 HiDPI 下一块 1280 逻辑宽的屏用 160% 缩放"完全一致。
+ *
+ * ③ 【dpi=1 时与改动前逐字节相同】→ 非 HiDPI 机器上零回归。
+ *    这一点有单测守着(遍历大量 (w, cap) 组合与旧公式对比), 不是嘴上说的。
+ */
+int fx_ui_scale_for(int phys_w, float dpi_scale, int cap, int compact)
+{
+    if (!(dpi_scale > 0.1f)) dpi_scale = 1.0f;
+
+    int logical_w = (int)((float)phys_w / dpi_scale + 0.5f);
+    int sc = (logical_w > 0) ? (logical_w * 100) / 480 : 100;
+    if (sc < 100) sc = 100;
+    if (!compact && sc > cap) sc = cap;
+
+    int out = (int)((float)sc * dpi_scale + 0.5f);
+    return (out > 0) ? out : 1;
+}
 
 /* ================= 日志 ================= */
 
@@ -483,11 +524,17 @@ int fx_img_load_mem(const void *data, int size, fx_img_t *out)
     if (!out) return 0;
     memset(out, 0, sizeof(*out));
     if (!data || size <= 0) return 0;
+#ifdef FXTK_NO_STB_IMAGE
+    /* 编译期关掉了图片解码: 明确报出来。静默返回 0 会让人以为是"文件坏了", 查半天。 */
+    fx_log(FX_LOG_WARN, "本构建未编译图片解码 (FXTK_NO_STB_IMAGE), 无法加载图片");
+    return 0;
+#else
     int w = 0, h = 0, ch = 0;
     unsigned char *px = stbi_load_from_memory((const stbi_uc *)data, size, &w, &h, &ch, 0);
     if (!px) { fx_log(FX_LOG_WARN, "图片解码失败: %s", stbi_failure_reason()); return 0; }
     out->w = w; out->h = h; out->channels = ch; out->pixels = px;
     return 1;
+#endif
 }
 
 int fx_img_load_file(const char *path, fx_img_t *out)
@@ -503,7 +550,9 @@ int fx_img_load_file(const char *path, fx_img_t *out)
 void fx_img_free(fx_img_t *img)
 {
     if (!img) return;
+#ifndef FXTK_NO_STB_IMAGE
     if (img->pixels) stbi_image_free(img->pixels);
+#endif
     memset(img, 0, sizeof(*img));
 }
 
@@ -517,18 +566,16 @@ int fx_img_has_file_ext(const char *path)
     return 0;
 }
 
-/* 编码回调: 统一走 fx_file_write, 这样 stub(内存 FS)与真实 FS 行为一致 */
-typedef struct { const char *path; int failed; } png_sink_t;
-static void png_sink_write(void *ctx, void *data, int size)
-{
-    png_sink_t *s = (png_sink_t *)ctx;
-    if (s->failed || size <= 0) return;
-    if (!fx_file_write(s->path, data, size, 1)) s->failed = 1;
-}
+/* v2.5: 原先这里还有 png_sink_write + png_sink_t, 是 v2.4.4 改成"先编码到内存再写文件"
+ * 之前的遗留 —— 改完后无人调用, 只用来产生一条 -Wunused-function 警告。已删除。 */
 
 int fx_img_save_png(const char *path, const unsigned char *px, int w, int h, int channels)
 {
     if (!path || !px || w <= 0 || h <= 0 || (channels != 3 && channels != 4)) return 0;
+#ifdef FXTK_NO_STB_IMAGE_WRITE
+    fx_log(FX_LOG_WARN, "本构建未编译 PNG 编码 (FXTK_NO_STB_IMAGE_WRITE), 未写出: %s", path);
+    return 0;
+#else
     /* v2.4.4 修复(评审 A8): 原先【先清空目标文件再编码】—— 编码失败时旧文件已被毁,
      * 用户会得到 0 字节 PNG。改为先编码到内存, 成功后再一次性写文件
      * (仍走 fx_file_write, 保持 stub 内存 FS 与真实 FS 行为一致; 失败时目标文件原样未动)。 */
@@ -542,6 +589,7 @@ int fx_img_save_png(const char *path, const unsigned char *px, int w, int h, int
         free(mem);
         return okw ? 1 : 0;
     }
+#endif
 }
 
 /* ================= 剪贴板 ================= */

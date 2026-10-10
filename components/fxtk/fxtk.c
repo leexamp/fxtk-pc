@@ -397,6 +397,7 @@ static void layout_children(fx_widget_t *p)
             c->x2=(int16_t)(p->x1+(int32_t)pw*c->px2/1000-1); c->y2=(int16_t)(p->y1+(int32_t)ph*c->py2/1000-1);
             break; }
         case FX_POS_FIXED: break;   /* 弹层: 保留直写坐标 */
+        case FX_POS_FLEX:  break;   /* v2.5: 坐标由 fx_flex_apply 写好了, 布局期不重算 */
         case FX_POS_GRID: {
             fx_widget_t *g=c->grid_ref;
             /* v2.3.1: grid 晚于子件创建时布局期重解析 (旧逻辑只在创建瞬间解析一次,
@@ -831,6 +832,10 @@ void fx_poll(void)
                 if (strcmp(nb,last)!=0) { strcpy(s_tdbg_str,nb); strcpy(last,nb); }
             }
         }
+        /* v2.5: 手势识别 —— 【每帧都喂】, 不能只在有新样本时喂:
+         * 长按要"等够时间"、双击窗口要"时间走完"才能结算, 手停着不动时同样要让时间
+         * 推进, 否则按住不放永远不会报长按、单击永远不会结算。 */
+        fx_gesture_feed(s_last_tx, s_last_ty, s_touch_prev, fx_time_ms());
     }
     if(!s_ctxpop){ s_ctxpop=fx_canvas_new(pixel("-2000,-2000","-1900,-1900"),color(FX_WHITE));
     if (s_ctxpop){ fx_set_cb(s_ctxpop,ctx_draw,0); s_ctxpop->pos_mode=FX_POS_FIXED; s_ctxpop->page=-1; fx_set_visible(s_ctxpop,0); } }

@@ -28,15 +28,25 @@ TOL=${GOLDEN_TOL:-$TOL}
 
 mkdir -p "$TMP" "$GOLD"
 [ -x /tmp/imgdiff ] || gcc -O2 -I. tools/imgdiff.c -o /tmp/imgdiff -lm
-CORE="../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c ../components/fxtk/fxtk_widgets.c
-      ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c"
+# v2.5: 【自动发现核心源文件】, 不再手抄清单。
+# 起因: 这份清单原先手抄了 6 个 .c, 每次往 components/fxtk/ 加新模块都得记得改它 ——
+#   而本项目已经【第三次】栽在同一件事上(Makefile 里 v2.3.1 的注释就写着
+#   "build.sh/build_ex.sh/build_win.sh 三处清单都漏了它, 链接必败")。
+#   这次是 fxtk.c 新增了 fx_gesture_feed() 调用, 而本脚本没链 fxtk_gesture.c。
+#   改成 glob 后新增模块自动被带上, 不需要任何人记得改这里。
+#   只排除 fxtk_font.c —— test/render_canvas.c 自带文字桩, 不要真字体。
+#   注意路径基准: 本赋值在【仓库根】执行, 而下面的 gcc 在 ( cd demo-main ) 子 shell 里跑,
+#   所以要把根相对路径前缀成 ../ 再传进去 —— 初版漏了这一步, 直接报
+#   "无法访问 '../components/fxtk/fxtk*.c'" 并把 CORE 判空。
+CORE=$(ls components/fxtk/fxtk*.c | grep -v '/fxtk_font\.c$' | sed 's|^|../|' | tr '\n' ' ')
+[ -n "$CORE" ] || { echo "❌ 核心源码清单为空(CORE glob 失效), 前置条件不成立"; exit 1; }
 fail=0; n=0
 
 echo "📐 画布示例 (480x272, 纯软件驱动)"
 for src in examples/canvas/canvas_*.c; do
   name=$(basename "$src" .c)
   ( cd demo-main
-    gcc -O2 -I. -I../components/fxtk $CORE test/render_canvas.c "../$src" -o /tmp/fxtk_golden_rc -lm 2>/dev/null ) || { echo "  ⚠ 编译失败 $name"; fail=1; continue; }
+    gcc -O2 -I. -I../components/fxtk $CORE test/render_canvas.c "../$src" -o /tmp/fxtk_golden_rc -lm -lpthread 2>/dev/null ) || { echo "  ⚠ 编译失败 $name"; fail=1; continue; }
   /tmp/fxtk_golden_rc 480 272 "$TMP/$name.png" >/dev/null 2>&1 || { echo "  ⚠ 渲染失败 $name"; fail=1; continue; }
   n=$((n+1))
   if [ "$UPDATE" = "1" ]; then cp "$TMP/$name.png" "$GOLD/$name.png"; echo "  ✏️  更新 $name.png"; continue; fi

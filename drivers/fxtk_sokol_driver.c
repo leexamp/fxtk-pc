@@ -1328,11 +1328,10 @@ int fxtk_fps(void) { return s_fps; }
 int fxtk_ui_scale(void)
 {
     extern int fxtk_drv_width(void);
-    int w = fxtk_drv_width();
-    int sc = w > 0 ? (w * 100) / 480 : 100;
-    if (sc < 100) sc = 100;
-    if (!getenv("FXTK_COMPACT") && sc > g_uicap) sc = g_uicap;
-    return sc;
+    /* v2.5: 走共享的 fx_ui_scale_for(逻辑宽 × dpi)。开启 high_dpi 后本函数是
+     * "UI 在 HiDPI 上大小正确"的另一半 —— 只开 high_dpi 而不改这里, UI 会缩一半。 */
+    return fx_ui_scale_for(fxtk_drv_width(), fx_dpi_scale(), g_uicap,
+                           getenv("FXTK_COMPACT") != NULL);
 }
 void fxtk_drv_set_uicap(int p) { if (p >= 100) g_uicap = p; }
 

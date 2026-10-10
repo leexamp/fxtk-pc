@@ -107,6 +107,7 @@ fx_attr_t fgcolor(fx_color_t c);
 fx_attr_t border(int n);
 fx_attr_t radius(int n);
 #define FX_POS_FIXED 3   /* 布局不重算(弹层直写坐标) */
+#define FX_POS_FLEX  4   /* v2.5: 坐标由 fx_flex_apply 写入, 布局期不重算 */
 #define FX_F_DENSE (1<<7)   /* grid 密集模式 */
 #define FX_F_FIT   (1<<8)   /* 适应: 封顶+居中 */
 #define FX_F_READONLY (1<<9)   /* 文本框只读 */
@@ -350,6 +351,201 @@ void fxtk_set_ui_scale_cap(int p);   /* 行高/字号缩放上限% */          /
 int  fxtk_font_height(int size);  /* 缩放后字高 */
 int  fxtk_drv_width(void);
 int  fxtk_drv_height(void);
+
+/* ==================== v2.5: 并行 for（CPU，不是 GPU） ====================
+ * 【先把名字说清 —— 它叫 par 而不是 gpu，因为按"gpu"叫就是名不副实】
+ *   ① GPU 上跑的是 GLSL/SPIR-V；C 代码块没法直接变成 GPU 指令 —— 那要先写个
+ *      C 子集编译器，属于重写 nvcc，不是"后端升级"。
+ *   ② sokol_gfx 只有 vertex/fragment 管线，【没有 compute shader】
+ *      （无 sg_dispatch 之类）—— 这是它的设计边界，不是版本问题。
+ *   所以本模块是【CPU 多线程】。想要真 GPU 并行，得换掉 sokol_gfx 走裸 GL 4.3
+ *   compute / Vulkan，代价是丢掉 ESP32 与 SDL2 后端的对等支持。
+ *
+ * 【两种用法】
+ *   语法糖（串行，零开销，全平台 —— 只是让循环读起来像一句话）:
+ *       fx_par_for(n) { a[fx_i] = fx_i * fx_i; }
+ *   真并行（要回调，因为宏没法把任务切给线程）:
+ *       static void fill(int lo, int hi, void *ud) {
+ *           int *a = ud;  for (int i = lo; i < hi; i++) a[i] = i * i;
+ *       }
+ *       fx_parallel_for(n, fill, a);
+ *
+ * 【⚠️ 它不会让"压测页"更快，别指望错方向】
+ *   压测页实测 59~108 fps 的瓶颈是【每帧整画布重绘 + 上传约 7.7MB 像素】
+ *   （见 CHANGELOG v2.4.3 的结论），那是光栅化与传输，不是算力。
+ *   并行循环帮的是【你自己的数据处理】，不是控件绘制。
+ *
+ * 【为什么不用 OpenMP / C11 threads】
+ *   OpenMP 会引入 libgomp 依赖，破坏"零第三方动态库"；C11 <threads.h> 在 mingw
+ *   与部分嵌入式工具链上支持不全。所以直接用 pthreads / Win32 线程，
+ *   其余平台（含 ESP32）退化为串行 —— 接口与语义不变，只是不并行。
+ */
+#define fx_par_for(cnt) for (int fx_i = 0, fx_n_ = (int)(cnt); fx_i < fx_n_; fx_i++)
+
+void fx_parallel_for(int n, void (*body)(int lo, int hi, void *ud), void *ud);
+/* 逻辑核数用已有的 fx_cpu_count()(声明在 fxtk_backends.h) —— 不要在这里重复声明,
+ * v2.5 初版曾在这里再声明一次并在 fxtk_par.c 里再实现一次, 直接撞出
+ * "multiple definition of fx_cpu_count" 链接错误。 */
+int  fx_parallel_threads(void);       /* 当前设定 (0 = 自动) */
+void fx_parallel_set_threads(int n);  /* 0 = 自动; 1 = 强制串行 */
+
+/* ==================== v2.5: 触摸手势（单指） ====================
+ * 【用法】驱动已有 touch_read 的话, 在 fx_poll() 之后取空事件队列即可:
+ *     fx_gesture_ev_t ev;
+ *     while (fx_gesture_poll(&ev)) {
+ *         if (ev.type == FX_GEST_SWIPE_LEFT) 切到上一页();
+ *         if (ev.type == FX_GEST_DOUBLE_TAP) 重置();
+ *     }
+ * 【不用改驱动】框架已在 fx_poll() 里把触摸样本喂进来了; 本组 API 只负责识别。
+ *
+ * 【⚠️ 只支持单指】当前驱动接口 touch_read(x,y,pressed) 只给一个触点,
+ *   所以捏合缩放(pinch)/双指旋转【没有实现】—— 那不是"以后再说", 是接口给不出
+ *   第二个触点。要支持必须先扩展驱动接口。别把本模块当多指方案。
+ *
+ * 【单击会延迟 g_double_tap_ms 才报】为了区分单击与双击, TAP 必须等双击窗口过去
+ *   才能确定。所以"要立刻响应的按钮"应当用控件自身的按下/抬起, 而不是等 TAP。
+ *   这是个真实取舍, 不是 bug。 */
+typedef enum {
+    FX_GEST_NONE = 0,
+    FX_GEST_TAP,           /* 单击(双击窗口后结算) */
+    FX_GEST_DOUBLE_TAP,
+    FX_GEST_LONG_PRESS,
+    FX_GEST_DRAG_BEGIN,
+    FX_GEST_DRAG_MOVE,     /* 拖拽中会持续产生 */
+    FX_GEST_DRAG_END,
+    FX_GEST_SWIPE_LEFT,    /* 四向滑动(快且远) */
+    FX_GEST_SWIPE_RIGHT,
+    FX_GEST_SWIPE_UP,
+    FX_GEST_SWIPE_DOWN
+} fx_gesture_type_t;
+
+typedef struct {
+    fx_gesture_type_t type;
+    int x, y;          /* 事件发生位置(拖拽类为当前位置) */
+    int dx, dy;        /* 相对按下点的位移 */
+    int duration_ms;   /* 从按下到本事件的耗时 */
+} fx_gesture_ev_t;
+
+void fx_gesture_feed(int x, int y, int pressed, uint32_t now_ms);  /* 框架内部调用 */
+int  fx_gesture_poll(fx_gesture_ev_t *ev);   /* 取一条, 无则 0; 建议 while 取空 */
+int  fx_gesture_pending(void);               /* 队列里还剩几条 */
+int  fx_gesture_active(void);                /* 手指是否正按着 */
+int  fx_gesture_dropped(void);               /* 调试: 因队列满被丢弃的事件数 */
+void fx_gesture_reset(void);
+const char *fx_gesture_name(int type);       /* 中文名, 便于日志/调试页 */
+/* 调阈值; 传 <=0 的项保持原值。默认: 长按500ms 点按300ms/12px 滑动40px/600ms 双击300ms */
+void fx_gesture_config(int long_press_ms, int tap_max_ms, int tap_max_dist,
+                       int swipe_min_dist, int double_tap_ms);
+void fx_gesture_config_default(void);
+
+/* ==================== v2.5: 弹性布局（flex 子集） ====================
+ * 【用法】容器尺寸照旧用 pixel/percent 定, 子件先随便给个矩形(它会被覆盖),
+ * 在容器尺寸确定后调一次:
+ *     fx_flex_apply_simple(panel, FX_FLEX_ROW, 8, 6,
+ *                          FX_FLEX_SPACE_BETWEEN, FX_FLEX_ALIGN_CENTER);
+ *                                        // 8 = 子件间距 gap, 6 = 容器内边距 pad
+ * 需要按权重分配宽度时用完整版：
+ *     fx_flex_item_t it[3] = {
+ *         { .size = 60,            .grow = 0 },   // 固定 60
+ *         { .size = 60,            .grow = 1 },   // 按比例吃掉剩余
+ *         { .size = -1, .grow = 2, .min_size = 40 },
+ *     };
+ *     fx_flex_apply(panel, it, 3, FX_FLEX_ROW, 8, 6,
+ *                   FX_FLEX_START, FX_FLEX_ALIGN_STRETCH);
+ *
+ * 【什么时候调】它不是"每帧自动跑"的, 而是一次性把坐标写死并把子件标成
+ * FX_POS_FLEX(布局期不再重算)。所以: 窗口缩放 / 容器改变尺寸 / 增删子件之后
+ * 要【再调一次】, 否则坐标是旧的。
+ *
+ * 【诚实边界 —— 没做的部分不装做过了】
+ *   ① 不收缩: 空间不够时【不压缩】子件, 直接溢出(不做 flex-shrink)。
+ *   ② 不换行(不做 flex-wrap)。
+ *   ③ 容器尺寸要调用方给; 不做嵌套 flex 的自动尺寸推导。
+ *   ④ 一次最多处理 64 个直接子件(超出部分不排, 但不会越界写内存)。 */
+typedef enum { FX_FLEX_ROW = 0, FX_FLEX_COL = 1 } fx_flex_dir_t;
+typedef enum {
+    FX_FLEX_START = 0, FX_FLEX_CENTER, FX_FLEX_END,
+    FX_FLEX_SPACE_BETWEEN, FX_FLEX_SPACE_AROUND
+} fx_flex_justify_t;
+typedef enum {
+    FX_FLEX_ALIGN_START = 0, FX_FLEX_ALIGN_CENTER, FX_FLEX_ALIGN_END, FX_FLEX_ALIGN_STRETCH
+} fx_flex_align_t;
+
+typedef struct {
+    int size;        /* 主轴基础尺寸(px); <=0 视为 0(靠 grow 撑开) */
+    int grow;        /* 弹性系数; 0 = 不伸缩 */
+    int min_size;    /* 夹紧下限; <=0 = 不限制 */
+    int max_size;    /* 夹紧上限; <=0 = 不限制 */
+    int cross_size;  /* 交叉轴尺寸; <=0 = 用容器可用交叉轴 */
+} fx_flex_item_t;
+
+/* 纯函数: 只算坐标, 不碰控件与驱动。返回实际排布的项数。
+ * out_xy4 需要 4*n 个 int, 每项按 (x1,y1,x2,y2) 写入。 */
+int  fx_flex_solve(int cx1, int cy1, int cx2, int cy2,
+                   int dir, int gap, int pad, int justify, int align,
+                   const fx_flex_item_t *items, int n, int *out_xy4);
+
+/* 应用: 把容器【可见子件】按 items 求解并写入坐标(标记 FX_POS_FLEX) */
+void fx_flex_apply(fx_widget_t *container,
+                   const fx_flex_item_t *items, int n,
+                   int dir, int gap, int pad, int justify, int align);
+/* 常用形态: 用每个子件【当前矩形尺寸】当基础尺寸, grow=0 */
+void fx_flex_apply_simple(fx_widget_t *container, int dir, int gap, int pad,
+                          int justify, int align);
+
+/* ⚠️⚠️ 顺序陷阱(v2.5 写演示时踩到, 务必先读) ⚠️⚠️
+ *
+ * items[i] 对应的是【遍历顺序】里的第 i 个可见子控件, 而本框架的子控件链表是
+ * 【头插】的 —— fxtk_link() 里 child->sibling = parent->child; parent->child = child;
+ * 于是 fx_flex_apply / layout_children / 绘制 全都按 child->sibling 迭代, 也就是
+ * 【逆着创建顺序】。换句话说:
+ *
+ *      最后创建的控件 = 链首 = items[0]
+ *      最先创建的控件 = 链尾 = items[n-1]
+ *
+ * 所以下面这段的直觉是【错的】:
+ *      fx_canvas_new(...);   // 以为这是"第一个", 会被排到最前面
+ *      fx_canvas_new(...);
+ *      fx_flex_apply(root, items, 2, FX_FLEX_COL, ...);   // items[0] 其实给了第二个
+ *
+ * 想让画面顺序 = 书写顺序, 就要【倒着创建】。这是框架级的一致约定(不是 flex 独有的
+ * 行为), 改它会翻转所有既有演示的层叠顺序, 所以这里【只记录、不改】。 */
+
+/* ==================== v2.5: SVG 子集 → canvas ====================
+ * 【用法】解析一次(init 里), 每帧在 canvas 回调里画(自动等比缩放+居中):
+ *     static fx_svg_t *g_icon;
+ *     static void on_canvas(fx_widget_t *w, void *ud) {
+ *         int cw, ch; fx_canvas_size(w, &cw, &ch);
+ *         fx_canvas_clear(w, FX_WHITE);
+ *         fx_svg_draw(g_icon, 0, 0, cw, ch);
+ *     }
+ *     g_icon = fx_svg_load("icon.svg");     // 或 fx_svg_parse(text)
+ * 析构时 fx_svg_free(g_icon)。
+ *
+ * 【支持】<svg> <g> <rect> <circle> <ellipse> <line> <polyline> <polygon> <path>;
+ *   fill/stroke/stroke-width/transform(translate,scale,rotate,matrix);
+ *   路径 M L H V C Q Z(含小写相对形式); 颜色 #rgb/#rrggbb/rgb()/颜色名/none。
+ *
+ * 【不支持(不装做支持)】圆弧 A/a、平滑曲线 S/s T/t、渐变/图案/滤镜、
+ *   <text>/<tspan>、CSS style 与 <style> 块、<use>/<defs>/裁剪蒙版。
+ *   遇到不认识的元素会【跳过并计数】, 用 fx_svg_skipped() 取, 便于知道图被简化了多少。
+ *
+ * 【近似之处】曲线用固定 12 段采样(不是自适应细分), 所以极大放大时能看到折线。 */
+typedef struct fx_svg fx_svg_t;
+
+fx_svg_t *fx_svg_parse(const char *text);
+fx_svg_t *fx_svg_load(const char *path);        /* 走 fx_file_read, stub 内存 FS 也能用 */
+void      fx_svg_free(fx_svg_t *s);
+/* 在 (x,y,w,h) 这个框内等比缩放并居中绘制; 需在 canvas 回调内调用 */
+void      fx_svg_draw(const fx_svg_t *s, int x, int y, int w, int h);
+/* 以下三个用于自检/调试, 也是测试能断言解析结果的入口 */
+int       fx_svg_shape_count(const fx_svg_t *s);
+int       fx_svg_shape_points(const fx_svg_t *s, int i);   /* 第 i 个形状的点数; 越界返回 -1 */
+/* 第 i 个形状的包围盒(已应用 transform); 越界返回 0。自检用它断言 transform 生效 */
+int       fx_svg_shape_bbox(const fx_svg_t *s, int i,
+                            float *x1, float *y1, float *x2, float *y2);
+int       fx_svg_skipped(const fx_svg_t *s);               /* 被跳过的元素/指令数 */
+int       fx_svg_size(const fx_svg_t *s, float *vw, float *vh);   /* viewBox 尺寸 */
 
 #ifdef __cplusplus
 }

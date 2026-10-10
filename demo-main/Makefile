@@ -43,7 +43,11 @@ CORE := ../components/fxtk/fxtk.c \
         ../components/fxtk/fxtk_font.c \
         ../components/fxtk/fxtk_effects.c \
         ../components/fxtk/fxtk_extra.c \
-        ../components/fxtk/fxtk_backends.c
+        ../components/fxtk/fxtk_backends.c \
+        ../components/fxtk/fxtk_par.c \
+        ../components/fxtk/fxtk_gesture.c \
+        ../components/fxtk/fxtk_flex.c \
+        ../components/fxtk/fxtk_svg.c
 HDRS := ../components/fxtk/fxtk.h ../components/fxtk/fxtk_internal.h
 DRIVER := ../drivers/fxtk_sdl_driver.c ../drivers/main_linux.c
 
@@ -55,15 +59,15 @@ all: fxtk_sim
 # 旧名字继续可用(脚本/文档里引用的是它), 现在只是别名 —— 产物仍是 ./fxtk_sim(sokol 版)
 fxtk_sim_sokol: fxtk_sim
 
-fxtk_sim: $(SOKOL_CORE) ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c \
+fxtk_sim: $(SOKOL_CORE) $(WIN_SRC) ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c \
           app.c app_desktop.c raymarch.c gpu_raymarch_stub.c
-	gcc $(CFLAGS) $(INC) $(SOKOL_INC) $(SOKOL_CORE) \
+	gcc $(CFLAGS) $(INC) $(SOKOL_INC) $(SOKOL_CORE) $(WIN_SRC) \
 	    ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c app.c app_desktop.c raymarch.c \
 	    gpu_raymarch_stub.c -o $@ $(LDFLAGS) $(SOKOL_LIBS)
 
-fxtk_sim_en: $(SOKOL_CORE) ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c \
+fxtk_sim_en: $(SOKOL_CORE) $(WIN_SRC) ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c \
              app_en.c app_desktop_en.c raymarch.c gpu_raymarch_stub.c
-	gcc $(CFLAGS) $(INC) $(SOKOL_INC) $(SOKOL_CORE) \
+	gcc $(CFLAGS) $(INC) $(SOKOL_INC) $(SOKOL_CORE) $(WIN_SRC) \
 	    ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c app_en.c app_desktop_en.c raymarch.c \
 	    gpu_raymarch_stub.c -o $@ $(LDFLAGS) $(SOKOL_LIBS)
 
@@ -85,18 +89,84 @@ test: test/headless_test test/headless_test_stub
 	./test/headless_test_stub
 
 TEST_CORE := $(filter-out ../components/fxtk/fxtk_font.c,$(CORE))
+# v2.5: CORE 里现在有 fxtk_par.c(pthreads), 无头测试也要链 -lpthread。
+# 注意它【必须】排在目标文件之后 —— ld 的库顺序敏感, 放前面会解析不到符号。
 test/headless_test: test/headless_test.c $(TEST_CORE) $(HDRS)
-	gcc -O2 $(INC) $(TEST_CORE) test/headless_test.c -o $@ -lm
+	gcc -O2 $(INC) $(TEST_CORE) test/headless_test.c -o $@ -lm -lpthread
 
 test/headless_test_stub: test/headless_test.c $(TEST_CORE) $(HDRS)
-	gcc -O2 -DFXTK_BACKEND_STUB $(INC) $(TEST_CORE) test/headless_test.c -o $@ -lm
+	gcc -O2 -DFXTK_BACKEND_STUB $(INC) $(TEST_CORE) test/headless_test.c -o $@ -lm -lpthread
+
+# ---- v2.5: 并行 for 自检 (无头, 不需要显示/窗口) ----
+# 只链 fxtk_par.c, 不拖整个框架进来 —— 它不依赖任何渲染/驱动。
+.PHONY: par-test
+par-test: test/par_test
+	./test/par_test
+
+test/par_test: test/par_test.c ../components/fxtk/fxtk_par.c $(HDRS)
+	gcc -O2 $(INC) test/par_test.c ../components/fxtk/fxtk_par.c -o $@ -lpthread
+
+# ---- v2.5: UI 缩放 (HiDPI) 自检 ----
+# 只链 fxtk_backends.c —— 它经核实只依赖 libc(外加 stb 需要的 -lm), 不拖框架进来。
+.PHONY: uiscale-test
+uiscale-test: test/uiscale_test
+	./test/uiscale_test
+
+test/uiscale_test: test/uiscale_test.c ../components/fxtk/fxtk_backends.c $(HDRS)
+	gcc -O2 $(INC) -I../components/fxtk/vendor/stb test/uiscale_test.c \
+	    ../components/fxtk/fxtk_backends.c -o $@ -lm
+
+# ---- v2.5: 触摸手势自检 (无头, 合成触摸序列, 完全不依赖硬件/真实时钟) ----
+.PHONY: gesture-test
+gesture-test: test/gesture_test
+	./test/gesture_test
+
+test/gesture_test: test/gesture_test.c ../components/fxtk/fxtk_gesture.c $(HDRS)
+	gcc -O2 $(INC) test/gesture_test.c ../components/fxtk/fxtk_gesture.c -o $@ -lm
+
+# ---- v2.5: 弹性布局自检 (无头, 只链 fxtk_flex.c；它不依赖驱动/控件绘制) ----
+.PHONY: flex-test
+flex-test: test/flex_test
+	./test/flex_test
+
+test/flex_test: test/flex_test.c ../components/fxtk/fxtk_flex.c $(HDRS)
+	gcc -O2 $(INC) test/flex_test.c ../components/fxtk/fxtk_flex.c -o $@ -lm
+
+# ---- v2.5: SVG 子集自检 (无头; 绘制调用用录制器替身验, 不需要真驱动) ----
+.PHONY: svg-test
+svg-test: test/svg_test
+	./test/svg_test
+
+test/svg_test: test/svg_test.c ../components/fxtk/fxtk_svg.c $(HDRS)
+	gcc -O2 $(INC) test/svg_test.c ../components/fxtk/fxtk_svg.c -o $@ -lm
 
 # ---- v2.4 sokol 后端 (无 SDL 依赖; 文本层走 stb_truetype) ----
 SOKOL_INC := -I../third_party/sokol
 SOKOL_LIBS := -lX11 -lXi -lXcursor -lGL -ldl -lpthread -lm
 SOKOL_CORE := ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
               ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_effects.c \
-              ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c
+              ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c \
+              ../components/fxtk/fxtk_par.c ../components/fxtk/fxtk_gesture.c \
+              ../components/fxtk/fxtk_flex.c ../components/fxtk/fxtk_svg.c
+# ⚠️ 这份清单【不是】CORE 的拷贝, 而是独立维护的(去掉 fxtk_font.c, 改用
+#    fxtk_font_stb.c)。新增核心 .c 时【两处都要加】—— v2.5 初版只往 CORE 里加了
+#    fxtk_gesture.c, 结果 sokol 版演示报 "fx_gesture_feed 未定义的引用"。
+
+# ---- v2.5: 单窗口桌面行为 (去标题栏/置顶/移动/居中/拖动) ----
+# 独立成文件而不是塞进驱动: 它只用 sokol_app 暴露的原生窗口句柄(sapp_x11_get_window
+# 等), 完全不碰渲染 —— 所以与帧流程、命令流、金图都无关, 加进来不影响既有行为。
+WIN_SRC := ../drivers/fxtk_window.c
+
+# 单窗口行为自检。
+# 【刻意不放进 test 目标】: 它要开真窗口并依赖窗口管理器, 不适合当无头 CI 的必过项。
+# 无头/Xvfb 下它会如实报 [N/A]/[ENV] 而不是假绿 —— 这正是本项目要守住的原则。
+.PHONY: window-test
+window-test: test/window_test
+	./test/window_test
+
+test/window_test: test/window_test.c test/sokol_app_impl.c $(WIN_SRC) $(HDRS)
+	gcc $(CFLAGS) $(INC) $(SOKOL_INC) test/window_test.c test/sokol_app_impl.c \
+	    $(WIN_SRC) -o $@ $(LDFLAGS) $(SOKOL_LIBS)
 
 sokol: fxtk_sim
 
@@ -155,3 +225,24 @@ fxtk_sim_dbg: $(SOKOL_CORE) ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_
 	    gpu_raymarch_stub.c -o $@ $(SOKOL_LIBS)
 
 .PHONY: dbg
+
+# ---- v2.5: 新功能可视化演示 (真实渲染管线导 PNG, 不需要真窗口) ----
+.PHONY: v25-showcase
+v25-showcase: test/v25_showcase
+	./test/v25_showcase 480 272 /tmp/v25_480.png
+	./test/v25_showcase 800 350 /tmp/v25_800.png
+
+test/v25_showcase: test/v25_showcase.c test/render_canvas.c $(HDRS)
+	gcc -O2 $(INC) test/render_canvas.c test/v25_showcase.c \
+	    $(shell ls ../components/fxtk/fxtk*.c | grep -v 'fxtk_font\.c$$') \
+	    -o $@ -lm -lpthread
+
+# ---- v2.5: 无头证据收集 (并行/手势/高DPI/flex/SVG 的可验证数字) ----
+.PHONY: v25-evidence
+v25-evidence: test/v25_evidence
+	./test/v25_evidence
+
+test/v25_evidence: test/v25_evidence.c $(HDRS)
+	gcc -O2 $(INC) test/v25_evidence.c \
+	    $(shell ls ../components/fxtk/fxtk*.c | grep -v 'fxtk_font\.c$$') \
+	    -o $@ -lm -lpthread

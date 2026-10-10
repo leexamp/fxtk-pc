@@ -57,6 +57,10 @@ $CC $OPT $TRIM -Os -s -flto -ffunction-sections -fmerge-all-constants \
     main.c ../drivers/fxtk_app_sokol.c ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c \
     ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c ../components/fxtk/fxtk_widgets.c \
     ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c \
+    ../components/fxtk/fxtk_par.c \
+    ../components/fxtk/fxtk_gesture.c \
+    ../components/fxtk/fxtk_flex.c \
+    ../components/fxtk/fxtk_svg.c \
     -o dist/win/your_app.exe \
     -lopengl32 -lgdi32 -luser32 -lshell32 -lole32 -lcomdlg32 -ldwmapi -lpthread -lm
 

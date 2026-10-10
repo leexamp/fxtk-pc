@@ -47,6 +47,13 @@ void fx_backend_set_screen(int w, int h, float dpi_scale);
 int  fx_screen_w(void);
 int  fx_screen_h(void);
 float fx_dpi_scale(void);
+/* v2.5: UI 缩放 = 逻辑缩放 × dpi。做成共享纯函数, 因为 sokol 与 SDL 两个驱动
+ * 原先各自复制了一份同样的算式, 而 HiDPI 修正必须在两处同时正确 —— 复制粘贴的
+ * 两份算式迟早会分叉。纯函数也便于单测(见 demo-main/test/uiscale_test.c)。
+ *   phys_w  帧缓冲宽度(物理像素)
+ *   dpi_scale 设备像素比 (取不到传 1.0)
+ *   cap     缩放上限(百分比); compact 非 0 时不受 cap 限制 */
+int  fx_ui_scale_for(int phys_w, float dpi_scale, int cap, int compact);
 
 /* ================= 日志 ================= */
 
