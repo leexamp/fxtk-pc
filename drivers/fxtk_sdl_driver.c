@@ -1,5 +1,6 @@
 /* fxtk_sdl_driver.c — v2.0 终版: 矩形SDL自批 + 折线/三角顶点批 + 图片GPU缩放 + 持久target */
 #include "fxtk.h"
+#include "fxtk_backends.h"   /* v2.5: fx_ui_scale_for / fx_dpi_scale */
 #include <SDL2/SDL.h>
 #include <stdio.h>
 #include <string.h>
@@ -307,9 +308,8 @@ void fxtk_flush_driver_batch(void) { flush_pixels(); flush_batch(); }
 int fxtk_ui_scale(void)
 {
     extern int fxtk_drv_width(void);
-    int w=fxtk_drv_width();
-    int s=w>0?(w*100)/480:100;
-    if (s<100)s=100;
-    if (!getenv("FXTK_COMPACT") && s>g_uicap) s=g_uicap;   /* 大屏默认限1.6x; FXTK_COMPACT=1才全比例 */
-    return s;
+    /* v2.5: 走共享的 fx_ui_scale_for —— 原先这里有一份手抄算式, 与 sokol 驱动那份
+     * 重复且都没处理 dpi。SDL 路径不注入 dpi(fx_dpi_scale 保持 1.0), 故行为不变。 */
+    return fx_ui_scale_for(fxtk_drv_width(), fx_dpi_scale(), g_uicap,
+                           getenv("FXTK_COMPACT") != NULL);
 }

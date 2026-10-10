@@ -103,6 +103,16 @@ par-test: test/par_test
 test/par_test: test/par_test.c ../components/fxtk/fxtk_par.c $(HDRS)
 	gcc -O2 $(INC) test/par_test.c ../components/fxtk/fxtk_par.c -o $@ -lpthread
 
+# ---- v2.5: UI 缩放 (HiDPI) 自检 ----
+# 只链 fxtk_backends.c —— 它经核实只依赖 libc(外加 stb 需要的 -lm), 不拖框架进来。
+.PHONY: uiscale-test
+uiscale-test: test/uiscale_test
+	./test/uiscale_test
+
+test/uiscale_test: test/uiscale_test.c ../components/fxtk/fxtk_backends.c $(HDRS)
+	gcc -O2 $(INC) -I../components/fxtk/vendor/stb test/uiscale_test.c \
+	    ../components/fxtk/fxtk_backends.c -o $@ -lm
+
 # ---- v2.4 sokol 后端 (无 SDL 依赖; 文本层走 stb_truetype) ----
 SOKOL_INC := -I../third_party/sokol
 SOKOL_LIBS := -lX11 -lXi -lXcursor -lGL -ldl -lpthread -lm

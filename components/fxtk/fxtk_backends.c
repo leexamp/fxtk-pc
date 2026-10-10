@@ -110,6 +110,37 @@ int   fx_screen_w(void) { return s_scr_w; }
 int   fx_screen_h(void) { return s_scr_h; }
 float fx_dpi_scale(void) { return s_dpi; }
 
+/* ================= v2.5: UI 缩放 (HiDPI 正确性) =================
+ * 设计要点(改动前两个驱动各有一份, HiDPI 下都是错的):
+ *
+ * ① 【缩放按逻辑宽算 = 物理宽 / dpi】
+ *    旧式 `sc = phys_w * 100 / 480` 把"物理宽"当"逻辑宽"用。HiDPI 屏上物理宽
+ *    天然是逻辑宽的数倍 → 算出的 sc 也数倍大 → 随即被 cap(默认160)砍回去 →
+ *    最终 UI 只占屏幕宽度的一小部分。实测推演: 2560 物理 / dpi=2 → 逻辑 1280,
+ *    正确缩放 266(被 cap 到 160), 而旧式给出 533(也被 cap 到 160) —— 看似一样,
+ *    但下一步差在"乘不乘 dpi"。
+ *
+ * ② 【结果要乘回 dpi】
+ *    帧缓冲是物理像素, 所以最终绘制尺寸 = 逻辑缩放 × dpi。
+ *    与 ① 配对后: 逻辑 1280 + dpi2 → 160 × 2 = 320, UI 宽 480×3.2 = 1536 物理像素
+ *    = 768 逻辑点, 与"非 HiDPI 下一块 1280 逻辑宽的屏用 160% 缩放"完全一致。
+ *
+ * ③ 【dpi=1 时与改动前逐字节相同】→ 非 HiDPI 机器上零回归。
+ *    这一点有单测守着(遍历大量 (w, cap) 组合与旧公式对比), 不是嘴上说的。
+ */
+int fx_ui_scale_for(int phys_w, float dpi_scale, int cap, int compact)
+{
+    if (!(dpi_scale > 0.1f)) dpi_scale = 1.0f;
+
+    int logical_w = (int)((float)phys_w / dpi_scale + 0.5f);
+    int sc = (logical_w > 0) ? (logical_w * 100) / 480 : 100;
+    if (sc < 100) sc = 100;
+    if (!compact && sc > cap) sc = cap;
+
+    int out = (int)((float)sc * dpi_scale + 0.5f);
+    return (out > 0) ? out : 1;
+}
+
 /* ================= 日志 ================= */
 
 static fx_log_level_t s_log_level = FX_LOG_INFO;

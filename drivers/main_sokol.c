@@ -211,6 +211,13 @@ sapp_desc sokol_main(int argc, char *argv[])
     (void)argc; (void)argv;
     static char s_title[64];
     snprintf(s_title, sizeof(s_title), "fxtk v%s · sokol", FXTK_VERSION);
+    /* v2.5: HiDPI 默认【开】—— 帧缓冲用物理像素, 文字与线条才清晰。
+     * FXTK_HIDPI=0 可关回逻辑像素(旧行为, 界面会糊但省显存)。
+     * ⚠️ 它与 fxtk_ui_scale() 里的"逻辑宽 × dpi"是【配对】的:
+     *    只开 high_dpi 而不改缩放, UI 只会占屏幕一半(见 fx_ui_scale_for 注释)。
+     *    非 HiDPI 设备上 sapp_dpi_scale()=1.0 → 本开关无任何行为差异。 */
+    const char *hidpi_env = getenv("FXTK_HIDPI");
+    bool use_hidpi = hidpi_env ? (hidpi_env[0] != '0') : true;
     return (sapp_desc){
         .init_cb = init_cb,
         .frame_cb = frame_cb,
@@ -222,6 +229,6 @@ sapp_desc sokol_main(int argc, char *argv[])
         .window_title = s_title,
         .depth_format = SAPP_PIXELFORMAT_NONE,   /* 2D UI: 交换链与管线都不带深度, 避免格式校验冲突 */
         .logger.func = slog_func,
-        .high_dpi = false,
+        .high_dpi = use_hidpi,
     };
 }
