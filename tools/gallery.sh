@@ -29,7 +29,7 @@ echo "📸 演示页面 (12 页 @1280x720)..."
 
 echo "📸 画布示例 (7 例 × 2 分辨率, 软件渲染)..."
 CORE="../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c ../components/fxtk/fxtk_widgets.c \
-      ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c ../components/fxtk/fxtk_par.c ../components/fxtk/fxtk_gesture.c"
+      ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c ../components/fxtk/fxtk_par.c ../components/fxtk/fxtk_gesture.c ../components/fxtk/fxtk_flex.c"
 for src in examples/canvas/canvas_*.c; do
     name=$(basename "$src" .c)
     ( cd demo-main

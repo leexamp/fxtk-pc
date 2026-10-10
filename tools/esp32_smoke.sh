@@ -52,7 +52,7 @@ cat > "$TMP/idf/freertos/task.h" <<'HDR'
 void vTaskDelay(TickType_t ticks);
 HDR
 
-SRCS="fxtk.c fxtk_draw.c fxtk_widgets.c fxtk_effects.c fxtk_extra.c fxtk_backends.c fxtk_par.c fxtk_gesture.c"
+SRCS="fxtk.c fxtk_draw.c fxtk_widgets.c fxtk_effects.c fxtk_extra.c fxtk_backends.c fxtk_par.c fxtk_gesture.c fxtk_flex.c"
 FAIL=0
 echo "🔎 ESP32 接口级冒烟 (-DESP_PLATFORM, 假 IDF 头, 只做语法/接口检查)"
 for f in $SRCS; do

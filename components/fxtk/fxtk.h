@@ -107,6 +107,7 @@ fx_attr_t fgcolor(fx_color_t c);
 fx_attr_t border(int n);
 fx_attr_t radius(int n);
 #define FX_POS_FIXED 3   /* 布局不重算(弹层直写坐标) */
+#define FX_POS_FLEX  4   /* v2.5: 坐标由 fx_flex_apply 写入, 布局期不重算 */
 #define FX_F_DENSE (1<<7)   /* grid 密集模式 */
 #define FX_F_FIT   (1<<8)   /* 适应: 封顶+居中 */
 #define FX_F_READONLY (1<<9)   /* 文本框只读 */
@@ -436,6 +437,61 @@ const char *fx_gesture_name(int type);       /* 中文名, 便于日志/调试�
 void fx_gesture_config(int long_press_ms, int tap_max_ms, int tap_max_dist,
                        int swipe_min_dist, int double_tap_ms);
 void fx_gesture_config_default(void);
+
+/* ==================== v2.5: 弹性布局（flex 子集） ====================
+ * 【用法】容器尺寸照旧用 pixel/percent 定, 子件先随便给个矩形(它会被覆盖),
+ * 在容器尺寸确定后调一次:
+ *     fx_flex_apply_simple(panel, FX_FLEX_ROW, 8, 6,
+ *                          FX_FLEX_SPACE_BETWEEN, FX_FLEX_ALIGN_CENTER);
+ *                                        // 8 = 子件间距 gap, 6 = 容器内边距 pad
+ * 需要按权重分配宽度时用完整版：
+ *     fx_flex_item_t it[3] = {
+ *         { .size = 60,            .grow = 0 },   // 固定 60
+ *         { .size = 60,            .grow = 1 },   // 按比例吃掉剩余
+ *         { .size = -1, .grow = 2, .min_size = 40 },
+ *     };
+ *     fx_flex_apply(panel, it, 3, FX_FLEX_ROW, 8, 6,
+ *                   FX_FLEX_START, FX_FLEX_ALIGN_STRETCH);
+ *
+ * 【什么时候调】它不是"每帧自动跑"的, 而是一次性把坐标写死并把子件标成
+ * FX_POS_FLEX(布局期不再重算)。所以: 窗口缩放 / 容器改变尺寸 / 增删子件之后
+ * 要【再调一次】, 否则坐标是旧的。
+ *
+ * 【诚实边界 —— 没做的部分不装做过了】
+ *   ① 不收缩: 空间不够时【不压缩】子件, 直接溢出(不做 flex-shrink)。
+ *   ② 不换行(不做 flex-wrap)。
+ *   ③ 容器尺寸要调用方给; 不做嵌套 flex 的自动尺寸推导。
+ *   ④ 一次最多处理 64 个直接子件(超出部分不排, 但不会越界写内存)。 */
+typedef enum { FX_FLEX_ROW = 0, FX_FLEX_COL = 1 } fx_flex_dir_t;
+typedef enum {
+    FX_FLEX_START = 0, FX_FLEX_CENTER, FX_FLEX_END,
+    FX_FLEX_SPACE_BETWEEN, FX_FLEX_SPACE_AROUND
+} fx_flex_justify_t;
+typedef enum {
+    FX_FLEX_ALIGN_START = 0, FX_FLEX_ALIGN_CENTER, FX_FLEX_ALIGN_END, FX_FLEX_ALIGN_STRETCH
+} fx_flex_align_t;
+
+typedef struct {
+    int size;        /* 主轴基础尺寸(px); <=0 视为 0(靠 grow 撑开) */
+    int grow;        /* 弹性系数; 0 = 不伸缩 */
+    int min_size;    /* 夹紧下限; <=0 = 不限制 */
+    int max_size;    /* 夹紧上限; <=0 = 不限制 */
+    int cross_size;  /* 交叉轴尺寸; <=0 = 用容器可用交叉轴 */
+} fx_flex_item_t;
+
+/* 纯函数: 只算坐标, 不碰控件与驱动。返回实际排布的项数。
+ * out_xy4 需要 4*n 个 int, 每项按 (x1,y1,x2,y2) 写入。 */
+int  fx_flex_solve(int cx1, int cy1, int cx2, int cy2,
+                   int dir, int gap, int pad, int justify, int align,
+                   const fx_flex_item_t *items, int n, int *out_xy4);
+
+/* 应用: 把容器【可见子件】按 items 求解并写入坐标(标记 FX_POS_FLEX) */
+void fx_flex_apply(fx_widget_t *container,
+                   const fx_flex_item_t *items, int n,
+                   int dir, int gap, int pad, int justify, int align);
+/* 常用形态: 用每个子件【当前矩形尺寸】当基础尺寸, grow=0 */
+void fx_flex_apply_simple(fx_widget_t *container, int dir, int gap, int pad,
+                          int justify, int align);
 
 #ifdef __cplusplus
 }

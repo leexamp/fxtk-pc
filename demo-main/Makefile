@@ -45,7 +45,8 @@ CORE := ../components/fxtk/fxtk.c \
         ../components/fxtk/fxtk_extra.c \
         ../components/fxtk/fxtk_backends.c \
         ../components/fxtk/fxtk_par.c \
-        ../components/fxtk/fxtk_gesture.c
+        ../components/fxtk/fxtk_gesture.c \
+        ../components/fxtk/fxtk_flex.c
 HDRS := ../components/fxtk/fxtk.h ../components/fxtk/fxtk_internal.h
 DRIVER := ../drivers/fxtk_sdl_driver.c ../drivers/main_linux.c
 
@@ -122,13 +123,22 @@ gesture-test: test/gesture_test
 test/gesture_test: test/gesture_test.c ../components/fxtk/fxtk_gesture.c $(HDRS)
 	gcc -O2 $(INC) test/gesture_test.c ../components/fxtk/fxtk_gesture.c -o $@ -lm
 
+# ---- v2.5: 弹性布局自检 (无头, 只链 fxtk_flex.c；它不依赖驱动/控件绘制) ----
+.PHONY: flex-test
+flex-test: test/flex_test
+	./test/flex_test
+
+test/flex_test: test/flex_test.c ../components/fxtk/fxtk_flex.c $(HDRS)
+	gcc -O2 $(INC) test/flex_test.c ../components/fxtk/fxtk_flex.c -o $@ -lm
+
 # ---- v2.4 sokol 后端 (无 SDL 依赖; 文本层走 stb_truetype) ----
 SOKOL_INC := -I../third_party/sokol
 SOKOL_LIBS := -lX11 -lXi -lXcursor -lGL -ldl -lpthread -lm
 SOKOL_CORE := ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
               ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_effects.c \
               ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c \
-              ../components/fxtk/fxtk_par.c ../components/fxtk/fxtk_gesture.c
+              ../components/fxtk/fxtk_par.c ../components/fxtk/fxtk_gesture.c \
+              ../components/fxtk/fxtk_flex.c
 # ⚠️ 这份清单【不是】CORE 的拷贝, 而是独立维护的(去掉 fxtk_font.c, 改用
 #    fxtk_font_stb.c)。新增核心 .c 时【两处都要加】—— v2.5 初版只往 CORE 里加了
 #    fxtk_gesture.c, 结果 sokol 版演示报 "fx_gesture_feed 未定义的引用"。

@@ -397,6 +397,7 @@ static void layout_children(fx_widget_t *p)
             c->x2=(int16_t)(p->x1+(int32_t)pw*c->px2/1000-1); c->y2=(int16_t)(p->y1+(int32_t)ph*c->py2/1000-1);
             break; }
         case FX_POS_FIXED: break;   /* 弹层: 保留直写坐标 */
+        case FX_POS_FLEX:  break;   /* v2.5: 坐标由 fx_flex_apply 写好了, 布局期不重算 */
         case FX_POS_GRID: {
             fx_widget_t *g=c->grid_ref;
             /* v2.3.1: grid 晚于子件创建时布局期重解析 (旧逻辑只在创建瞬间解析一次,
