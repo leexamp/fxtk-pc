@@ -351,6 +351,43 @@ int  fxtk_font_height(int size);  /* 缩放后字高 */
 int  fxtk_drv_width(void);
 int  fxtk_drv_height(void);
 
+/* ==================== v2.5: 并行 for（CPU，不是 GPU） ====================
+ * 【先把名字说清 —— 它叫 par 而不是 gpu，因为按"gpu"叫就是名不副实】
+ *   ① GPU 上跑的是 GLSL/SPIR-V；C 代码块没法直接变成 GPU 指令 —— 那要先写个
+ *      C 子集编译器，属于重写 nvcc，不是"后端升级"。
+ *   ② sokol_gfx 只有 vertex/fragment 管线，【没有 compute shader】
+ *      （无 sg_dispatch 之类）—— 这是它的设计边界，不是版本问题。
+ *   所以本模块是【CPU 多线程】。想要真 GPU 并行，得换掉 sokol_gfx 走裸 GL 4.3
+ *   compute / Vulkan，代价是丢掉 ESP32 与 SDL2 后端的对等支持。
+ *
+ * 【两种用法】
+ *   语法糖（串行，零开销，全平台 —— 只是让循环读起来像一句话）:
+ *       fx_par_for(n) { a[fx_i] = fx_i * fx_i; }
+ *   真并行（要回调，因为宏没法把任务切给线程）:
+ *       static void fill(int lo, int hi, void *ud) {
+ *           int *a = ud;  for (int i = lo; i < hi; i++) a[i] = i * i;
+ *       }
+ *       fx_parallel_for(n, fill, a);
+ *
+ * 【⚠️ 它不会让"压测页"更快，别指望错方向】
+ *   压测页实测 59~108 fps 的瓶颈是【每帧整画布重绘 + 上传约 7.7MB 像素】
+ *   （见 CHANGELOG v2.4.3 的结论），那是光栅化与传输，不是算力。
+ *   并行循环帮的是【你自己的数据处理】，不是控件绘制。
+ *
+ * 【为什么不用 OpenMP / C11 threads】
+ *   OpenMP 会引入 libgomp 依赖，破坏"零第三方动态库"；C11 <threads.h> 在 mingw
+ *   与部分嵌入式工具链上支持不全。所以直接用 pthreads / Win32 线程，
+ *   其余平台（含 ESP32）退化为串行 —— 接口与语义不变，只是不并行。
+ */
+#define fx_par_for(cnt) for (int fx_i = 0, fx_n_ = (int)(cnt); fx_i < fx_n_; fx_i++)
+
+void fx_parallel_for(int n, void (*body)(int lo, int hi, void *ud), void *ud);
+/* 逻辑核数用已有的 fx_cpu_count()(声明在 fxtk_backends.h) —— 不要在这里重复声明,
+ * v2.5 初版曾在这里再声明一次并在 fxtk_par.c 里再实现一次, 直接撞出
+ * "multiple definition of fx_cpu_count" 链接错误。 */
+int  fx_parallel_threads(void);       /* 当前设定 (0 = 自动) */
+void fx_parallel_set_threads(int n);  /* 0 = 自动; 1 = 强制串行 */
+
 #ifdef __cplusplus
 }
 #endif

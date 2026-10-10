@@ -43,7 +43,8 @@ CORE := ../components/fxtk/fxtk.c \
         ../components/fxtk/fxtk_font.c \
         ../components/fxtk/fxtk_effects.c \
         ../components/fxtk/fxtk_extra.c \
-        ../components/fxtk/fxtk_backends.c
+        ../components/fxtk/fxtk_backends.c \
+        ../components/fxtk/fxtk_par.c
 HDRS := ../components/fxtk/fxtk.h ../components/fxtk/fxtk_internal.h
 DRIVER := ../drivers/fxtk_sdl_driver.c ../drivers/main_linux.c
 
@@ -85,11 +86,22 @@ test: test/headless_test test/headless_test_stub
 	./test/headless_test_stub
 
 TEST_CORE := $(filter-out ../components/fxtk/fxtk_font.c,$(CORE))
+# v2.5: CORE 里现在有 fxtk_par.c(pthreads), 无头测试也要链 -lpthread。
+# 注意它【必须】排在目标文件之后 —— ld 的库顺序敏感, 放前面会解析不到符号。
 test/headless_test: test/headless_test.c $(TEST_CORE) $(HDRS)
-	gcc -O2 $(INC) $(TEST_CORE) test/headless_test.c -o $@ -lm
+	gcc -O2 $(INC) $(TEST_CORE) test/headless_test.c -o $@ -lm -lpthread
 
 test/headless_test_stub: test/headless_test.c $(TEST_CORE) $(HDRS)
-	gcc -O2 -DFXTK_BACKEND_STUB $(INC) $(TEST_CORE) test/headless_test.c -o $@ -lm
+	gcc -O2 -DFXTK_BACKEND_STUB $(INC) $(TEST_CORE) test/headless_test.c -o $@ -lm -lpthread
+
+# ---- v2.5: 并行 for 自检 (无头, 不需要显示/窗口) ----
+# 只链 fxtk_par.c, 不拖整个框架进来 —— 它不依赖任何渲染/驱动。
+.PHONY: par-test
+par-test: test/par_test
+	./test/par_test
+
+test/par_test: test/par_test.c ../components/fxtk/fxtk_par.c $(HDRS)
+	gcc -O2 $(INC) test/par_test.c ../components/fxtk/fxtk_par.c -o $@ -lpthread
 
 # ---- v2.4 sokol 后端 (无 SDL 依赖; 文本层走 stb_truetype) ----
 SOKOL_INC := -I../third_party/sokol
