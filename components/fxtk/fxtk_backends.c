@@ -37,7 +37,13 @@
   #include <sys/types.h>
 #endif
 
-/* ---- 图片编解码: vendored stb, 只开需要的解码器 (体积) ---- */
+/* ---- 图片编解码: vendored stb, 只开需要的解码器 (体积) ----
+ * v2.5: 可编译期关掉 —— 各约省 20KB / 13KB(实测见 CHANGELOG)。
+ *   -DFXTK_NO_STB_IMAGE        不加载图片(纯 UI 程序用不到)
+ *   -DFXTK_NO_STB_IMAGE_WRITE  不导出 PNG
+ * 关掉后对应 API 变成【明确报不支持】(返回 0 + 一条 WARN 日志),
+ * 而不是静默返回 0 让人以为"文件坏了" —— 与"别把没实现的说成已实现"一致。 */
+#ifndef FXTK_NO_STB_IMAGE
 #define STBI_NO_STDIO
 #define STBI_NO_HDR
 #define STBI_NO_PSD
@@ -50,9 +56,13 @@
 #define STBI_ONLY_TGA
 #define STB_IMAGE_IMPLEMENTATION
 #include "vendor/stb/stb_image.h"
+#endif /* !FXTK_NO_STB_IMAGE */
+
+#ifndef FXTK_NO_STB_IMAGE_WRITE
 #define STBI_WRITE_NO_STDIO
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "vendor/stb/stb_image_write.h"
+#endif /* !FXTK_NO_STB_IMAGE_WRITE */
 
 /* ================= 能力与屏幕参数 ================= */
 
@@ -483,11 +493,17 @@ int fx_img_load_mem(const void *data, int size, fx_img_t *out)
     if (!out) return 0;
     memset(out, 0, sizeof(*out));
     if (!data || size <= 0) return 0;
+#ifdef FXTK_NO_STB_IMAGE
+    /* 编译期关掉了图片解码: 明确报出来。静默返回 0 会让人以为是"文件坏了", 查半天。 */
+    fx_log(FX_LOG_WARN, "本构建未编译图片解码 (FXTK_NO_STB_IMAGE), 无法加载图片");
+    return 0;
+#else
     int w = 0, h = 0, ch = 0;
     unsigned char *px = stbi_load_from_memory((const stbi_uc *)data, size, &w, &h, &ch, 0);
     if (!px) { fx_log(FX_LOG_WARN, "图片解码失败: %s", stbi_failure_reason()); return 0; }
     out->w = w; out->h = h; out->channels = ch; out->pixels = px;
     return 1;
+#endif
 }
 
 int fx_img_load_file(const char *path, fx_img_t *out)
@@ -503,7 +519,9 @@ int fx_img_load_file(const char *path, fx_img_t *out)
 void fx_img_free(fx_img_t *img)
 {
     if (!img) return;
+#ifndef FXTK_NO_STB_IMAGE
     if (img->pixels) stbi_image_free(img->pixels);
+#endif
     memset(img, 0, sizeof(*img));
 }
 
@@ -517,18 +535,16 @@ int fx_img_has_file_ext(const char *path)
     return 0;
 }
 
-/* 编码回调: 统一走 fx_file_write, 这样 stub(内存 FS)与真实 FS 行为一致 */
-typedef struct { const char *path; int failed; } png_sink_t;
-static void png_sink_write(void *ctx, void *data, int size)
-{
-    png_sink_t *s = (png_sink_t *)ctx;
-    if (s->failed || size <= 0) return;
-    if (!fx_file_write(s->path, data, size, 1)) s->failed = 1;
-}
+/* v2.5: 原先这里还有 png_sink_write + png_sink_t, 是 v2.4.4 改成"先编码到内存再写文件"
+ * 之前的遗留 —— 改完后无人调用, 只用来产生一条 -Wunused-function 警告。已删除。 */
 
 int fx_img_save_png(const char *path, const unsigned char *px, int w, int h, int channels)
 {
     if (!path || !px || w <= 0 || h <= 0 || (channels != 3 && channels != 4)) return 0;
+#ifdef FXTK_NO_STB_IMAGE_WRITE
+    fx_log(FX_LOG_WARN, "本构建未编译 PNG 编码 (FXTK_NO_STB_IMAGE_WRITE), 未写出: %s", path);
+    return 0;
+#else
     /* v2.4.4 修复(评审 A8): 原先【先清空目标文件再编码】—— 编码失败时旧文件已被毁,
      * 用户会得到 0 字节 PNG。改为先编码到内存, 成功后再一次性写文件
      * (仍走 fx_file_write, 保持 stub 内存 FS 与真实 FS 行为一致; 失败时目标文件原样未动)。 */
@@ -542,6 +558,7 @@ int fx_img_save_png(const char *path, const unsigned char *px, int w, int h, int
         free(mem);
         return okw ? 1 : 0;
     }
+#endif
 }
 
 /* ================= 剪贴板 ================= */
