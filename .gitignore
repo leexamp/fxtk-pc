@@ -52,3 +52,5 @@ demo-main/test/svg_test
 your_app/your_app
 your_app/libfxtk*.so
 your_app/dist/
+demo-main/test/v25_showcase
+demo-main/test/v25_evidence

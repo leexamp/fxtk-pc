@@ -493,6 +493,24 @@ void fx_flex_apply(fx_widget_t *container,
 void fx_flex_apply_simple(fx_widget_t *container, int dir, int gap, int pad,
                           int justify, int align);
 
+/* ⚠️⚠️ 顺序陷阱(v2.5 写演示时踩到, 务必先读) ⚠️⚠️
+ *
+ * items[i] 对应的是【遍历顺序】里的第 i 个可见子控件, 而本框架的子控件链表是
+ * 【头插】的 —— fxtk_link() 里 child->sibling = parent->child; parent->child = child;
+ * 于是 fx_flex_apply / layout_children / 绘制 全都按 child->sibling 迭代, 也就是
+ * 【逆着创建顺序】。换句话说:
+ *
+ *      最后创建的控件 = 链首 = items[0]
+ *      最先创建的控件 = 链尾 = items[n-1]
+ *
+ * 所以下面这段的直觉是【错的】:
+ *      fx_canvas_new(...);   // 以为这是"第一个", 会被排到最前面
+ *      fx_canvas_new(...);
+ *      fx_flex_apply(root, items, 2, FX_FLEX_COL, ...);   // items[0] 其实给了第二个
+ *
+ * 想让画面顺序 = 书写顺序, 就要【倒着创建】。这是框架级的一致约定(不是 flex 独有的
+ * 行为), 改它会翻转所有既有演示的层叠顺序, 所以这里【只记录、不改】。 */
+
 /* ==================== v2.5: SVG 子集 → canvas ====================
  * 【用法】解析一次(init 里), 每帧在 canvas 回调里画(自动等比缩放+居中):
  *     static fx_svg_t *g_icon;

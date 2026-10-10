@@ -225,3 +225,24 @@ fxtk_sim_dbg: $(SOKOL_CORE) ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_
 	    gpu_raymarch_stub.c -o $@ $(SOKOL_LIBS)
 
 .PHONY: dbg
+
+# ---- v2.5: 新功能可视化演示 (真实渲染管线导 PNG, 不需要真窗口) ----
+.PHONY: v25-showcase
+v25-showcase: test/v25_showcase
+	./test/v25_showcase 480 272 /tmp/v25_480.png
+	./test/v25_showcase 800 350 /tmp/v25_800.png
+
+test/v25_showcase: test/v25_showcase.c test/render_canvas.c $(HDRS)
+	gcc -O2 $(INC) test/render_canvas.c test/v25_showcase.c \
+	    $(shell ls ../components/fxtk/fxtk*.c | grep -v 'fxtk_font\.c$$') \
+	    -o $@ -lm -lpthread
+
+# ---- v2.5: 无头证据收集 (并行/手势/高DPI/flex/SVG 的可验证数字) ----
+.PHONY: v25-evidence
+v25-evidence: test/v25_evidence
+	./test/v25_evidence
+
+test/v25_evidence: test/v25_evidence.c $(HDRS)
+	gcc -O2 $(INC) test/v25_evidence.c \
+	    $(shell ls ../components/fxtk/fxtk*.c | grep -v 'fxtk_font\.c$$') \
+	    -o $@ -lm -lpthread
