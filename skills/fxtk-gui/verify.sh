@@ -20,6 +20,8 @@ CORE=(
   "$ROOT/components/fxtk/fxtk_effects.c"
   "$ROOT/components/fxtk/fxtk_extra.c"
   "$ROOT/components/fxtk/fxtk_backends.c"
+  "$ROOT/components/fxtk/fxtk_par.c"
+  "$ROOT/components/fxtk/fxtk_gesture.c"
 )
 DRV=(
   "$ROOT/drivers/fxtk_app_sokol.c"

@@ -52,7 +52,7 @@ cat > "$TMP/idf/freertos/task.h" <<'HDR'
 void vTaskDelay(TickType_t ticks);
 HDR
 
-SRCS="fxtk.c fxtk_draw.c fxtk_widgets.c fxtk_effects.c fxtk_extra.c fxtk_backends.c"
+SRCS="fxtk.c fxtk_draw.c fxtk_widgets.c fxtk_effects.c fxtk_extra.c fxtk_backends.c fxtk_par.c fxtk_gesture.c"
 FAIL=0
 echo "🔎 ESP32 接口级冒烟 (-DESP_PLATFORM, 假 IDF 头, 只做语法/接口检查)"
 for f in $SRCS; do
@@ -68,5 +68,7 @@ for f in $SRCS; do
         echo "FAIL"; sed 's/^/      /' "$TMP/err" | head -12; FAIL=1
     fi
 done
-[ "$FAIL" = "0" ] && echo "✅ ESP32 冒烟通过(6 个核心文件)" || echo "❌ ESP32 冒烟失败"
+# 计数【动态算】而不是写死数字: 原先写死 "6 个核心文件", v2.5 加了 fxtk_par.c /
+# fxtk_gesture.c 之后就变成假信息(实际 8 个却仍打印 6)。数字类文案一律从数据推。
+[ "$FAIL" = "0" ] && echo "✅ ESP32 冒烟通过($(echo $SRCS | wc -w) 个核心文件)" || echo "❌ ESP32 冒烟失败"
 exit $FAIL

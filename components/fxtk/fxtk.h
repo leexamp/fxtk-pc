@@ -388,6 +388,55 @@ void fx_parallel_for(int n, void (*body)(int lo, int hi, void *ud), void *ud);
 int  fx_parallel_threads(void);       /* 当前设定 (0 = 自动) */
 void fx_parallel_set_threads(int n);  /* 0 = 自动; 1 = 强制串行 */
 
+/* ==================== v2.5: 触摸手势（单指） ====================
+ * 【用法】驱动已有 touch_read 的话, 在 fx_poll() 之后取空事件队列即可:
+ *     fx_gesture_ev_t ev;
+ *     while (fx_gesture_poll(&ev)) {
+ *         if (ev.type == FX_GEST_SWIPE_LEFT) 切到上一页();
+ *         if (ev.type == FX_GEST_DOUBLE_TAP) 重置();
+ *     }
+ * 【不用改驱动】框架已在 fx_poll() 里把触摸样本喂进来了; 本组 API 只负责识别。
+ *
+ * 【⚠️ 只支持单指】当前驱动接口 touch_read(x,y,pressed) 只给一个触点,
+ *   所以捏合缩放(pinch)/双指旋转【没有实现】—— 那不是"以后再说", 是接口给不出
+ *   第二个触点。要支持必须先扩展驱动接口。别把本模块当多指方案。
+ *
+ * 【单击会延迟 g_double_tap_ms 才报】为了区分单击与双击, TAP 必须等双击窗口过去
+ *   才能确定。所以"要立刻响应的按钮"应当用控件自身的按下/抬起, 而不是等 TAP。
+ *   这是个真实取舍, 不是 bug。 */
+typedef enum {
+    FX_GEST_NONE = 0,
+    FX_GEST_TAP,           /* 单击(双击窗口后结算) */
+    FX_GEST_DOUBLE_TAP,
+    FX_GEST_LONG_PRESS,
+    FX_GEST_DRAG_BEGIN,
+    FX_GEST_DRAG_MOVE,     /* 拖拽中会持续产生 */
+    FX_GEST_DRAG_END,
+    FX_GEST_SWIPE_LEFT,    /* 四向滑动(快且远) */
+    FX_GEST_SWIPE_RIGHT,
+    FX_GEST_SWIPE_UP,
+    FX_GEST_SWIPE_DOWN
+} fx_gesture_type_t;
+
+typedef struct {
+    fx_gesture_type_t type;
+    int x, y;          /* 事件发生位置(拖拽类为当前位置) */
+    int dx, dy;        /* 相对按下点的位移 */
+    int duration_ms;   /* 从按下到本事件的耗时 */
+} fx_gesture_ev_t;
+
+void fx_gesture_feed(int x, int y, int pressed, uint32_t now_ms);  /* 框架内部调用 */
+int  fx_gesture_poll(fx_gesture_ev_t *ev);   /* 取一条, 无则 0; 建议 while 取空 */
+int  fx_gesture_pending(void);               /* 队列里还剩几条 */
+int  fx_gesture_active(void);                /* 手指是否正按着 */
+int  fx_gesture_dropped(void);               /* 调试: 因队列满被丢弃的事件数 */
+void fx_gesture_reset(void);
+const char *fx_gesture_name(int type);       /* 中文名, 便于日志/调试页 */
+/* 调阈值; 传 <=0 的项保持原值。默认: 长按500ms 点按300ms/12px 滑动40px/600ms 双击300ms */
+void fx_gesture_config(int long_press_ms, int tap_max_ms, int tap_max_dist,
+                       int swipe_min_dist, int double_tap_ms);
+void fx_gesture_config_default(void);
+
 #ifdef __cplusplus
 }
 #endif

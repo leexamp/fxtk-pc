@@ -41,6 +41,8 @@ x86_64-w64-mingw32-gcc $SZ -I. -I../components/fxtk -I../drivers $INC \
     ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_font.c \
     ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_extra.c \
     ../components/fxtk/fxtk_backends.c \
+    ../components/fxtk/fxtk_par.c \
+    ../components/fxtk/fxtk_gesture.c \
     ../drivers/fxtk_sdl_driver.c ../drivers/main_linux.c $SRCS \
     -o dist/win/$OUT $LIB \
     -lmingw32 -lSDL2main -lSDL2 -lSDL2_ttf -lSDL2_image -lshell32 -lcomdlg32 -lole32 -lm \

@@ -55,7 +55,7 @@ if [ "$MODE" = shared ]; then
     #   your_app          = 只含 main.c 与外壳(入口), 不再包含 sokol 实现
     # 上一版我误把驱动编进 exe → 整套 sokol 进了可执行文件(141K); 正确分法下 exe 只有几十 KB。
     rm -f your_app libfxtk.so libfxtk_sokol.so
-    CORE_CS="../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c ../components/fxtk/fxtk_widgets.c              ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c"
+    CORE_CS="../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c ../components/fxtk/fxtk_widgets.c              ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c ../components/fxtk/fxtk_par.c ../components/fxtk/fxtk_gesture.c"
     echo "🔨 libfxtk.so (框架核心) ..."
     gcc -shared -fPIC -Os -s -flto -ffunction-sections -fdata-sections -DNDEBUG \
         -I../components/fxtk -I../drivers -I../third_party/sokol \

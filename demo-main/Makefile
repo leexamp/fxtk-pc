@@ -44,7 +44,8 @@ CORE := ../components/fxtk/fxtk.c \
         ../components/fxtk/fxtk_effects.c \
         ../components/fxtk/fxtk_extra.c \
         ../components/fxtk/fxtk_backends.c \
-        ../components/fxtk/fxtk_par.c
+        ../components/fxtk/fxtk_par.c \
+        ../components/fxtk/fxtk_gesture.c
 HDRS := ../components/fxtk/fxtk.h ../components/fxtk/fxtk_internal.h
 DRIVER := ../drivers/fxtk_sdl_driver.c ../drivers/main_linux.c
 
@@ -113,12 +114,24 @@ test/uiscale_test: test/uiscale_test.c ../components/fxtk/fxtk_backends.c $(HDRS
 	gcc -O2 $(INC) -I../components/fxtk/vendor/stb test/uiscale_test.c \
 	    ../components/fxtk/fxtk_backends.c -o $@ -lm
 
+# ---- v2.5: 触摸手势自检 (无头, 合成触摸序列, 完全不依赖硬件/真实时钟) ----
+.PHONY: gesture-test
+gesture-test: test/gesture_test
+	./test/gesture_test
+
+test/gesture_test: test/gesture_test.c ../components/fxtk/fxtk_gesture.c $(HDRS)
+	gcc -O2 $(INC) test/gesture_test.c ../components/fxtk/fxtk_gesture.c -o $@ -lm
+
 # ---- v2.4 sokol 后端 (无 SDL 依赖; 文本层走 stb_truetype) ----
 SOKOL_INC := -I../third_party/sokol
 SOKOL_LIBS := -lX11 -lXi -lXcursor -lGL -ldl -lpthread -lm
 SOKOL_CORE := ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
               ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_effects.c \
-              ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c
+              ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c \
+              ../components/fxtk/fxtk_par.c ../components/fxtk/fxtk_gesture.c
+# ⚠️ 这份清单【不是】CORE 的拷贝, 而是独立维护的(去掉 fxtk_font.c, 改用
+#    fxtk_font_stb.c)。新增核心 .c 时【两处都要加】—— v2.5 初版只往 CORE 里加了
+#    fxtk_gesture.c, 结果 sokol 版演示报 "fx_gesture_feed 未定义的引用"。
 
 # ---- v2.5: 单窗口桌面行为 (去标题栏/置顶/移动/居中/拖动) ----
 # 独立成文件而不是塞进驱动: 它只用 sokol_app 暴露的原生窗口句柄(sapp_x11_get_window
