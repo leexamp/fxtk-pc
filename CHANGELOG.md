@@ -1,5 +1,64 @@
 # Changelog
 
+## v2.5（开发中：后端升级 + 单窗口行为）
+
+> 复核方式：`make` + `make test` + `make fxtk_sim_en` + `make window-test` + `make golden`（无头金图用 `GOLDEN_SKIP_DEMO=1`）。
+
+### 新增：单窗口桌面行为（`drivers/fxtk_window.c`）
+
+- **★ 边界先说清：这是「单窗口」行为，不是多窗口。**
+  sokol_app 是单窗口设计（全局状态 + 一次 `sapp_run`），**多窗口必须换掉平台层**。
+  但它对外暴露了**原生窗口句柄**（`sapp_win32_get_hwnd` / `sapp_x11_get_window` /
+  `sapp_macos_get_window`），所以「改窗口样式 / 挪窗口 / 置顶」这类**单窗口**动作
+  不必换后端。真正被卡死的只有多窗口 —— 这一条此前在外部分析里被误判成「都做不了」。
+- 新增 8 个 API（`fx_win_available` / `set|get_borderless` / `set|get_always_on_top` /
+  `move` / `get_pos` / `center` / `drag_begin`）+ 回查用的 `fx_win_get_decorated`。
+  X11 与 Win32 两套实现；其它平台（含 SDL 遗留后端）为**安全空操作**，返回 0 不崩。
+- **体积代价：0 字节。** 演示仍为 385,912 B（与改动前逐字节相同）——
+  未调用 `fx_win_*` 时整个模块被 `--gc-sections` + ICF 剥掉，**用了才付**。
+- **实测结论（本机 GNOME Shell/mutter + XWayland 1920×1080，装饰高 38px）**：
+
+  | 行为 | 结果 | 验证方式 |
+  |---|---|---|
+  | 置顶 | ✅ 生效 | 回查 `_NET_WM_STATE_ABOVE` |
+  | 移动 | ✅ `fx_win_move(120,90)` 实测精确 `(120,90)`，偏差 (0,0) | 回查窗口坐标 |
+  | 居中 | ✅ 期望左上角 `(760,371)` 实测 `(760,371)`，偏差 (0,0) | 按屏尺寸反推 |
+  | 去标题栏 | ⚠️ **`_MOTIF_WM_HINTS` 无效**（连 unmap+map 都不行） | 回查 `_NET_FRAME_EXTENTS` |
+
+- **去标题栏那条不是本模块的 bug**：mutter 走客户端装饰，就是不认 motif hints。
+  因此 `fx_win_get_decorated()` 存在的意义就是让调用者能**回查验证**，而不是只能
+  听返回值 —— 这正是 v2.4.5 那条「别把没验证的写成已修」的落实。
+  自检把它归为 `[ENV]`（环境限制）而非 `[FAIL]`，并注明在 xfwm/openbox/KWin 等
+  支持 motif hints 的 WM 上应走 `[PASS]`。
+
+### 排查中挖出的两条使用铁律（已写进 `test/window_test.c` 文件头）
+
+1. **别在 `init_cb` 里操作窗口。** 窗口刚 map，WM 还在做初始摆放，会把你的
+   move/置顶**覆盖掉**。实测同一份 `fx_win_move(120,90)`：`init_cb` 里调 →
+   停在 WM 摆的 `(760,423)`；延迟若干帧 → 精确落在 `(120,90)`。
+2. **EWMH 请求（`_NET_WM_STATE` / `_MOTIF_WM_HINTS` / `_NET_WM_MOVERESIZE`）必须给 WM 留处理时间。**
+   这些是发给 WM 的 ClientMessage，由 WM 事件循环**异步**处理；而 `XMoveWindow`
+   直接落 X 服务器。无 vsync 时帧间隔只有几毫秒 —— 隔 3 帧就回查会拿到**假的 FAIL**
+   （实测「置顶」就是这样被误判过一次）。间隔要按**时间**留，不能按帧数。
+
+### 顺带修掉两处自己踩的坑（注释里都记了，免得后人再踩）
+
+- **`MotifWmHints` 必须用 `uint32_t[5]` 而非 `unsigned long[5]`**：LP64 上 `long` 是
+  8 字节，而 `XChangeProperty(format=32)` 按**连续 32 位单元**读取 → 整份 hints 错位，
+  表现是「设了跟没设一样」。
+- **`DisplayWidth(d, n)` 的 `n` 是屏幕*索引*，不是 `Screen*`**：要按 `Screen*` 取值
+  得用 `WidthOfScreen` / `HeightOfScreen`（编译器报错时建议的 `XWidthOfScreen`
+  **并不存在**，别被带偏）。
+
+### v2.5 尚未开始（本轮只做了第一块）
+
+- **画布整体搬 GPU**（帧率方向；已选定，未开工）
+- **高 DPI**：现状是 `main_sokol.c` 里 **`.high_dpi = false` 显式关掉的**，
+  打开会影响渲染分辨率/布局/金图，需成套改。
+- **触摸手势层**、**灵活布局**、**SVG → canvas**、**stb 可选化（约 -36KB / -9%）**
+- **明确不做（架构级）**：多窗口、GPU compute（`sokol_gfx` 无 compute shader，
+  这是它的设计边界而非版本问题）。
+
 ## v2.4.5（文档与可用性整改）
 
 > 本轮针对「对外表述」与「入门第一公里」的集中整改，全部改动可用 `make` + `make test` + `make golden` 复核。
