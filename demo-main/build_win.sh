@@ -17,6 +17,7 @@ gcc -O2 -I. -I../components/fxtk -I../drivers \
     ../components/fxtk/fxtk_par.c \
     ../components/fxtk/fxtk_gesture.c \
     ../components/fxtk/fxtk_flex.c \
+    ../components/fxtk/fxtk_svg.c \
     ../drivers/fxtk_sdl_driver.c ../drivers/main_linux.c \
     $( if [ "$EX" = "app" ]; then echo "app.c app_desktop.c raymarch.c gpu_stub_win.c"; else echo "../examples/$EX.c"; fi ) \
     -o fxtk_win.exe \

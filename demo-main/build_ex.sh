@@ -15,6 +15,7 @@ SRCS="../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
       ../components/fxtk/fxtk_par.c \
       ../components/fxtk/fxtk_gesture.c \
       ../components/fxtk/fxtk_flex.c \
+      ../components/fxtk/fxtk_svg.c \
       ../drivers/fxtk_sdl_driver.c ../drivers/main_linux.c"
 LIBS="-lSDL2 -lSDL2_ttf -lSDL2_image -lm -pthread -lX11"
 

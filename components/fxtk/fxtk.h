@@ -493,6 +493,42 @@ void fx_flex_apply(fx_widget_t *container,
 void fx_flex_apply_simple(fx_widget_t *container, int dir, int gap, int pad,
                           int justify, int align);
 
+/* ==================== v2.5: SVG 子集 → canvas ====================
+ * 【用法】解析一次(init 里), 每帧在 canvas 回调里画(自动等比缩放+居中):
+ *     static fx_svg_t *g_icon;
+ *     static void on_canvas(fx_widget_t *w, void *ud) {
+ *         int cw, ch; fx_canvas_size(w, &cw, &ch);
+ *         fx_canvas_clear(w, FX_WHITE);
+ *         fx_svg_draw(g_icon, 0, 0, cw, ch);
+ *     }
+ *     g_icon = fx_svg_load("icon.svg");     // 或 fx_svg_parse(text)
+ * 析构时 fx_svg_free(g_icon)。
+ *
+ * 【支持】<svg> <g> <rect> <circle> <ellipse> <line> <polyline> <polygon> <path>;
+ *   fill/stroke/stroke-width/transform(translate,scale,rotate,matrix);
+ *   路径 M L H V C Q Z(含小写相对形式); 颜色 #rgb/#rrggbb/rgb()/颜色名/none。
+ *
+ * 【不支持(不装做支持)】圆弧 A/a、平滑曲线 S/s T/t、渐变/图案/滤镜、
+ *   <text>/<tspan>、CSS style 与 <style> 块、<use>/<defs>/裁剪蒙版。
+ *   遇到不认识的元素会【跳过并计数】, 用 fx_svg_skipped() 取, 便于知道图被简化了多少。
+ *
+ * 【近似之处】曲线用固定 12 段采样(不是自适应细分), 所以极大放大时能看到折线。 */
+typedef struct fx_svg fx_svg_t;
+
+fx_svg_t *fx_svg_parse(const char *text);
+fx_svg_t *fx_svg_load(const char *path);        /* 走 fx_file_read, stub 内存 FS 也能用 */
+void      fx_svg_free(fx_svg_t *s);
+/* 在 (x,y,w,h) 这个框内等比缩放并居中绘制; 需在 canvas 回调内调用 */
+void      fx_svg_draw(const fx_svg_t *s, int x, int y, int w, int h);
+/* 以下三个用于自检/调试, 也是测试能断言解析结果的入口 */
+int       fx_svg_shape_count(const fx_svg_t *s);
+int       fx_svg_shape_points(const fx_svg_t *s, int i);   /* 第 i 个形状的点数; 越界返回 -1 */
+/* 第 i 个形状的包围盒(已应用 transform); 越界返回 0。自检用它断言 transform 生效 */
+int       fx_svg_shape_bbox(const fx_svg_t *s, int i,
+                            float *x1, float *y1, float *x2, float *y2);
+int       fx_svg_skipped(const fx_svg_t *s);               /* 被跳过的元素/指令数 */
+int       fx_svg_size(const fx_svg_t *s, float *vw, float *vh);   /* viewBox 尺寸 */
+
 #ifdef __cplusplus
 }
 #endif

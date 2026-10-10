@@ -60,6 +60,7 @@ $CC $OPT $TRIM -Os -s -flto -ffunction-sections -fmerge-all-constants \
     ../components/fxtk/fxtk_par.c \
     ../components/fxtk/fxtk_gesture.c \
     ../components/fxtk/fxtk_flex.c \
+    ../components/fxtk/fxtk_svg.c \
     -o dist/win/your_app.exe \
     -lopengl32 -lgdi32 -luser32 -lshell32 -lole32 -lcomdlg32 -ldwmapi -lpthread -lm
 

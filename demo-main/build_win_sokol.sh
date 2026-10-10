@@ -29,6 +29,7 @@ x86_64-w64-mingw32-gcc $SZ -I. -I../components/fxtk -I../drivers -I../third_part
     ../components/fxtk/fxtk_par.c \
     ../components/fxtk/fxtk_gesture.c \
     ../components/fxtk/fxtk_flex.c \
+    ../components/fxtk/fxtk_svg.c \
     ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c \
     $SRCS_APP raymarch.c gpu_raymarch_stub.c \
     -o dist/win_sokol/$OUT \
