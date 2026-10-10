@@ -55,15 +55,15 @@ all: fxtk_sim
 # 旧名字继续可用(脚本/文档里引用的是它), 现在只是别名 —— 产物仍是 ./fxtk_sim(sokol 版)
 fxtk_sim_sokol: fxtk_sim
 
-fxtk_sim: $(SOKOL_CORE) ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c \
+fxtk_sim: $(SOKOL_CORE) $(WIN_SRC) ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c \
           app.c app_desktop.c raymarch.c gpu_raymarch_stub.c
-	gcc $(CFLAGS) $(INC) $(SOKOL_INC) $(SOKOL_CORE) \
+	gcc $(CFLAGS) $(INC) $(SOKOL_INC) $(SOKOL_CORE) $(WIN_SRC) \
 	    ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c app.c app_desktop.c raymarch.c \
 	    gpu_raymarch_stub.c -o $@ $(LDFLAGS) $(SOKOL_LIBS)
 
-fxtk_sim_en: $(SOKOL_CORE) ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c \
+fxtk_sim_en: $(SOKOL_CORE) $(WIN_SRC) ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c \
              app_en.c app_desktop_en.c raymarch.c gpu_raymarch_stub.c
-	gcc $(CFLAGS) $(INC) $(SOKOL_INC) $(SOKOL_CORE) \
+	gcc $(CFLAGS) $(INC) $(SOKOL_INC) $(SOKOL_CORE) $(WIN_SRC) \
 	    ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c app_en.c app_desktop_en.c raymarch.c \
 	    gpu_raymarch_stub.c -o $@ $(LDFLAGS) $(SOKOL_LIBS)
 
@@ -97,6 +97,22 @@ SOKOL_LIBS := -lX11 -lXi -lXcursor -lGL -ldl -lpthread -lm
 SOKOL_CORE := ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
               ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_effects.c \
               ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c
+
+# ---- v2.5: 单窗口桌面行为 (去标题栏/置顶/移动/居中/拖动) ----
+# 独立成文件而不是塞进驱动: 它只用 sokol_app 暴露的原生窗口句柄(sapp_x11_get_window
+# 等), 完全不碰渲染 —— 所以与帧流程、命令流、金图都无关, 加进来不影响既有行为。
+WIN_SRC := ../drivers/fxtk_window.c
+
+# 单窗口行为自检。
+# 【刻意不放进 test 目标】: 它要开真窗口并依赖窗口管理器, 不适合当无头 CI 的必过项。
+# 无头/Xvfb 下它会如实报 [N/A]/[ENV] 而不是假绿 —— 这正是本项目要守住的原则。
+.PHONY: window-test
+window-test: test/window_test
+	./test/window_test
+
+test/window_test: test/window_test.c test/sokol_app_impl.c $(WIN_SRC) $(HDRS)
+	gcc $(CFLAGS) $(INC) $(SOKOL_INC) test/window_test.c test/sokol_app_impl.c \
+	    $(WIN_SRC) -o $@ $(LDFLAGS) $(SOKOL_LIBS)
 
 sokol: fxtk_sim
 
