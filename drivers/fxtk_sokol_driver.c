@@ -19,9 +19,11 @@
  * 代价: Windows 侧需要系统自带 opengl32.dll(所有 Windows 都有) —— 正好满足"单 exe 无第三方 DLL"。 */
 #define SOKOL_GLCORE
 
-#define SOKOL_APP_IMPL
 #define SOKOL_GFX_IMPL
+#ifndef FXTK_MW
+#define SOKOL_APP_IMPL
 #define SOKOL_GLUE_IMPL
+#endif
 #define SOKOL_LOG_IMPL
 /* 注意顺序: sokol 各头文件的"实现段"不在 include guard 内, 同一 TU 里绝不能包含两次。
  * fxtk_sokol.h 会带出 sokol_gfx.h(声明+实现), 所以这里不再单独 include 它。 */
@@ -52,7 +54,7 @@
 typedef struct { float x, y, u, v; uint32_t rgba; float s0, s1, s2, s3; } vtx_t;
 
 #define VB_MAX   262144     /* 顶点数上限 (~4MB) */
-#define CMD_MAX  8192
+#define CMD_MAX  65536   /* v2.6: 多窗口/复杂帧会超过 8192, 超限原先静默丢绘制 */
 #define TEX_MAX  256        /* 每帧可用的纹理绑定数(文本纹理等) */
 
 static vtx_t  s_vb[VB_MAX];
@@ -102,10 +104,40 @@ static int s_px_stage_cap = 0;
 /* 持久离屏画布: 框架用脏矩形重绘, 静态内容不会每帧重画 —— 因此渲染目标必须跨帧保留。
  * sokol_app 是双缓冲, 直接画交换链会让静态部分丢失, 所以与 SDL 驱动同构:
  * 先画进这张持久纹理, 再整屏贴到交换链。 */
+#ifdef FXTK_MW
+/* ======== 多窗口模式 (fxtk_sokol_mw.c): 单进程/单 GL 上下文/N 个真实窗口 ======== */
+#include "fxtk_mw.h"
+/* 后端提供: sokol 类型只出现在驱动内部 */
+extern sg_environment fxtk_mw_environment(void);
+extern sg_swapchain   fxtk_mw_swapchain(void);
+#define sapp_width()                fxtk_mw_sapp_width()
+#define sapp_height()               fxtk_mw_sapp_height()
+#define sapp_set_window_title(t)    fxtk_mw_sapp_set_title(t)
+#define sapp_x11_set_ime_spot(x,y)  fxtk_mw_sapp_ime_spot(x,y)
+#define sglue_swapchain()           fxtk_mw_swapchain()
+static sg_image s_mw_img[24];
+static sg_view  s_mw_attach[24], s_mw_tex[24];
+static int s_mw_w[24], s_mw_h[24], s_mw_n = 0, s_cvi = 0;
+static int s_mw_clear[24];
+#define MW_NEED_CLEAR (s_need_clear || s_mw_clear[s_cvi])
+#define s_canvas_img    (s_mw_img[s_cvi])
+#define s_canvas_attach (s_mw_attach[s_cvi])
+#define s_canvas_tex    (s_mw_tex[s_cvi])
+#define s_canvas_w      (s_mw_w[s_cvi])
+#define s_canvas_h      (s_mw_h[s_cvi])
+static void canvas_select(void){
+    for (int i = 0; i < s_mw_n; i++) if (s_mw_w[i] == s_w && s_mw_h[i] == s_h) { s_cvi = i; return; }
+    if (s_mw_n < 24) { s_cvi = s_mw_n++; s_mw_w[s_cvi] = s_w; s_mw_h[s_cvi] = s_h;
+        s_mw_img[s_cvi].id = SG_INVALID_ID; s_mw_clear[s_cvi] = 1; }
+}
+#else
 static sg_image s_canvas_img;
 static sg_view  s_canvas_attach, s_canvas_tex;
+#endif
 static sg_buffer s_blit_vb, s_blit_ib;
+#ifndef FXTK_MW
 static int s_canvas_w = 0, s_canvas_h = 0;
+#endif
 
 /* 首帧/窗口尺寸变化后需要清一次屏; 其余帧必须 LOAD(保留上一帧内容) ——
  * 框架采用脏矩形重绘, 静态部分不会每帧重画, 若每帧 CLEAR 会让它们变黑。 */
@@ -266,7 +298,11 @@ static int cmd_new(int pip, int tex)
  * 这是"颜色有问题"的根因, 别再当成冗余代码删掉。 */
 static inline uint32_t rgba_pack(uint32_t rgb)
 {
-    return 0xFF000000u | ((rgb & 0xFFu) << 16) | (rgb & 0xFF00u) | ((rgb >> 16) & 0xFFu);
+    /* v2.6: 保留颜色里已有的 alpha (高 8 位); 24 位老颜色 alpha=0 时按 255 处理。
+     * 管线本来就开了 SRC_ALPHA/ONE_MINUS_SRC_ALPHA 混合, 于是半透明填充/文字直接生效。 */
+    uint32_t a = (rgb >> 24) & 0xFFu;
+    if (!a) a = 0xFFu;
+    return (a << 24) | ((rgb & 0xFFu) << 16) | (rgb & 0xFF00u) | ((rgb >> 16) & 0xFFu);
 }
 
 /* 像素坐标 → NDC (在 CPU 侧算好, 免掉 uniform block 及其名字查找/420pack 扩展等一整类坑) */
@@ -459,7 +495,11 @@ static int drv_init(void)
     /* 环境默认值与我们的管线保持一致: 2D UI 不需要深度缓冲。
      * (交换链的 depth_format 取自环境默认值, 不一致会让 sokol 校验直接 panic) */
     {
+#ifdef FXTK_MW
+        sg_environment env = fxtk_mw_environment();
+#else
         sg_environment env = sglue_environment();
+#endif
         env.defaults.color_format = SG_PIXELFORMAT_RGBA8;
         env.defaults.depth_format = SG_PIXELFORMAT_NONE;
         env.defaults.sample_count = 1;
@@ -1165,6 +1205,9 @@ fx_driver_t fx_sokol_driver = {
 
 static void canvas_ensure(void)
 {
+#ifdef FXTK_MW
+    canvas_select();
+#endif
     if (s_canvas_img.id != SG_INVALID_ID && s_canvas_w == s_w && s_canvas_h == s_h) return;
     if (s_canvas_img.id != SG_INVALID_ID) {
         sg_destroy_view(s_canvas_attach); sg_destroy_view(s_canvas_tex); sg_destroy_image(s_canvas_img);
@@ -1204,10 +1247,17 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
     /* --- 第 1 趟: 画进持久画布纹理 (LOAD 保留上一帧的静态内容) --- */
     sg_begin_pass(&(sg_pass){
         .action = { .colors[0] = {
+            #ifdef FXTK_MW
+            .load_action = MW_NEED_CLEAR ? SG_LOADACTION_CLEAR : SG_LOADACTION_LOAD,
+#else
             .load_action = s_need_clear ? SG_LOADACTION_CLEAR : SG_LOADACTION_LOAD,
+#endif
             .clear_value = { 0.0f, 0.0f, 0.0f, 1.0f } } },
         .attachments = { .colors[0] = s_canvas_attach } });
     s_need_clear = 0;
+#ifdef FXTK_MW
+    s_mw_clear[s_cvi] = 0;
+#endif
 
     for (int i = 0; i < s_cmd_n; i++) {
         cmd_t *c = &s_cmd[i];
@@ -1341,21 +1391,46 @@ int  fxtk_sokol_vtx_count(void) { return s_vb_n; }
 
 /* 尺寸变化: 与 SDL 驱动同构 —— 丢缓冲、重建纹理、**让框架重排并全量重绘**。
  * 漏掉 fx_layout/fx_repaint 会让新暴露的区域一直没人画 → 缩放后几乎全屏黑(实测踩坑)。 */
+#ifdef FXTK_MW
+/* 多窗口模式: 不同窗口尺寸来回切换, 帧缓冲按尺寸缓存, 避免每帧 malloc/free */
+static uint32_t *s_mw_fb[24];
+static int s_mw_fbw[24], s_mw_fbh[24], s_mw_fbn = 0;
+#endif
+
 void fxtk_sokol_apply_size(int w, int h)
 {
     s_clip_x1 = 0; s_clip_y1 = 0; s_clip_x2 = 32767; s_clip_y2 = 32767;
+#ifdef FXTK_MW
+    /* 多窗口模式: 窗口可以很矮 (歌词条 70px / 通知 88px), 不能按框架最小值钳制 */
+    if (w < 8) w = 8;
+    if (h < 8) h = 8;
+#else
     if (w < 160) w = 160;
     if (h < 120) h = 120;
+#endif
     if (w == s_w && h == s_h) return;
     s_w = w; s_h = h;
     fx_sokol_driver.width = (uint32_t)s_w;
     fx_sokol_driver.height = (uint32_t)s_h;
+#ifdef FXTK_MW
+    {   int found = 0;
+        for (int i = 0; i < s_mw_fbn; i++) if (s_mw_fbw[i] == w && s_mw_fbh[i] == h) {
+            s_fb = s_mw_fb[i]; s_fb_w = w; s_fb_h = h; s_dirty = 0; found = 1; break; }
+        if (!found) {
+            s_fb = NULL; s_fb_w = s_fb_h = 0; s_dirty = 0;
+            fb_ensure();
+            if (s_mw_fbn < 24) { s_mw_fb[s_mw_fbn] = s_fb; s_mw_fbw[s_mw_fbn] = w; s_mw_fbh[s_mw_fbn] = h; s_mw_fbn++; }
+        }
+    }
+    s_need_clear = 1;
+#else
     free(s_fb); s_fb = NULL; s_fb_w = s_fb_h = 0; s_dirty = 0;
     fb_ensure();
     s_need_clear = 1;          /* 离屏画布下一帧会按新尺寸重建并清一次 */
     fx_layout();
     fx_repaint();
     fx_repaint();
+#endif
 }
 
 /* ================= sokol_app 事件 → 框架轮询队列 =================

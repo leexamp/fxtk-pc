@@ -316,6 +316,9 @@ void fxtk_draw_set_driver(const fx_driver_t *drv)
     line_ensure(drv->width + 1);    /* 【修复】预分配屏幕宽度 */
 }
 
+const fx_driver_t *fxtk_draw_get_driver(void) { return s_drv; }
+
+
 void fxtk_draw_flush_all(void) { flush_line(); }
 void fx_frame_begin(void) { if (!s_drv) return; s_framing = 1; fx_transform_reset(); }
 void fx_frame_end(void) { if (!s_drv) return; flush_line(); s_framing = 0; }
