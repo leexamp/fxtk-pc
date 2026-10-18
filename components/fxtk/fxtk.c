@@ -154,6 +154,44 @@ void fxtk_free(fx_widget_t *w)
 void fxtk_link(fx_widget_t *parent, fx_widget_t *child)
 { child->parent = parent; child->sibling = parent->child; parent->child = child; }
 void fx_parent(fx_widget_t *p) { s_parent = p; }
+
+/* ================= v2.6: 多窗口需要的 z 序控制 =================
+ * 绘制顺序 = 子链表的遍历顺序(child 先画); fxtk_link 是头插(最后 link 的最先画 = 最底),
+ * 因此"提到最前"= 移到链表尾部,"压到最底"= 移到链表头部。
+ * 多窗口合成必须显式控制顺序, 否则窗口的边框/阴影/内容会互相穿插。 */
+void fxtk_unlink(fx_widget_t *w)
+{
+    if (!w || !w->parent) return;
+    fx_widget_t *p = w->parent;
+    if (p->child == w) p->child = w->sibling;
+    else {
+        fx_widget_t *c = p->child;
+        while (c && c->sibling != w) c = c->sibling;
+        if (!c) { w->parent = 0; w->sibling = 0; return; }
+        c->sibling = w->sibling;
+    }
+    w->parent = 0; w->sibling = 0;
+}
+
+void fxtk_raise(fx_widget_t *w)
+{
+    if (!w || !w->parent) return;
+    fx_widget_t *p = w->parent;
+    fxtk_unlink(w);
+    w->parent = p; w->sibling = 0;
+    if (!p->child) { p->child = w; return; }
+    fx_widget_t *c = p->child;
+    while (c->sibling) c = c->sibling;
+    c->sibling = w;
+}
+
+void fxtk_lower(fx_widget_t *w)
+{
+    if (!w || !w->parent) return;
+    fx_widget_t *p = w->parent;
+    fxtk_unlink(w);
+    w->parent = p; w->sibling = p->child; p->child = w;
+}
 int fxtk_widget_count(void) { return s_widget_live; }
 void fxtk_pool_reset_count(void) { s_widget_live = 0; s_alloc_hint = 0; }   /* fx_init 清池后同步 */
 

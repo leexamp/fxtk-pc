@@ -127,6 +127,7 @@ void fxtk_off_begin(fx_widget_t *cv);
 void fxtk_off_end(fx_widget_t *cv);
 
 void fxtk_draw_set_driver(const fx_driver_t *drv);
+const fx_driver_t *fxtk_draw_get_driver(void);
 void fxtk_draw_flush_all(void);
 
 #if FXTK_WIDGET_BUTTON

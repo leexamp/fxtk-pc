@@ -25,6 +25,15 @@ typedef struct {
 
 #define FX_RGB(r, g, b) \
     ((fx_color_t)((((r) & 0xFF) << 16) | (((g) & 0xFF) << 8) | ((b) & 0xFF)))
+
+/* v2.6: RGBA —— 高 8 位是 alpha。alpha=0 视为"不透明", 与旧的 24 位颜色完全兼容;
+ * 需要半透明时用 FX_RGBA(...) 显式给 alpha (1..255)。
+ * 支持 alpha 的路径: GPU 填充/线段/圆角矩形/图片/文字贴图(整个 sokol 管线本来就开了 blend)。 */
+#define FX_RGBA(r, g, b, a) \
+    ((fx_color_t)(((fx_color_t)(a) << 24) | (((r) & 0xFF) << 16) | (((g) & 0xFF) << 8) | ((b) & 0xFF)))
+/* 文字专用: 让字形背景透明 (只在 stb 字体驱动里识别) */
+#define FX_TEXT_NOBG ((fx_color_t)0x00FFFFFFu)
+static inline int fx_color_alpha(fx_color_t c) { unsigned a = (unsigned)(c >> 24); return a ? (int)a : 255; }
 #define FX_RED    0xFF0000
 #define FX_GREEN  0x00FF00
 #define FX_BLUE   0x0000FF
@@ -158,6 +167,9 @@ fx_widget_t *fx_widget_new_impl(int type, fx_attr_t attrs[]);
 #define fx_tab_new(...)      fx_widget_new_impl(FX_W_TAB,      (fx_attr_t[]){__VA_ARGS__, FX_ATTR_END})
 
 void fx_parent(fx_widget_t *p);
+void fxtk_unlink(fx_widget_t *w);   /* v2.6: 从父链表摘除 */
+void fxtk_raise(fx_widget_t *w);    /* v2.6: 提到最前(最后绘制) */
+void fxtk_lower(fx_widget_t *w);    /* v2.6: 压到最底(最先绘制) */
 fx_widget_t *fx_find(const char *name);
 void fx_delete_impl(fx_attr_t attrs[]);
 #define fx_delete(...) fx_delete_impl((fx_attr_t[]){__VA_ARGS__, FX_ATTR_END})

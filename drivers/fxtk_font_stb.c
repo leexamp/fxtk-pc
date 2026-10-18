@@ -202,12 +202,16 @@ static unsigned char *rasterize(font_t *f, const char *s, fx_color_t fg, fx_colo
     if (h < 1) h = 1;
     unsigned char *px = (unsigned char *)malloc((size_t)w * h * 4);
     if (!px) return NULL;
+    int nobg = (bg == FX_TEXT_NOBG);   /* v2.6: 透明背景模式 —— 只写字形覆盖度, 不铺底色 */
     unsigned char br = (unsigned char)((bg >> 16) & 0xFF), bgc = (unsigned char)((bg >> 8) & 0xFF), bb = (unsigned char)(bg & 0xFF);
     unsigned char fr = (unsigned char)((fg >> 16) & 0xFF), fgc = (unsigned char)((fg >> 8) & 0xFF), fb = (unsigned char)(fg & 0xFF);
     /* 字节序(2026-09 修正): sokol 的 SG_PIXELFORMAT_RGBA8 是标准 RGBA 布局 —— 内存第 0 字节 = R。
      * 以前这里按 B,G,R 写(说是"实测"), 那是被回读路径的双重互换骗了: 结果彩色文字/彩色底反色
      * (蓝字变橙字), 而且与顶点色互相矛盾。纹理与顶点现在统一成【byte0 = R】。 */
-    for (int i = 0; i < w * h; i++) { px[i*4+0] = br; px[i*4+1] = bgc; px[i*4+2] = bb; px[i*4+3] = 255; }
+    for (int i = 0; i < w * h; i++) {
+        px[i*4+0] = br; px[i*4+1] = bgc; px[i*4+2] = bb;
+        px[i*4+3] = nobg ? 0 : 255;
+    }
 
     int baseline = (int)(f->ascent * f->scale + 0.5f) + 1;
     float x = 1.0f;
@@ -227,9 +231,14 @@ static unsigned char *rasterize(font_t *f, const char *s, fx_color_t fg, fx_colo
                     unsigned int a = bmp[yy * gw + xx];
                     if (!a) continue;
                     unsigned char *d = &px[((size_t)py * w + pxx) * 4];
-                    d[0] = (unsigned char)((fr  * a + d[0] * (255 - a)) / 255);   /* R */
-                    d[1] = (unsigned char)((fgc * a + d[1] * (255 - a)) / 255);   /* G */
-                    d[2] = (unsigned char)((fb  * a + d[2] * (255 - a)) / 255);   /* B */
+                    if (nobg) {   /* 透明底: 颜色=fg, alpha=覆盖度, 由 GPU 混合 */
+                        d[0] = fr; d[1] = fgc; d[2] = fb;
+                        if (a > d[3]) d[3] = (unsigned char)a;
+                    } else {
+                        d[0] = (unsigned char)((fr  * a + d[0] * (255 - a)) / 255);   /* R */
+                        d[1] = (unsigned char)((fgc * a + d[1] * (255 - a)) / 255);   /* G */
+                        d[2] = (unsigned char)((fb  * a + d[2] * (255 - a)) / 255);   /* B */
+                    }
                 }
             }
             stbtt_FreeBitmap(bmp, NULL);
@@ -308,7 +317,7 @@ void fx_draw_text_c(int x, int y, const char *s, fx_color_t fg, fx_color_t bg)
     fxtk_text_blit(&e->tex, x, y, e->w, e->h);
 }
 
-void fx_draw_text(int x, int y, const char *s) { fx_draw_text_c(x, y, s, FX_WHITE, FX_BLACK); }
+void fx_draw_text(int x, int y, const char *s) { fx_draw_text_c(x, y, s, FX_WHITE, FX_TEXT_NOBG); }   /* v2.6: 默认透明底 */
 
 void fx_draw_text_c_n(int x, int y, const char *s, int n, fx_color_t fg, fx_color_t bg)
 {
