@@ -8,6 +8,9 @@
  * ==========================================================================*/
 #include "sokol_gfx.h"
 #include "fxtk_mw.h"
+
+/* 由 fxtk_sokol_driver.c 提供: 设置 fxtk 驱动的画布尺寸 (多窗口每帧切换) */
+void fxtk_sokol_apply_size(int w, int h);
 #include "fxtk_win.h"
 #include <stdio.h>
 #include <stdlib.h>
