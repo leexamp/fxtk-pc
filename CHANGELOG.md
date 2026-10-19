@@ -4,6 +4,18 @@
 
 > 复核方式：`make` + `make test` + `make fxtk_sim_en` + `make window-test` + `make golden`（无头金图用 `GOLDEN_SKIP_DEMO=1`）。
 
+### 新增：多真实窗口后端（独立分支 `feat/multi-window`）
+
+- 新增 `drivers/fxtk_win.[ch]`（后端无关 façade vtable）、`drivers/fxtk_sokol_mw.c`（X11 GLX + Win32 WGL）、
+  `drivers/fxtk_mw.h`、`drivers/fxtk_mw_gl.c`；`fxtk_sokol_driver.c` 增加 `FXTK_MW` 多窗口模式
+  （每窗口画布/帧缓冲缓存、按尺寸选择、关闭 vsync）。
+- 能力：N 个原生窗口、每窗口独立尺寸、窗口移动/缩放/置顶、无边框标志、UTF-8 标题、
+  屏幕尺寸查询、客户区偏移查询（Win32 扣标题栏，X11 返回 0）。
+- 已知边界：X11 only、主屏、最大 8 窗口、输入事件未转发到控件层、真 HiDPI 未验证；
+  多窗口串行 Swap 必须关闭 vsync。
+- 文档：`docs/multi-window.md`；参考实现：MV 仓库 `mv/pv/v2/single/`（6 窗口、81 句画面、全片 212s）。
+- 该后端不改变默认单窗口路径与产物体积（未引用时链接器会剥掉）。
+
 ### 新增：单窗口桌面行为（`drivers/fxtk_window.c`）
 
 - **★ 边界先说清：这是「单窗口」行为，不是多窗口。**

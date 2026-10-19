@@ -69,6 +69,20 @@
 - 注意:控件层 SDF 抗锯齿**默认开启**(`s_widget_aa = 1`);要对比或排查观感用 `fx_set_widget_aa(0/1/2)`
   —— 它在"画布 + 文字 + quadwarp 混排"场景下有一个已知缺陷正在修(详见 CHANGELOG v2.4.1)。
 
+## v2.5 多真实窗口（实验性，独立分支 `feat/multi-window`）
+
+- **一个进程、一个 GL 上下文、N 个原生窗口**：应用只依赖 `fxtk_win.h`，Windows 走 WGL、Linux 走 GLX；
+  后端在 `drivers/fxtk_sokol_mw.c`，单窗口 sokol_app 路径**不受影响**（未引用时链接器会剥掉）。
+- 应用侧 API：`fxtk_win_create / create_ex(borderless) / show / raise / move / resize / title / begin / end /
+  width / height / poll / quit / time`，以及 `fxtk_win_screen()`（屏幕尺寸，用于把 1280×720 舞台
+  等比缩放/居中）与 `fxtk_win_client_offset()`（Win32 标题栏偏移补偿，X11 返回 0）。
+- 每窗口独立画布/帧缓冲（按尺寸缓存，24 槽）；关闭 vsync（多窗口串行 Swap 会互相等垂直同步）；
+  窗口事件走原生 API（Win32 消息 / X11 `XNextEvent`）；UTF-8 标题（Win32 W 版 API / X11 `_NET_WM_NAME`）。
+- 已知边界（如实写）：**X11 only、主屏、最大 8 窗口、鼠标/键盘事件尚未转发给 fxtk 控件层、
+  真 HiDPI 未验证**。
+- 文档：[docs/multi-window.md](docs/multi-window.md)。参考实现：MV 仓库 `mv/pv/v2/single/`
+  （6 窗口、81 句画面、全片 212s）。
+
 ## 已知限制
 
 - ~~中文输入(输入法)在 sokol 版不可用~~ —— **v2.4.1 已解决**:给 vendored sokol_app 的 X11 后端补了
