@@ -1,6 +1,6 @@
 
 import io, re, sys, os
-ROOT='/media/user/Data/fxtk-pc-main'
+ROOT=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HEADERS=[
  'components/fxtk/fxtk.h','components/fxtk/fxtk_wm.h','components/fxtk/fxtk_backends.h',
  'components/fxtk/fxtk_desktop.h','components/fxtk/fxtk_effects.h','components/fxtk/fxtk_image.h',
