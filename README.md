@@ -65,6 +65,8 @@
   `FX_TEXT_NOBG` 让文字背景透明。
 - **控件 z 序**：`fxtk_unlink / fxtk_raise / fxtk_lower`；`fxtk_draw_get_driver()` 供后端/调试查询。
 - 驱动：`CMD_MAX` 8192→65536（复杂帧不再静默丢绘制）；多窗口驱动按窗口尺寸缓存画布/帧缓冲。
+- **画布内窗口管理器** §BT§fxtk_wm§BT§（§BT§fxtk_wm.h§BT§）：单窗口内画"桌面风格窗口"（标题栏/边框/z 序/焦点），
+  文档 [docs/window-manager.md](docs/window-manager.md)。
 
 ## v2.4 新增
 
@@ -226,6 +228,7 @@ cd demo-main && make package     # 或 ../tools/package_release.sh
 - [docs/internals.md](docs/internals.md) — 内部机制（面向源码修改）
 - [docs/windows.md](docs/windows.md) — Windows 编译
 - [docs/multi-window.md](docs/multi-window.md) — 多真实窗口后端（FXTK_MW）
+- [docs/window-manager.md](docs/window-manager.md) — 画布内窗口管理器（fxtk_wm）
 
 ## 许可
 

@@ -298,3 +298,4 @@ plus `./build_dbg.sh` / `make fxtk_sim_dbg` for a build with the probes compiled
 - Widget z-order: `fxtk_unlink / fxtk_raise / fxtk_lower`; driver query: `fxtk_draw_get_driver()`.
 - Multi-window: see [docs/multi-window.md](../docs/multi-window.md) and [multi_window_en.md](multi_window_en.md).
 
+- In-canvas window manager `fxtk_wm`: `fx_wm_add / set / set_style / set_title / set_z / set_focus / set_visible / set_ui / draw`; see [window_manager_en.md](window_manager_en.md).

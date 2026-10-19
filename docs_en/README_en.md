@@ -126,3 +126,4 @@ Measurements on this machine (headless, no vsync): stress page saturated at
 - Colors: `FX_RGBA(r,g,b,a)` / `fx_color_alpha`; widget z-order: `fxtk_raise / fxtk_lower / fxtk_unlink`.
 - Single-window desktop behavior: `fx_win_*`. Default single-window path and binary size are unchanged.
 
+- In-canvas window manager `fxtk_wm` (single-window, self-drawn windows): [window_manager_en.md](window_manager_en.md) / [docs/window-manager.md](../docs/window-manager.md).

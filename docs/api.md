@@ -333,3 +333,10 @@ int fx_backend_pick_file(char *out,int cap,const char *title,const char *ext_csv
 - 驱动查询：`fxtk_draw_get_driver()`。
 - 多真实窗口（独立后端）：`fxtk_win_*` 全套，见 [multi-window.md](multi-window.md)。
 
+## v2.5：画布内窗口管理器 `fxtk_wm`（`fxtk_wm.h`）
+
+- `fx_wm_add(title, style, cw, ch)` / `fx_wm_set(idx,x,y,w,h)` / `fx_wm_set_style/title/z/focus/visible/rot`
+- `fx_wm_set_ui(k)`（缩放）、`fx_wm_prepare(content,ud)`（兼容空操作）、`fx_wm_draw(content,ud)`（渲染+合成）
+- `fx_wm_count()` / `fx_wm_get(...)` / `fx_wm_title_h(style)`
+- 与「系统真实多窗口」的区别见 [window-manager.md](window-manager.md)。
+
