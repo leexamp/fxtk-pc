@@ -894,3 +894,10 @@ const char *r = gpu_raymarch_renderer();       /* return the renderer name */
 Build with `-DFXTK_MW` and follow [docs/multi-window.md](../docs/multi-window.md) (Chinese). The default
 single-window path is unchanged.
 
+## v2.5: colors (ARGB)
+
+`fx_color_t` is `0xAARRGGBB`: `FX_RGB` stays opaque (alpha=0 means opaque for compatibility); use `FX_RGBA(r,g,b,a)` (a=1..255) for translucency, `FX_TEXT_NOBG` for transparent text background, `fx_color_alpha(c)` to query. Alpha blending is supported on the default sokol backend; SDL/software backends treat colors as opaque.
+
+## v2.5 note: cross-platform file services
+
+The v2.3 `fxtk_fs.c` was merged into `fxtk_backends.c` (v2.4) and removed; `fxtk_fs.h` is a deprecated compat shim. New code should use `fxtk_backends.h`: `fx_file_*`, `fx_dir_*`, `fx_backend_pick_dir/file`, `fx_img_*`, `fx_clip_*`, `fx_prefs_*` (see docs/backends.md and docs/api.md section 15).

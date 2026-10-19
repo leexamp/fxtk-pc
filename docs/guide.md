@@ -164,13 +164,24 @@ if (rh < 12) rh = 12;
 
 ## 4. 颜色系统
 
-颜色为 **24bit RGB**（`uint32_t`，格式 `0xRRGGBB`），与主流标准一致。
+`fx_color_t` 是 `uint32_t`，格式 **`0xAARRGGBB`（ARGB）**。
+v2.5 起支持 alpha；高 8 位 = alpha，低 24 位 = RGB。
+**为了兼容旧代码：alpha 位为 0 时按"不透明"处理**（旧的 `FX_RGB` / `0xRRGGBB` 字面量行为完全不变）。
 
-### 4.1 构造与常量
+### 4.1 构造颜色
 
 ```c
-fx_set_color(FX_RGB(33, 150, 243));     /* 任意 8bit 分量 */
+fx_set_color(FX_RGB(33, 150, 243));            /* 不透明蓝 (alpha 位=0 → 不透明) */
+fx_set_color(FX_RGBA(0, 0, 0, 110));           /* 半透明黑: 110/255 ≈ 43% 不透明 */
+fx_draw_text_c(x, y, "hi", FX_WHITE, FX_TEXT_NOBG);  /* 文字背景透明 */
+int a = fx_color_alpha(c);                     /* 取有效 alpha: 0 → 255 */
 ```
+
+- `FX_RGB(r,g,b)`：24 位不透明颜色（最常用，和 v2.4 完全一样）。
+- `FX_RGBA(r,g,b,a)`：带 alpha，`a` = **1–255**（255 完全不透明）。
+- `FX_TEXT_NOBG`：文字专用"透明底"，替代以前的背景色方块。
+- 十六进制字面量同样可用：`0xFFFF0000` 为不透明红，`0x80FF0000` 为 50% 红。
+- **没有"全透明"颜色**：alpha=0 表示"不透明/未指定"；要全透明就别画。最小可见 alpha 是 1（约 0.4%）。
 
 | 常量 | 值 | 常量 | 值 |
 |---|---|---|---|
@@ -213,6 +224,35 @@ fx_label_new(pixel("10,10","300,34"), title("灰注释"),
 ```
 
 改窗口背景：`fx_set_bg(FX_RGB(245,245,245))`；读当前背景：`fx_get_bg()`。
+
+### 4.3 半透明（RGBA，v2.5 新增）
+
+支持 alpha 的路径（默认 sokol 后端）：**填充/线段/圆角矩形/图片/文字贴图**——sokol 管线本来就开着混合，
+半透明图元是按 **src over dst**（非预乘）合成。SDL 遗留后端与纯软件假驱动**不保证**逐像素 alpha
+（它们按不透明处理，金图/无头测试因此也不受 alpha 影响）。
+
+三条实用规则：
+
+1. **先画底、再画半透明**：混合依赖已经画好的目标像素；在半透明清屏上再叠半透明会得到反直觉结果。
+2. **阴影/蒙层**：`fx_set_color(FX_RGBA(0,0,0,110)); fx_fill_rect_round(...);`
+   —— 比预先渲染阴影贴图简单，成本是每帧一次混合。
+3. **淡入淡出**：把 alpha 当动画变量（0→255 之间变化），每帧用 `FX_RGBA` 重设颜色再画，
+   不需要逐像素操作。
+
+```c
+/* 40% 黑色蒙层 + 透明底文字 */
+fx_set_color(FX_RGBA(0, 0, 0, 102));
+fx_fill_rect(0, 0, fx_width()-1, fx_height()-1);
+fx_draw_text_c(24, 40, "PAUSED", FX_WHITE, FX_TEXT_NOBG);
+
+/* 半透明高亮扫过（t 随时间 0→1） */
+int a = (int)(t * 200) + 20;
+fx_set_color(FX_RGBA(126, 231, 135, a));
+fx_fill_rect_round(x, y, x+w, y+h, 10);
+```
+
+主题色也可以带 alpha：`fx_colorx_t` 仍是"浅/深两套 24 位值"，
+需要半透明时先 `fx_color_t c = fx_colorx_current(cx);` 再按需用 `FX_RGBA(fx_red..., a)` 组合。
 
 ---
 
@@ -510,15 +550,44 @@ static void on_view(fx_widget_t *w, void *ud) {
 
 ---
 
-### 8.6 跨平台文件 API（v2.3）
+### 8.6 跨平台文件/系统服务（v2.4 起：`fxtk_backends`）
 
-`fxtk_fs.h`：系统对话框选文件夹 + 列目录内容，Linux/Windows 各走对应系统 API。
+> **历史与现状**：v2.3 的 `fxtk_fs.c` 已在 v2.4 **并入 `fxtk_backends.c` 并删除**；
+> `fxtk_fs.h` 只剩**兼容薄壳**（旧名 `fx_fs_*` 映射到新接口，一个版本后移除）。
+> **新代码请直接 `#include "fxtk_backends.h"`**，用 `fx_file_* / fx_dir_* / fx_backend_pick_*`。
 
 ```c
-#include "fxtk_fs.h"
-char d[512]; if (fx_fs_pick_dir(d, sizeof(d))) { /* d = 选中路径 */ }
-fx_fs_entry_t e[64]; int n = fx_fs_list(d, e, 64);   /* name / is_dir / size / date */
+#include "fxtk_backends.h"
+
+/* 系统对话框：选目录 / 选文件 (无对话框后端返回 0, 可降级为手输路径) */
+char dir[512];
+if (fx_backend_pick_dir(dir, sizeof dir)) { /* dir = 选中目录 */ }
+char file[512];
+if (fx_backend_pick_file(file, sizeof file, "打开图片", "png,jpg,gif")) { /* file = 选中文件 */ }
+
+/* 列目录: name / is_dir / size / date */
+fx_dir_entry_t es[64];
+int n = fx_dir_list(dir, es, 64);
+
+/* 读写文件 (跨平台, 64 位大小) */
+long long sz = 0;
+if (fx_file_size("a.bin", &sz) == 1) { ... }
+int len = 0;
+void *buf = fx_file_read("a.bin", &len);   /* 失败 NULL */
+fx_file_free(buf);
+fx_file_write("out.bin", data, len, 0);     /* 最后参数: 1=追加 */
+
+/* 应用数据目录 / 图片 / 剪贴板 / 偏好 */
+char app[512]; fx_dir_app(app, sizeof app);
+fx_img_t img;
+if (fx_img_load_file("p.png", &img)) { fx_img_free(&img); }
+fx_clip_set("text"); fx_clip_get(buf, sizeof buf);
+fx_prefs_set("theme", "dark"); fx_prefs_save();
 ```
+
+**每个函数**（`fx_path_* / fx_file_* / fx_dir_* / fx_img_* / fx_clip_* / fx_prefs_* /
+`fx_backend_pick_* / fx_open_url / fx_cpu_count` 等）的签名与用法见
+[api.md](api.md) 第 15 节；后端如何实现这些能力见 [backends.md](backends.md)。
 
 demo 的**组件页**用它做了文件浏览器：文件夹内容以表格呈现（名称/大小/日期），带**平滑滚动条**（拖拽跟手、悬停变宽变蓝）、**悬停提示**（跟鼠标显示完整信息）、点击行选中+悬停边框；`fx_grid_map(dense())` 网格名字编辑器；两套 RGB 颜色选择器改按钮底色/字色。
 
@@ -805,7 +874,7 @@ void app_init(void) { build_wave_page(); }
 6. **动态创建控件会被布局复位**：创建后必须 `fx_widget_fix(w,x,y)` 固定坐标，否则下一次 `fx_layout()` 会把它拉回设计坐标原点。
 7. **每帧 `fx_find` 是 O(池大小)**：热点循环里用指针缓存（如压测页 `s_dyn[]`）。
 8. **字号用 `line()`/`fx_set_fontsize`**：自绘文字用 `fxtk_draw_text_size`，不要手写缩放字号。
-9. **颜色是 24bit RGB**：`0xRRGGBB`，直接用 `FX_RGB(r,g,b)` 或十六进制字面量（如 `0xFF0000` 红）。
+9. **颜色是 ARGB**：`0xAARRGGBB`。不透明用 `FX_RGB(r,g,b)`/`0xRRGGBB`（alpha=0 语义=不透明）；半透明用 `FX_RGBA(r,g,b,a)`，`a`=1–255（0 不是"全透明"而是"不透明"）；文字透明底用 `FX_TEXT_NOBG`。
 10. **窗口关闭/退出**：SDL 收到 QUIT 事件自动 `exit(0)`，无需处理。
 
 ### 最佳实践清单
