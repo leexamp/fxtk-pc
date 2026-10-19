@@ -55,3 +55,13 @@ x86_64-w64-mingw32-objdump -p dist/win_sokol/fxtk_sokol.exe | grep 'DLL Name'
 make package      # 或 ../tools/package_release.sh
 # → dist/pkg/fxtk-<版本>-win-x86_64.zip (中英两个单 exe + README + 运行说明)
 ```
+
+## v2.5：Windows 多窗口（FXTK_MW）
+
+- 编译：`-DFXTK_MW -DSOKOL_GLCORE`，链接
+  `-lopengl32 -lgdi32 -luser32 -lole32 -loleaut32 -luuid -lshell32 -lwinmm -mwindows`。
+- 每个窗口单独 `SetPixelFormat`（共享 WGL 上下文要求 pixel format 相同）；窗口是 Unicode 窗口：
+  `CreateWindowExW` + `DefWindowProcW`（否则标题/消息字符串会被截断）。
+- 关窗走 `WM_CLOSE` / `WM_DESTROY` / Esc；标题 UTF-8 内部转 UTF-16。
+- 限制与坑位见 [multi-window.md](multi-window.md)。
+

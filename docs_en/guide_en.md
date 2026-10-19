@@ -888,3 +888,9 @@ const char *r = gpu_raymarch_renderer();       /* return the renderer name */
   4096/8/8 on ESP32. Only API/syntax and rendered output are kept in sync.
 - Font scale now matches SDL_ttf (`stbtt_ScaleForMappingEmToPixels`), and the widget-layer SDF
   anti-aliasing is **on by default** (`FXTK_AA=0` disables; A/B cost measured at ~1.6%).
+
+## v2.5 note: multi-window
+
+Build with `-DFXTK_MW` and follow [docs/multi-window.md](../docs/multi-window.md) (Chinese). The default
+single-window path is unchanged.
+

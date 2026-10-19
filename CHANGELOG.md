@@ -1,6 +1,6 @@
 # Changelog
 
-## v2.5（开发中：后端升级 + 单窗口行为）
+## v2.5（后端升级 + 单窗口行为 + 多真实窗口）
 
 > 复核方式：`make` + `make test` + `make fxtk_sim_en` + `make window-test` + `make golden`（无头金图用 `GOLDEN_SKIP_DEMO=1`）。
 

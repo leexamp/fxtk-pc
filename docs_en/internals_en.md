@@ -88,3 +88,10 @@ Provides `width/height`, `set_window/push_pixels`, `fill_rect`, `touch_read/key_
 
 - `raymarch.c`: POSIX persistent thread pool (`pthread_barrier` two-phase sync each frame, waking workers to render row bands), avoiding create/join every frame; on Windows it falls back to create/join each frame (winpthreads has no barrier).
 - `gpu_raymarch.c`: a separate thread does EGL/GLES2 offscreen rendering (rejects llvmpipe software GL); the task queue uses mutex+cond.
+
+## v2.5 driver internals
+
+- `FXTK_MW` branch: per-size canvas/framebuffer caches (24 slots), `MW_NEED_CLEAR`, alpha-preserving
+  `rgba_pack`; `CMD_MAX` raised to 65536. Multi-window window/event handling lives in
+  `drivers/fxtk_sokol_mw.c`. Details: [docs/multi-window.md](../docs/multi-window.md).
+

@@ -64,3 +64,11 @@
 - **不静默降级**：池满、能力缺失、解码失败都走 `fx_log(FX_LOG_WARN/ERROR, ...)` 并返回可判断的失败值。
 - **确定性优先**：随机与时间都能被固定（stub 后端），这样金图回归与单元测试才可能逐像素稳定。
 - **体积优先**：图片解码裁掉了 HDR/PSD/PIC；需要的格式用 `STBI_NO_*` 精确关闭，而不是整库替换。
+
+## v2.5：多真实窗口后端（FXTK_MW）
+
+除 sokol 单窗口与 SDL 遗留对照外，新增**多窗口**后端（独立编译开关 `-DFXTK_MW`）：
+应用通过 `drivers/fxtk_win.h` 的后端无关接口创建/移动/绘制 N 个原生窗口，后端实现为
+`drivers/fxtk_sokol_mw.c`（X11 GLX + Win32 WGL；一进程一 GL 上下文、每窗口独立画布、关闭 vsync）。
+不定义 `FXTK_MW` 时该后端不参与编译/链接。设计与限制见 [multi-window.md](multi-window.md)。
+

@@ -290,3 +290,11 @@ the same rendered result (see the README).
 ## Debug switches
 `FXTK_AA`, `FXTK_RECTDBG`, `FXTK_SDFNOMERGE`, `FXTK_IMEDBG`, `FXTK_IMPORT`, `FXTK_NOVSYNC`,
 plus `./build_dbg.sh` / `make fxtk_sim_dbg` for a build with the probes compiled in.
+
+## v2.5 additions
+
+- Single-window desktop behavior: `fx_win_*`.
+- Colors: `FX_RGBA(r,g,b,a)` / `FX_TEXT_NOBG` / `fx_color_alpha` (24-bit colors stay opaque).
+- Widget z-order: `fxtk_unlink / fxtk_raise / fxtk_lower`; driver query: `fxtk_draw_get_driver()`.
+- Multi-window: see [docs/multi-window.md](../docs/multi-window.md) and [multi_window_en.md](multi_window_en.md).
+

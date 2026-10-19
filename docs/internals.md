@@ -87,3 +87,13 @@
 
 - `raymarch.c`：POSIX 持久线程池（`pthread_barrier` 每帧两扇同步，唤醒 worker 渲染行带），避免每帧 create/join；Windows 退回每帧 create/join（winpthreads 无 barrier）。
 - `gpu_raymarch.c`：独立线程做 EGL/GLES2 离屏渲染（拒绝 llvmpipe 软件 GL），任务队列用 mutex+cond。
+
+## v2.5：驱动与多窗口内部变化
+
+- `drivers/fxtk_sokol_driver.c` 增加 `FXTK_MW` 分支：每窗口画布（`s_mw_img[24]`）与帧缓冲（`s_mw_fb[24]`）
+  按尺寸缓存；`MW_NEED_CLEAR` 控制首帧/换尺寸清屏；`rgba_pack()` 保留 alpha（24 位 alpha=0 → 不透明）。
+- `CMD_MAX` 8192 → 65536：多窗口/复杂帧下不再静默丢绘制。
+- 多窗口环境：窗口尺寸/位置/事件由 `drivers/fxtk_sokol_mw.c` 负责；`fxtk_sokol_frame()` 只负责画布合成 +
+  swapchain 呈现；vsync 关闭由后端完成。
+- 单窗口路径保持原样（`SOKOL_APP_IMPL` 仅在非 `FXTK_MW` 时编译）。
+

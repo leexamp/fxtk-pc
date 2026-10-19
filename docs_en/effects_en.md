@@ -56,3 +56,9 @@ fx_image_tint(pic, FX_RGB(0,200,255), 90);   /* tint to a cyan family */
 ```
 
 > The offscreen canvas (3D page) goes through the `fxtk_put_px` pixel path, which does not interfere with the GPU text/geometry path.
+
+## v2.5 colors
+
+`FX_RGBA(r,g,b,a)` adds alpha (0 in 24-bit colors still means opaque); `FX_TEXT_NOBG` makes glyph
+backgrounds transparent. See [docs/effects.md](../docs/effects.md) (Chinese) for alpha-capable paths.
+

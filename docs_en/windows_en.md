@@ -46,3 +46,10 @@ If you need clipboard or an IME on Windows, the legacy SDL cross-build still sup
 ```bash
 ./build_win_cross.sh    # legacy: needs mingw-w64 SDL2 packages; produces an exe that ships SDL2 dlls
 ```
+
+## v2.5 Windows multi-window
+
+Build with `-DFXTK_MW -DSOKOL_GLCORE` and link `-lopengl32 -lgdi32 -luser32 -lole32 -loleaut32 -luuid -lshell32 -lwinmm -mwindows`.
+Each window needs the same `SetPixelFormat` (shared WGL context); use `CreateWindowExW` + `DefWindowProcW`.
+See [docs/multi-window.md](../docs/multi-window.md) (Chinese).
+

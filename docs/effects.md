@@ -56,3 +56,12 @@ fx_image_tint(pic, FX_RGB(0,200,255), 90);   /* 染色成青色系 */
 ```
 
 > 离屏画布（3D 页）走 `fxtk_put_px` 像素路径，与 GPU 文本/几何路径互不干扰。
+
+## v2.5：颜色透明度（FX_RGBA）
+
+- `fx_color_t` 现在是 **ARGB**：`FX_RGBA(r,g,b,a)` 可给 1–255 的 alpha；`FX_RGB` 的 alpha=0 视为不透明，
+  与旧代码完全兼容。
+- 支持 alpha 的路径：GPU 填充/线段/圆角矩形/图片/文字贴图（sokol 管线本就开混合）。
+- 文字专用 `FX_TEXT_NOBG`：让字形背景透明（stb 字体驱动识别）。
+- 半透明不会改变 24 位老用例的金图结果（alpha=0 → 255）。
+

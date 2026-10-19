@@ -116,3 +116,13 @@ what makes the single-file Windows build possible (system DLLs only).
 
 Measurements on this machine (headless, no vsync): stress page saturated at
 2819 widgets / 1920x1080 → **9.0–9.3 ms/frame ≈ 107–111 fps**; 1235 widgets / 1280x720 → 230 fps.
+
+## v2.5 update
+
+- **Multi-window backend (experimental, `-DFXTK_MW`)**: one process / one GL context / N native windows
+  (Win32 WGL + X11 GLX); app-side API is `fxtk_win_*`. Full design/limits:
+  [docs/multi-window.md](../docs/multi-window.md) (Chinese).
+- Summary: [docs_en/multi_window_en.md](multi_window_en.md).
+- Colors: `FX_RGBA(r,g,b,a)` / `fx_color_alpha`; widget z-order: `fxtk_raise / fxtk_lower / fxtk_unlink`.
+- Single-window desktop behavior: `fx_win_*`. Default single-window path and binary size are unchanged.
+

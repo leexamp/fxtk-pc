@@ -47,3 +47,9 @@ fx_label_new(pixel("6,36","240,56"), page(5), title("..."));
 /* percent (0.0~1.0 float string, relative to parent widget) */
 fx_label_new(percent("0.02,0.01","0.98,0.09"), title("fxtk demo · tab page"));
 ```
+
+## v2.5: multi-window (experimental)
+
+See [docs_en/multi_window_en.md](multi_window_en.md) and [docs/multi-window.md](../docs/multi-window.md) (Chinese):
+client-area alignment, no per-frame resizing, vsync off for serial SwapBuffers, close-any-window = quit.
+

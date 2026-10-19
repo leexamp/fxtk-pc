@@ -324,3 +324,12 @@ int fx_backend_pick_file(char *out,int cap,const char *title,const char *ext_csv
 | `FXTK_IMPORT=<路径>` | 免对话框导入图片（CI/无桌面环境） |
 | `FXTK_NOVSYNC=1` | 关垂直同步 |
 | `./build_dbg.sh` / `make fxtk_sim_dbg` | **取证版**：探针编进二进制，不依赖环境变量；启动会打一行自检 |
+
+## v2.5 新增 API（速查）
+
+- 单窗口桌面行为：`fx_win_available / set|get_borderless / set|get_always_on_top / move / get_pos / center / drag_begin / fx_win_get_decorated`（桌面差异见 CHANGELOG v2.5 与 [desktop.md](desktop.md)）。
+- 颜色/透明度：`FX_RGBA(r,g,b,a)`、`FX_TEXT_NOBG`、`fx_color_alpha(c)`；24 位 `FX_RGB` 的 alpha=0 仍按不透明处理。
+- 控件树 z 序：`fxtk_unlink(w)` / `fxtk_raise(w)` / `fxtk_lower(w)`。
+- 驱动查询：`fxtk_draw_get_driver()`。
+- 多真实窗口（独立后端）：`fxtk_win_*` 全套，见 [multi-window.md](multi-window.md)。
+

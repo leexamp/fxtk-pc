@@ -87,3 +87,9 @@ To run:
 ## From examples to the full demo
 
 `demo-main/app.c` + `app_desktop.c` is a 12-page comprehensive demo (including 3D ray tracing, GPU particles, dynamic stress test); run `./build.sh` to view it; documentation is in `desktop.md`.
+
+## v2.5 external example
+
+`leexamp/world.execute-me--fxtk` `mv/pv/v2/single/` is a real multi-window application (6 native windows,
+81 per-lyric scenes, 212s) built with `-DFXTK_MW`.
+

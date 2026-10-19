@@ -87,3 +87,10 @@ convert /tmp/frame.ppm /tmp/frame.png # 用 ImageMagick 转 PNG 查看
 ## 从示例到完整演示
 
 `demo-main/app.c` + `app_desktop.c` 是 12 页综合演示（含 3D 光追、GPU 粒子、动态压测），运行 `./build.sh` 查看；文档见 `desktop.md`。
+
+## v2.5：外部参考实现（多窗口 MV）
+
+仓库外的 `world.execute-me--fxtk` 里有一份**多真实窗口**的实际用例
+（`mv/pv/v2/single/`：6 个系统窗口、81 句歌词画面、全片 212s、Windows/Linux 双平台），
+用 `-DFXTK_MW` 构建，可作为多窗口后端 API 的参考（文档见其 `BUILD.md` / `MAINTENANCE.md`）。
+

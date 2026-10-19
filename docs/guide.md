@@ -1043,3 +1043,9 @@ PC 端**不再迁就 ESP32 的资源约束**，只保证 **API/语法一致 + �
 - 字号与 SDL_ttf 对齐（`stbtt_ScaleForMappingEmToPixels`）：同名义字号两端视觉一致（实测墨迹差 1.8%）。
 - 控件层 SDF 抗锯齿**默认开启**（`FXTK_AA=0` 可关）；同控件数 A/B 实测开销约 1.6%。
 - Windows 交叉构建：单 exe、无第三方 DLL；`fxtk_sokol_en.exe` 英文版同款。
+
+## v2.5 补充：多窗口
+
+本教程的主线仍是单窗口 sokol_app。需要多真实窗口时，编译加 `-DFXTK_MW`，并按
+[multi-window.md](multi-window.md) 的 API/编译/限制使用；默认路径与体积不受影响。
+

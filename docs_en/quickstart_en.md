@@ -104,3 +104,9 @@ The demo's "stress test" page automatically adds widgets every frame and lets th
 
 > The other English documents in this folder predate v2.4 and describe the v2.3 API surface;
 > the Chinese `docs/ROADMAP_v2.4.md` is the authoritative per-version status.
+
+## v2.5 note
+
+- Multi-window (experimental): `-DFXTK_MW`, see [docs/multi-window.md](../docs/multi-window.md).
+- `FX_RGBA(r,g,b,a)` for alpha; 24-bit colors behave as before.
+

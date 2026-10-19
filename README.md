@@ -1,11 +1,11 @@
-# fxtk — 轻量GUI框架 (v2.4)
+# fxtk — 轻量GUI框架 (v2.5)
 
 > ## 📖 ENGLISH VERSION AVAILABLE AT [docs_en/README_en.md](docs_en/README_en.md)
 >
 > **[→ Read this README in English](docs_en/README_en.md)**
 
 <p>
-  <img alt="version" src="https://img.shields.io/badge/version-v2.4-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-v2.5-blue">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green">
   <img alt="c" src="https://img.shields.io/badge/language-C99-9cf">
   <img alt="platform" src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20ESP32-lightgrey">
@@ -50,6 +50,21 @@
   **逐像素正确性仍靠 `make golden` 的金图**。金图**本地默认容差 0**（逐像素），
   **CI 里会跑**，但用 `GOLDEN_TOL=1` 并跳过依赖 SDL/字体版本差异的演示页——即 CI 上不是逐像素口径。
 - **能改得动**：所有控件的颜色/圆角/留白集中在 `fxtk_tokens.h`，换风格只改一个文件。
+
+## v2.5 新增
+
+- **多真实窗口后端（实验性，独立编译开关 `-DFXTK_MW`）**：一个进程 / 一个 GL 上下文 / N 个原生窗口，
+  Windows WGL + Linux GLX；应用只依赖 `fxtk_win.h`；详见 [docs/multi-window.md](docs/multi-window.md)。
+  默认单窗口路径与产物体积不受影响（未引用时链接器剥掉）。
+- **单窗口桌面行为**：`fx_win_*`（置顶/无边框/移动/居中/拖拽）+ 可回查的 `fx_win_get_decorated`；
+  边界与实测见 CHANGELOG v2.5。
+- **SVG 子集 → canvas**：解析与绘制分离 + 61 项无头自检。
+- **弹性布局**：`FX_POS_FLEX` + `fx_flex_apply`（ROW/COLUMN，2640 组随机穷举自检）。
+- **单指触摸手势**、**高 DPI 修正**（high_dpi + 按逻辑宽缩放配对）。
+- **颜色/混合**：`FX_RGBA(r,g,b,a)`、`fx_color_alpha()`；24 位老颜色 alpha=0 仍视为不透明；
+  `FX_TEXT_NOBG` 让文字背景透明。
+- **控件 z 序**：`fxtk_unlink / fxtk_raise / fxtk_lower`；`fxtk_draw_get_driver()` 供后端/调试查询。
+- 驱动：`CMD_MAX` 8192→65536（复杂帧不再静默丢绘制）；多窗口驱动按窗口尺寸缓存画布/帧缓冲。
 
 ## v2.4 新增
 
@@ -210,6 +225,7 @@ cd demo-main && make package     # 或 ../tools/package_release.sh
 - [docs/examples.md](docs/examples.md) — 示例导读
 - [docs/internals.md](docs/internals.md) — 内部机制（面向源码修改）
 - [docs/windows.md](docs/windows.md) — Windows 编译
+- [docs/multi-window.md](docs/multi-window.md) — 多真实窗口后端（FXTK_MW）
 
 ## 许可
 

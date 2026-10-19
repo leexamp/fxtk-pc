@@ -348,3 +348,9 @@ HUD 显示 `四边形数 / draw call / 路径(GPU|CPU) / fps`; ③1080p 下 200 
   英文档同步 v2.4 事实、`tools/package_release.sh` 发布打包(源码 + Linux 单文件中英 + Windows zip 中英 + 动态库包) —— 全部完成。
 - 体积:Linux 单文件 361KB(sokol) / 遗留 SDL 版 144KB;Windows 单 exe 433KB(**口径按 ~450KB**, 零第三方 DLL)。
 - 质量闸门:`make test` 2/2 PASS、ASan+UBSan 干净、金图 10/10、ESP32 冒烟 6/6、bench 1080P 比 v2.3 快 3~6%。
+
+## 状态（v2.5）
+
+v2.4 已完成；v2.5（后端升级 + 单窗口行为 + 多真实窗口）见 README「v2.5 新增」与 `CHANGELOG.md`。
+本文保留作历史记录。
+

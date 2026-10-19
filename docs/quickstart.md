@@ -80,3 +80,10 @@ fx_canvas_new(pixel("6,32","444,236"), anim(1), call(on_draw));
 | `FXTK_STAT=1` | 每秒打印渲染统计 |
 | `FXTK_BENCH=1` | 关垂直同步测帧率 |
 | `FXTK_MAXW=1920` | 缩放封顶 |
+
+## v2.5 补充
+
+- 多真实窗口（实验性）：编译加 `-DFXTK_MW`，见 [multi-window.md](multi-window.md)；
+- 桌面行为（置顶/无边框/移动/居中，单窗口）：`fx_win_*`，见 [desktop.md](desktop.md) 与 CHANGELOG v2.5；
+- 颜色透明度：`FX_RGBA(r,g,b,a)`（24 位老颜色行为不变）。
+
