@@ -1,6 +1,6 @@
 # Windows（交叉编译，sokol 单 exe）
 
-> v2.4 起 Windows 侧只推荐这一条路：**sokol 单 exe，不依赖任何第三方 DLL**。
+> v2.5 起 Windows 侧有两条路：**默认 sokol 单 exe（单窗口，零第三方 DLL）**；需要真实多窗口时用 **FXTK_MW**（见文末 / [multi-window.md](multi-window.md)）。
 > （旧的 SDL 交叉编译路径已降级为遗留方案，见文末。）
 
 ## 一、准备工具链（MSYS2 或 Linux 上的 mingw-w64）

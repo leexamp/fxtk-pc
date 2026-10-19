@@ -97,3 +97,28 @@
   swapchain 呈现；vsync 关闭由后端完成。
 - 单窗口路径保持原样（`SOKOL_APP_IMPL` 仅在非 `FXTK_MW` 时编译）。
 
+## 驱动接口 `fx_driver_t` 逐字段（写后端）
+
+| 字段 | 契约 |
+|---|---|
+| `width/height` | 画布像素尺寸（必填）。 |
+| `init` | 初始化，返回 0 失败。 |
+| `set_window(x0,y0,x1,y1)` | 告知当前绘制窗口（裁剪/统计）。 |
+| `push_pixels(px,n)` | 像素流推送（软后端）。 |
+| `hold_begin/hold_end` | 批量绘制包裹（GPU 合批）。 |
+| `fill_rect` | 矩形填充（核心快路径）。 |
+| `touch_read(&x,&y,&pressed)` / `key_read(ev)` / `wheel_read(&x,&y,&dy)` | 输入读取（返回 1 有事件）。 |
+| `clip_set/clip_get` | 系统剪贴板。 |
+| `set_title` | 窗口标题。 |
+| `blit_img` / `blit_tex` / `blit_img_rot` | 图片缩放 blit / 文字纹理 blit / 旋转 blit。 |
+| `set_clip_rect` | 裁剪。 |
+| `fill_tri / draw_line` | GPU 三角/折线批处理。 |
+| `read_pixels` | 回读帧（截图/金图）。 |
+| `draw_image_quad` | GPU 真透视四边形（缺省走 CPU 逆单应）。 |
+| `raymarch` | GPU 光线步进。 |
+| `fill_rect_round / stroke_rect_round` | GPU SDF 圆角填充/描边。 |
+| `draw_line_aa` | GPU 羽化线段。 |
+| `ime_pos` | 输入法候选窗位置。 |
+
+> 除 `width/height` 外全部可为 NULL，框架自动回退 CPU。完整 API 参考见 [api.md](api.md) 第 20 节；
+> 多窗口驱动细节见 [multi-window.md](multi-window.md)。

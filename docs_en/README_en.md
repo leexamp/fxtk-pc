@@ -127,3 +127,5 @@ Measurements on this machine (headless, no vsync): stress page saturated at
 - Single-window desktop behavior: `fx_win_*`. Default single-window path and binary size are unchanged.
 
 - In-canvas window manager `fxtk_wm` (single-window, self-drawn windows): [window_manager_en.md](window_manager_en.md) / [docs/window-manager.md](../docs/window-manager.md).
+
+- Per-function reference (signatures/usage): [docs/api.md](../docs/api.md) (Chinese, hand-maintained; CI checks coverage).

@@ -65,3 +65,22 @@ fx_image_tint(pic, FX_RGB(0,200,255), 90);   /* 染色成青色系 */
 - 文字专用 `FX_TEXT_NOBG`：让字形背景透明（stb 字体驱动识别）。
 - 半透明不会改变 24 位老用例的金图结果（alpha=0 → 255）。
 
+## 逐函数（`fxtk_effects.h` + `fxtk_image.h`）
+
+| 函数 | 用法 |
+|---|---|
+| `fx_draw_image_rot(img,cx,cy,angle,scale)` | 以中心旋转绘制（CPU 路径）。 |
+| `fx_fill_polygon_rot(pts,n,cx,cy,angle)` | 绕中心旋转填充多边形。 |
+| `fx_image_flip_x(img)` / `fx_image_flip_y(img)` | 原地水平/垂直翻转。 |
+| `fx_image_grayscale(img)` | 原地灰度化。 |
+| `fx_image_tint(img,c,amount)` | 着色（amount 0–100）。 |
+| `fx_image_brightness(img,delta)` | 亮度增减。 |
+| `image(img)` | 属性宏：把图片绑到图片控件。 |
+| `fx_image_create(w,h)` / `fx_image_free(img)` | 新建/释放内存图片。 |
+| `fx_image_set_px(img,x,y,c)` | 写像素（程序化贴图）。 |
+| `fx_image_load(path)` / `fx_image_set_zoom(w,pct)` / `fx_set_image(w,img)` | 加载 / 控件缩放 / 绑定控件。 |
+| `fx_draw_image(img,x,y,dw,dh)` / `fx_draw_image_ex(...,dark)` | 缩放绘制 / 暗色版本。 |
+| `fx_draw_image_quad(img,xy8)` / `fx_draw_image_quad_persp(...)` | 透视四边形贴图 / 快捷斜视屏幕。 |
+| `fx_quad_homography(src8,dst8,m9)` / `fx_quad_corner_weights(xy8,d4)` / `fx_mat3_invert(m,out)` | 单应矩阵 / 四角权重 / 3×3 求逆。 |
+
+> 完整签名见 [api.md](api.md) 第 10、17 节。

@@ -1,5 +1,8 @@
 # fxtk 完整指南（guide.md）
 
+> **版本提示**：本指南主体写于 v2.4；**v2.5 的新增能力**（多真实窗口、画布内窗口管理器、`FX_RGBA` 透明度、
+> 单窗口桌面行为 `fx_win_*`、手势/并行/SVG）见文末「v2.5 实战用法」；**所有函数签名以 [api.md](api.md) 为准**。
+
 > 本指南覆盖 fxtk 的全部常用能力：从第一个窗口到自绘动画、数据控件、性能优化。
 > 环境：纯 PC / Linux 模拟器（`demo-main/`），SDL2 渲染，已完全脱离 ESP32。
 > 建议顺序：第 1~4 章 → 用 quickstart 跑通 → 第 5~9 章写实际页面 → 第 10~14 章深入。
@@ -886,7 +889,7 @@ const char *r = gpu_raymarch_renderer();       /* 返回渲染器名 */
 
 ---
 
-# v2.4 新增能力（都已在本次开发中实测通过）
+## v2.4 新增能力（历史章节，均已在 v2.4 实测通过）
 
 > 这一节只讲"怎么用"。想要每项的验证证据与踩坑记录，见 `docs/ROADMAP_v2.4.md` 与 `CHANGELOG.md`。
 
@@ -1048,4 +1051,65 @@ PC 端**不再迁就 ESP32 的资源约束**，只保证 **API/语法一致 + �
 
 本教程的主线仍是单窗口 sokol_app。需要多真实窗口时，编译加 `-DFXTK_MW`，并按
 [multi-window.md](multi-window.md) 的 API/编译/限制使用；默认路径与体积不受影响。
+
+## v2.5 实战用法（多窗口 / 窗口管理 / 透明度 / 桌面）
+
+### 1) 系统真实多窗口（`-DFXTK_MW`）
+
+```c
+fxtk_mw_register();                       // 平台外壳注册后端
+fxtk_win_init();
+int notes  = fxtk_win_create(720,340, 24,24,  "notes");
+int player = fxtk_win_create(1200,78, 40,588, "player");
+for (;;) {
+    fxtk_win_poll();
+    if (fxtk_win_quit()) break;
+    fxtk_win_begin(notes);
+      fx_frame_begin(); /* 画窗口内容 */ fx_frame_end();
+    fxtk_win_end(notes);
+    fxtk_win_begin(player);
+      fx_frame_begin(); /* ... */ fx_frame_end();
+    fxtk_win_end(player);
+}
+```
+
+要点：关闭任意窗口=退出；不要逐帧 resize；多窗口串行 Swap 必须关 vsync；
+客户区对齐用 `fxtk_win_client_offset`（Win32 扣标题栏，X11=0）。完整见 [multi-window.md](multi-window.md)。
+
+### 2) 画布内窗口管理器（`fxtk_wm`）
+
+```c
+fx_wm_set_ui(1.5f);
+fx_wm_add("notes", FX_WM_WIN11, 640, 300);
+fx_wm_add("player", FX_WM_LINUX, 1200, 70);
+/* 每帧: */
+fx_wm_prepare(content, NULL);   // 兼容空操作
+/* 画背景 */
+fx_wm_draw(content, NULL);      // 渲染内容 + 合成窗口
+```
+
+`content(idx,cw,ch,ud)` 里按 `idx` 画每窗内容。完整见 [window-manager.md](window-manager.md)。
+
+### 3) 半透明与阴影
+
+```c
+fx_set_color(FX_RGBA(0,0,0,110));
+fx_fill_rect_round(x, y, x+w, y+h, 12);      // 半透明圆角阴影
+fx_draw_text_c(px, py, "text", FX_RGB(230,237,243), FX_TEXT_NOBG);  // 透明底文字
+```
+
+24 位 `FX_RGB` 的 alpha=0 仍按不透明处理，老代码不受影响。
+
+### 4) 单窗口桌面行为
+
+`fx_win_center(); fx_win_move(120,90); fx_win_set_always_on_top(1);`
+去标题栏在 GNOME/Mutter 可能无效，务必用 `fx_win_get_decorated()` 回查；不要在 init 回调里操作窗口。
+
+### 5) 手势 / 并行 / SVG
+
+- 手势：`fx_gesture_feed(x,y,pressed,now_ms)` 每帧喂采样，`fx_gesture_poll(&ev)` 取事件（点击/双击/长按/滑动）。
+- 并行：`fx_parallel_for(n, body, ud)`（CPU 多线程；不是 GPU）；语法糖 `fx_par_for(n){...}`。
+- SVG：`fx_svg_parse/fx_svg_load → fx_svg_draw`，`fx_svg_skipped` 报告不支持元素数（诚实标注）。
+
+> 每个函数的签名/参数/返回值：见 [api.md](api.md)。
 

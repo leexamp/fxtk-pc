@@ -56,3 +56,32 @@ fx_label_new(percent("0.02,0.01","0.98,0.09"), title("fxtk 演示 · 标签页")
 - 多窗口串行 `SwapBuffers` 必须关闭 vsync，否则帧率被拖到 `60/N`。
 - 完整说明/限制（X11 only、主屏、最大 8 窗口、输入未转发、真 HiDPI 未验证）见 [multi-window.md](multi-window.md)。
 
+## 桌面/输入 API 逐条（`fxtk_desktop.h`）
+
+| 函数 | 用法 |
+|---|---|
+| `fxtk_draw_textedit(w)` | 按框架规则绘制文本框（自绘复杂面板时复用）。 |
+| `fx_set_focus(w)` / `fx_get_focus()` | 设置/读取键盘焦点控件。 |
+| `fx_focus_blink()` | 光标闪烁亮态（自绘文本框用）。 |
+| `fx_last_key()` | 最近一次按键（`fx_keyev_t`：utf8/key/down/mod）。 |
+| `fx_touch_state(&x,&y,&pressed)` | 当前触摸状态。 |
+| `fx_pressed()` | 当前按下的控件。 |
+| `fx_wheel_take(w)` | 取滚轮事件（滚动容器）。 |
+| `fx_scroll_content(w,h)` / `fx_scroll_update(w,h)` / `fx_scrollbar_draw(w,off,h)` / `fx_set_scroll(w,off)` | 滚动容器四件套：设内容高 → 每帧更新取偏移 → 画滚动条 → 拖拽设目标。 |
+| `fx_text_width_n(s,n)` / `fx_draw_text_c_n(x,y,s,n,fg,bg)` | 量/画前 n 字符（编辑框/省略号）。 |
+| `maxlen(n)` | 属性：文本框最大字符数。 |
+| `fx_widget_set_rect(w,...)` / `fx_set_fgcolor(w,c)` | 设矩形 / 前景色（旧别名 `fx_set_fgcolor_w`）。 |
+
+## v2.5：单窗口系统窗口行为（`fx_win_*`）
+
+| 函数 | 用法 |
+|---|---|
+| `fx_win_available()` | 后端是否支持（sokol/sdl 桌面版为 1；stub 为 0）。 |
+| `fx_win_set_borderless(on)` / `fx_win_get_borderless()` | 去/加系统标题栏；GNOME/Mutter 下 motif hints 可能无效。 |
+| `fx_win_get_decorated()` | **回查**实际是否带系统装饰（不信任 set 返回值）。 |
+| `fx_win_set_always_on_top(on)` / `fx_win_get_always_on_top()` | 置顶。 |
+| `fx_win_move(x,y)` / `fx_win_get_pos(&x,&y)` / `fx_win_center()` | 移动/读位置/居中。 |
+| `fx_win_drag_begin()` | 触发 WM 拖窗（自定义标题栏拖拽）。 |
+
+> 实测边界（本机 GNOME+XWayland）：移动/居中精确 (0,0)、置顶生效、去标题栏无效。
+> **不要**在 init_cb 里操作窗口；EWMH 请求要给 WM 处理时间。完整列表见 [api.md](api.md) 第 16 节。

@@ -72,3 +72,50 @@
 `drivers/fxtk_sokol_mw.c`（X11 GLX + Win32 WGL；一进程一 GL 上下文、每窗口独立画布、关闭 vsync）。
 不定义 `FXTK_MW` 时该后端不参与编译/链接。设计与限制见 [multi-window.md](multi-window.md)。
 
+## 后端服务函数逐条（`fxtk_backends.h`）
+
+### 能力 / 屏幕 / 日志
+
+| 函数 | 用法 |
+|---|---|
+| `fx_backend_caps()` | 返回能力位（`fx_caps_t`），判断 GPU 圆角/图片/剪贴板等是否可用。 |
+| `fx_backend_name()` | 后端名（sokol/sdl/stub），日志/诊断。 |
+| `fx_backend_set_screen(w,h,dpi)` | 驱动启动时上报物理屏幕尺寸与 DPI 缩放。 |
+| `fx_screen_w()` / `fx_screen_h()` / `fx_dpi_scale()` | 读屏幕像素尺寸 / DPI 缩放。 |
+| `fx_ui_scale_for(phys_w,dpi,cap,compact)` | 由物理宽/DPI 计算 UI 缩放（cap=上限%，compact=紧凑）。 |
+| `fx_log_set_level(lv)` / `fx_log_get_level()` / `fx_log(lv,fmt,...)` | 日志等级开关 / 取等级 / 打日志。 |
+
+### 随机 / 时间
+
+| 函数 | 用法 |
+|---|---|
+| `fx_rand_seed(seed)` | 设种子（测试/金图必须固定种子才可复现）。 |
+| `fx_rand_u32()` / `fx_rand_below(n)` / `fx_rand_range(lo,hi)` / `fx_randf()` | 32 位随机 / `[0,n)` / `[lo,hi]` 闭区间 / `[0,1)`。 |
+| `fx_time_us()` / `fx_time_ms()` | 单调时间（动画计时用，不受墙钟跳变影响）。 |
+| `fx_time_unix()` / `fx_sleep_ms(ms)` | Unix 秒 / 睡眠。 |
+
+### 路径 / 文件 / 目录
+
+| 函数 | 用法 |
+|---|---|
+| `fx_path_join(dst,cap,a,b)` | 拼路径（自动分隔符），返回长度。 |
+| `fx_path_basename(path)` / `fx_path_ext(path)` | 取文件名 / 扩展名（静态缓冲，勿 free）。 |
+| `fx_path_dir(dst,cap,path)` / `fx_dir_app(dst,cap)` | 取所在目录 / 应用数据目录。 |
+| `fx_file_exists(path)` / `fx_file_size(path,&sz)` | 存在性 / 64 位大小。 |
+| `fx_file_read(path,&sz)` / `fx_file_free(buf)` | 读整个文件（malloc，失败 NULL）/ 释放。 |
+| `fx_file_write(path,data,n,append)` | 写文件（append=1 追加）。 |
+| `fx_dir_create(path)` / `fx_dir_list(dir,out,max)` | 建目录 / 列目录（`fx_dir_entry_t` 数组，返回条数）。 |
+
+### 图片 / 剪贴板 / 偏好 / 系统集成
+
+| 函数 | 用法 |
+|---|---|
+| `fx_img_load_file(path,&img)` / `fx_img_load_mem(data,n,&img)` | 解码 PNG/JPEG/BMP/GIF/TGA/PNM 到 `fx_img_t`。 |
+| `fx_img_free(&img)` / `fx_img_has_file_ext(path)` / `fx_img_save_png(...)` | 释放 / 后缀判断 / 存 PNG。 |
+| `fx_clip_set(text)` / `fx_clip_get(buf,cap)` | 系统剪贴板写 / 读（返回长度）。 |
+| `fx_prefs_set/get` / `fx_prefs_save/load` | 键值偏好设置/读取/落盘/读盘。 |
+| `fx_backend_pick_dir(out,cap)` / `fx_backend_pick_file(out,cap,title,exts)` | 系统选目录/文件对话框。 |
+| `fx_open_url(url)` / `fx_reveal_file(path)` | 打开浏览器 / 文件管理器定位。 |
+| `fx_cpu_count()` | CPU 逻辑核心数（并行默认线程数）。 |
+
+> 完整签名/参数见 [api.md](api.md) 第 15 节。
