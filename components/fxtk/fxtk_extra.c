@@ -111,6 +111,7 @@ fx_widget_t *fx_list_new_p(const char*r1,const char*r2,int pg)
 {
     fx_widget_t *w=(pg>=0)?fx_canvas_new(pixel(r1,r2),page(pg),color(FX_WHITE),anim(1))
                          :fx_canvas_new(pixel(r1,r2),color(FX_WHITE),anim(1));
+    if (!w) return NULL;   /* v2.5.1(M3): 控件池满时 fx_canvas_new 返回 NULL, 不能继续解引用 */
     ex_slot_t *s=ex_new(w);
     if (s)fx_set_cb(w,ex_list_cb,0);
     return w;
@@ -243,6 +244,7 @@ fx_widget_t *fx_drop_new_p(const char*r1,const char*r2,int pg)
     ex_ensure_pop();
     fx_widget_t *w=(pg>=0)?fx_canvas_new(pixel(r1,r2),page(pg),color(FX_RGB(250,250,250)),fgcolor(FX_RGB(40,40,40)),anim(1))
                          :fx_canvas_new(pixel(r1,r2),color(FX_RGB(250,250,250)),fgcolor(FX_RGB(40,40,40)),anim(1));
+    if (!w) return NULL;   /* v2.5.1(M3): 控件池满 → 不再 w->bg 空指针崩溃 */
     w->bg=FX_RGB(245,245,245); w->border=0;   /* 底盘与页面同色, 高分辨率无下巴 */
     ex_slot_t *s=ex_new(w);
     if (s)fx_set_cb(w,ex_drop_cb,0);
@@ -260,9 +262,24 @@ void fxtk_extra_forget(const fx_widget_t *w)
 #if FXTK_WIDGET_LIST || FXTK_WIDGET_DROP
     if (!w) return;
     /* v2.4.4 修复(评审 A2): 原先硬编码 8, 而池是 FX_MAX_EXTRA_WIDGETS(PC 上 64)
-     * → 第 8 槽之后永不回收: 槽位泄漏、strdup 的条目泄漏、地址复用后新 list 继承死控件的 items/sel。 */
-    for (int i = 0; i < FX_MAX_EXTRA_WIDGETS; i++)
-        if (s_ex[i].w == w) memset(&s_ex[i], 0, sizeof(ex_slot_t));
+     * → 第 8 槽之后永不回收: 槽位泄漏、strdup 的条目泄漏、地址复用后新 list 继承死控件的 items/sel。
+     * v2.5.1(M2): 回收槽位前先释放 items[] 里 strdup 的字符串;
+     *   - 弹层槽(owner!=0)的 items 只是属主字符串的别名, 不能 free;
+     *   - 属主槽若弹层还开着, 先关弹层断别名, 再 free。 */
+    for (int i = 0; i < FX_MAX_EXTRA_WIDGETS; i++) {
+        if (s_ex[i].w != w) continue;
+#if FXTK_WIDGET_DROP
+        if (s_ex[i].pop) ex_close_pop(&s_ex[i]);      /* 关弹层: 清别名, 防悬垂 */
+        if (s_ex[i].owner == 0)                        /* 非弹层槽: 字符串归它所有 */
+#endif
+        {
+            for (int k = 0; k < s_ex[i].n; k++) free(s_ex[i].items[k]);
+        }
+#if FXTK_WIDGET_DROP
+        if (s_pop == w) s_pop = NULL;                  /* 池化弹层本身被删: 断开缓存指针 */
+#endif
+        memset(&s_ex[i], 0, sizeof(ex_slot_t));
+    }
 #endif
 }
 void fxtk_extra_reset(void)

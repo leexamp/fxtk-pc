@@ -129,3 +129,13 @@ Measurements on this machine (headless, no vsync): stress page saturated at
 - In-canvas window manager `fxtk_wm` (single-window, self-drawn windows): [window_manager_en.md](window_manager_en.md) / [docs/window-manager.md](../docs/window-manager.md).
 
 - Per-function reference (signatures/usage): [docs/api.md](../docs/api.md) (Chinese, hand-maintained; CI checks coverage).
+
+## v2.5.2 update
+
+- **Multi-window input is wired**: native mouse/keyboard events are queued per window and delivered in
+  `fxtk_win_begin()`; use one widget root per window (`fx_root_new / fx_root_select`) and call `fx_poll()`
+  inside begin/end. Interactive demo: `make -C demo-main mw_interactive` (buttons/checkbox/slider/textedit/
+  context menu/window raise·move·resize).
+- One-command builds for demos and for the MV app (`make` / `make win` in `mv/pv/v2/single`).
+- Still missing in the multi-window path: clipboard, IME, HiDPI verification; see docs/multi-window.md.
+

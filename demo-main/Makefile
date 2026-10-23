@@ -97,6 +97,15 @@ test/headless_test: test/headless_test.c $(TEST_CORE) $(HDRS)
 test/headless_test_stub: test/headless_test.c $(TEST_CORE) $(HDRS)
 	gcc -O2 -DFXTK_BACKEND_STUB $(INC) $(TEST_CORE) test/headless_test.c -o $@ -lm -lpthread
 
+# ---- v2.5.2: 多真实窗口 + 控件输入闭环 demo ----
+# 一条命令构建: make mw_interactive && ./mw_interactive
+.PHONY: mw_interactive
+mw_interactive: ../examples/mw_interactive.c $(SOKOL_CORE) ../drivers/fxtk_sokol_mw.c ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/fxtk_win.c $(HDRS)
+	gcc $(CFLAGS) -DFXTK_MW $(INC) $(SOKOL_INC) $(SOKOL_CORE) \
+	    ../drivers/fxtk_sokol_mw.c ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/fxtk_win.c \
+	    ../examples/mw_interactive.c -o $@ \
+	    -lX11 -lXi -lXcursor -lGL -ldl -lpthread -lm
+
 # ---- v2.5: 并行 for 自检 (无头, 不需要显示/窗口) ----
 # 只链 fxtk_par.c, 不拖整个框架进来 —— 它不依赖任何渲染/驱动。
 .PHONY: par-test

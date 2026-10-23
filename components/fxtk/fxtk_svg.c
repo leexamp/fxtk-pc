@@ -187,25 +187,35 @@ static int sv_push_pt(sv_shape_t *s, float x, float y)
 /* ===================== 属性解析小工具 ===================== */
 
 /* 在 attr 串里找 key="value" 或 key='value', 返回 value 的起止(不含引号); 找不到返回 0 */
-static int sv_attr(const char *tag, const char *key, const char **vs, int *vlen)
+/* v2.5.1(M1): 属性搜索必须限制在【本元素】的 <...> 区间 [tag,end) 内。
+ * 旧实现只拿到元素起始指针、用 strstr 搜到整个文档末尾 → 前一个元素缺属性时会命中
+ * 后续元素的同名属性(最小例: rect 缺 x/y 继承第二个 rect 的 x=40,y=40)。 */
+static int sv_attr(const char *tag, const char *end, const char *key, const char **vs, int *vlen)
 {
     size_t kl = strlen(key);
     const char *p = tag;
-    while ((p = strstr(p, key))) {
-        /* key 必须是独立的名字(前面是空白, 后面紧跟 = ) */
+    while (p + kl <= end) {
+        const char *hit = NULL;
+        for (const char *q = p; q + kl <= end; q++)
+            if (memcmp(q, key, kl) == 0) { hit = q; break; }
+        if (!hit) break;
+        p = hit;
+        /* key 必须是独立的名字(前面是空白/<, 后面紧跟 = ) */
         int okhead = (p == tag) || isspace((unsigned char)p[-1]) || p[-1] == '<';
-        if (okhead && p[kl] == '=') {
+        if (okhead && p + kl < end && p[kl] == '=') {
             const char *q = p + kl + 1;
-            while (*q == ' ' || *q == '\t') q++;
+            while (q < end && (*q == ' ' || *q == '\t')) q++;
+            if (q >= end) return 0;
             if (*q == '"' || *q == '\'') {
                 char qc = *q; q++;
-                const char *e = strchr(q, qc);
-                if (!e) return 0;
+                const char *e = q;
+                while (e < end && *e != qc) e++;
+                if (e >= end) return 0;
                 *vs = q; *vlen = (int)(e - q);
                 return 1;
             }
             const char *e = q;
-            while (*e && !isspace((unsigned char)*e) && *e != '>') e++;
+            while (e < end && *e && !isspace((unsigned char)*e) && *e != '>') e++;
             *vs = q; *vlen = (int)(e - q);
             return 1;
         }
@@ -214,20 +224,20 @@ static int sv_attr(const char *tag, const char *key, const char **vs, int *vlen)
     return 0;
 }
 
-static float sv_num(const char *tag, const char *key, float dflt)
+static float sv_num(const char *tag, const char *end, const char *key, float dflt)
 {
     const char *v; int l;
-    if (!sv_attr(tag, key, &v, &l)) return dflt;
+    if (!sv_attr(tag, end, key, &v, &l)) return dflt;
     char buf[64]; if (l > 63) l = 63;
     memcpy(buf, v, (size_t)l); buf[l] = 0;
     return (float)atof(buf);
 }
 
 /* 取绝对/相对属性: SVG 里 fill/stroke 会从父级继承, 这里用"未设置=-1"表示继承 */
-static int sv_attr_str(const char *tag, const char *key, char *out, int outsz)
+static int sv_attr_str(const char *tag, const char *end, const char *key, char *out, int outsz)
 {
     const char *v; int l;
-    if (!sv_attr(tag, key, &v, &l)) return 0;
+    if (!sv_attr(tag, end, key, &v, &l)) return 0;
     if (l > outsz - 1) l = outsz - 1;
     memcpy(out, v, (size_t)l); out[l] = 0;
     return 1;
@@ -251,10 +261,10 @@ static int sv_numlist(const char *s, int len, float *out, int maxn)
 }
 
 /* 解析 transform="translate(..) scale(..) rotate(..) matrix(..)" */
-static sv_aff_t sv_transform(const char *tag, sv_aff_t base)
+static sv_aff_t sv_transform(const char *tag, const char *end, sv_aff_t base)
 {
     char buf[256];
-    if (!sv_attr_str(tag, "transform", buf, sizeof buf)) return base;
+    if (!sv_attr_str(tag, end, "transform", buf, sizeof buf)) return base;
     sv_aff_t m = base;
     const char *p = buf;
     while (*p) {
@@ -405,20 +415,20 @@ typedef struct {
     float stroke_w;
 } sv_style_t;
 
-static void sv_style_from_tag(const char *tag, sv_style_t *st)
+static void sv_style_from_tag(const char *tag, const char *end, sv_style_t *st)
 {
     char v[64];
-    if (sv_attr_str(tag, "fill", v, sizeof v)) {
+    if (sv_attr_str(tag, end, "fill", v, sizeof v)) {
         int ok; fx_color_t c = sv_color(v, &ok);
         st->has_fill = ok; st->fill = c;
     }
-    if (sv_attr_str(tag, "stroke", v, sizeof v)) {
+    if (sv_attr_str(tag, end, "stroke", v, sizeof v)) {
         int ok; fx_color_t c = sv_color(v, &ok);
         st->has_stroke = ok; st->stroke = c;
     }
     {
         const char *pv; int pl;
-        if (sv_attr(tag, "stroke-width", &pv, &pl)) {
+        if (sv_attr(tag, end, "stroke-width", &pv, &pl)) {
             char b[32]; if (pl > 31) pl = 31;
             memcpy(b, pv, (size_t)pl); b[pl] = 0;
             float f = (float)atof(b);
@@ -460,26 +470,26 @@ fx_svg_t *fx_svg_parse(const char *text)
 
         if (!strcmp(nm, "svg")) {
             char vb[128];
-            if (sv_attr_str(p, "viewBox", vb, sizeof vb)) {
+            if (sv_attr_str(p, e, "viewBox", vb, sizeof vb)) {
                 float a[4];
                 if (sv_numlist(vb, (int)strlen(vb), a, 4) == 4 && a[2] > 0 && a[3] > 0) { d->vw = a[2]; d->vh = a[3]; }
             }
-            if (d->vw <= 0) { d->vw = sv_num(p, "width", 100); d->vh = sv_num(p, "height", 100); }
+            if (d->vw <= 0) { d->vw = sv_num(p, e, "width", 100); d->vh = sv_num(p, e, "height", 100); }
         } else if (!strcmp(nm, "g")) {
             if (depth < 16) { stack[depth] = m; sstack[depth] = st; depth++; }
-            sv_style_from_tag(p, &st);
-            m = sv_transform(p, m);
+            sv_style_from_tag(p, e, &st);
+            m = sv_transform(p, e, m);
         } else if (!strcmp(nm, "rect") || !strcmp(nm, "circle") || !strcmp(nm, "ellipse") ||
                    !strcmp(nm, "line") || !strcmp(nm, "polyline") || !strcmp(nm, "polygon") ||
                    !strcmp(nm, "path")) {
             sv_style_t lst = st;
-            sv_style_from_tag(p, &lst);
-            sv_aff_t lm = sv_transform(p, m);
+            sv_style_from_tag(p, e, &lst);
+            sv_aff_t lm = sv_transform(p, e, m);
 
             if (!strcmp(nm, "rect")) {
-                float x = sv_num(p,"x",0), y = sv_num(p,"y",0);
-                float w = sv_num(p,"width",0), h = sv_num(p,"height",0);
-                float rx = sv_num(p,"rx",-1), ry = sv_num(p,"ry",-1);
+                float x = sv_num(p, e,"x",0), y = sv_num(p, e,"y",0);
+                float w = sv_num(p, e,"width",0), h = sv_num(p, e,"height",0);
+                float rx = sv_num(p, e,"rx",-1), ry = sv_num(p, e,"ry",-1);
                 if (w > 0 && h > 0) {
                     sv_shape_t *s = sv_new_shape(d);
                     if (s) {
@@ -509,10 +519,10 @@ fx_svg_t *fx_svg_parse(const char *text)
                     }
                 }
             } else if (!strcmp(nm, "circle") || !strcmp(nm, "ellipse")) {
-                float cx = sv_num(p,"cx",0), cy = sv_num(p,"cy",0);
-                float rr = sv_num(p,"r",-1);
-                float rx = (rr >= 0) ? rr : sv_num(p,"rx",0);
-                float ry = (rr >= 0) ? rr : sv_num(p,"ry",0);
+                float cx = sv_num(p, e,"cx",0), cy = sv_num(p, e,"cy",0);
+                float rr = sv_num(p, e,"r",-1);
+                float rx = (rr >= 0) ? rr : sv_num(p, e,"rx",0);
+                float ry = (rr >= 0) ? rr : sv_num(p, e,"ry",0);
                 if (rx > 0 || ry > 0) {
                     sv_shape_t *s = sv_new_shape(d);
                     if (s) {
@@ -538,8 +548,8 @@ fx_svg_t *fx_svg_parse(const char *text)
                     }
                 }
             } else if (!strcmp(nm, "line")) {
-                float x1=sv_num(p,"x1",0), y1=sv_num(p,"y1",0);
-                float x2=sv_num(p,"x2",0), y2=sv_num(p,"y2",0);
+                float x1=sv_num(p, e,"x1",0), y1=sv_num(p, e,"y1",0);
+                float x2=sv_num(p, e,"x2",0), y2=sv_num(p, e,"y2",0);
                 sv_shape_t *s = sv_new_shape(d);
                 if (s) {
                     s->kind = SV_SH_POLY; s->closed = 0;
@@ -551,7 +561,7 @@ fx_svg_t *fx_svg_parse(const char *text)
                 }
             } else if (!strcmp(nm, "polyline") || !strcmp(nm, "polygon")) {
                 const char *v; int l;
-                if (sv_attr(p, "points", &v, &l)) {
+                if (sv_attr(p, e, "points", &v, &l)) {
                     sv_shape_t *s = sv_new_shape(d);
                     if (s) {
                         s->kind = SV_SH_POLY; s->closed = !strcmp(nm, "polygon");
@@ -567,7 +577,7 @@ fx_svg_t *fx_svg_parse(const char *text)
                 }
             } else if (!strcmp(nm, "path")) {
                 const char *v; int l;
-                if (sv_attr(p, "d", &v, &l))
+                if (sv_attr(p, e, "d", &v, &l))
                     sv_path(d, v, l, lm, lst.has_fill, lst.fill, lst.has_stroke, lst.stroke, lst.stroke_w);
             }
         } else if (nm[0]) {

@@ -167,6 +167,10 @@ fx_widget_t *fx_widget_new_impl(int type, fx_attr_t attrs[]);
 #define fx_tab_new(...)      fx_widget_new_impl(FX_W_TAB,      (fx_attr_t[]){__VA_ARGS__, FX_ATTR_END})
 
 void fx_parent(fx_widget_t *p);
+/* v2.5.2: 多窗口控件根 (单窗口不用) —— 见 docs/multi-window.md */
+fx_widget_t *fx_root_new(void);              /* 新建一棵独立的控件树根 (不挂到当前根) */
+void         fx_root_select(fx_widget_t *r); /* 切换当前活动根; NULL = 回到缺省根 */
+fx_widget_t *fx_root_active(void);           /* 当前活动根 */
 void fxtk_unlink(fx_widget_t *w);   /* v2.6: 从父链表摘除 */
 void fxtk_raise(fx_widget_t *w);    /* v2.6: 提到最前(最后绘制) */
 void fxtk_lower(fx_widget_t *w);    /* v2.6: 压到最底(最先绘制) */

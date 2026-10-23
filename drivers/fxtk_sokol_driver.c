@@ -1521,3 +1521,19 @@ void fxtk_sokol_handle_event(const sapp_event *e)
  *   ② 用遗留 SDL 版: ./build.sh --sdl (SDL2 走 SDL_TEXTINPUT, 输入法正常);
  *   ③ 界面文字本身一直是中文正常的(用的是内置字体), 只有"键盘打字输入中文"受限。
  */
+
+/* ================= v2.5.2: 多窗口后端的输入注入 =================
+ * FXTK_MW 下没有 sokol_app 事件回调, 由 fxtk_sokol_mw.c 从原生窗口事件里取到鼠标/键盘后,
+ * 通过下面这组函数塞进与单窗口完全相同的队列 —— 控件层因此不需要知道"输入来自哪扇窗"。
+ * 单窗口路径不调用这些函数, 行为不变。 */
+void fxtk_sokol_input_touch(int x, int y, int pressed) { q_push_touch_edge(x, y, pressed); }
+void fxtk_sokol_input_touch_move(int x, int y, int pressed) { q_push_touch(x, y, pressed); }
+void fxtk_sokol_input_wheel(int x, int y, int dy) { q_push_wheel(x, y, dy); }
+void fxtk_sokol_input_key(const fx_keyev_t *ev) { if (ev) q_push_key(ev); }
+void fxtk_sokol_input_right_click(int x, int y) { s_rc = 1; s_rc_x = x; s_rc_y = y; }
+int  fxtk_sokol_input_pending(void)
+{
+    return (s_qt_h != s_qt_t) || (s_qw_h != s_qw_t) || (s_qk_h != s_qk_t);
+}
+int  fxtk_sokol_input_touch_pending(void) { return s_qt_h != s_qt_t; }
+

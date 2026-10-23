@@ -14,11 +14,13 @@ extern void fxtk_flush_driver_batch(void);
 extern int fxtk_is_offing(void);
 extern void fxtk_text_blit(void *tex,int x,int y,int w,int h);
 extern void fxtk_put_px(int x, int y, uint32_t c);   /* v2.3.1: 旧声明是 uint16_t, 与定义(fxtk_draw.c uint32_t)类型冲突 UB, LTO 实证 */
+extern void fxtk_put_px_alpha(int x, int y, uint32_t c, int a);   /* v2.5.1(H3) */
 
 #define TEXT_CACHE_SIZE 64   /* 文本贴图缓存上限(v2.3: 256 减到 64, 省内存; 命中不足会自动重建) */
 typedef struct {
     TTF_Font *font;
-    char *key;
+    char *s;         /* v2.5.1(M4): 保存完整字符串(不再用截断的 key) */
+    fx_color_t fg, bg;
     uint32_t hash;   /* v2.3: 键哈希, 命中先比哈希再比字符串 (旧: 每次最多 64 次 strcmp) */
     int w, h;
     SDL_Texture *tex;
@@ -46,13 +48,10 @@ static tc_entry_t *tc_lookup(TTF_Font *font, const char *s, fx_color_t fg, fx_co
      * 旧实现每次 lookup 都 snprintf + 最多 64 次 strcmp —— 压测下每帧 1276 次文本绘制。 */
     uint32_t h = tc_keyhash(font, s, fg, bg);
     for (int i = 0; i < TEXT_CACHE_SIZE; i++) {
-        if (s_tc[i].key && s_tc[i].hash == h && s_tc[i].font == font) {
-            char key[256];
-            snprintf(key, sizeof(key), "%s|%06x|%06x", s, (unsigned)fg, (unsigned)bg);
-            if (strcmp(s_tc[i].key, key) == 0) {
-                s_tc[i].age = ++s_tc_clock;
-                return &s_tc[i];
-            }
+        if (s_tc[i].s && s_tc[i].hash == h && s_tc[i].font == font &&
+            s_tc[i].fg == fg && s_tc[i].bg == bg && strcmp(s_tc[i].s, s) == 0) {
+            s_tc[i].age = ++s_tc_clock;
+            return &s_tc[i];
         }
     }
     return NULL;
@@ -60,13 +59,13 @@ static tc_entry_t *tc_lookup(TTF_Font *font, const char *s, fx_color_t fg, fx_co
 static tc_entry_t *tc_evict(void)
 {
     for (int i = 0; i < TEXT_CACHE_SIZE; i++)
-        if (!s_tc[i].key) return &s_tc[i];
+        if (!s_tc[i].s) return &s_tc[i];
     int min_i = 0;
     for (int i = 1; i < TEXT_CACHE_SIZE; i++)
         if (s_tc[i].age < s_tc[min_i].age) min_i = i;
-    free(s_tc[min_i].key);
+    free(s_tc[min_i].s);
     if (s_tc[min_i].tex) SDL_DestroyTexture(s_tc[min_i].tex);
-    s_tc[min_i].key = NULL;
+    s_tc[min_i].s = NULL;
     s_tc[min_i].tex = NULL;
     return &s_tc[min_i];
 }
@@ -177,6 +176,7 @@ void fx_draw_text_c(int x, int y, const char *s, fx_color_t fg, fx_color_t bg)
     SDL_FreeSurface(surf);
     if (!fmt_surf) return;
 
+    int nobg = (bg == FX_TEXT_NOBG);   /* v2.5.1(H3): 透明底 */
     uint8_t r_bg = (uint8_t)((bg >> 16) & 0xFF);
     uint8_t g_bg = (uint8_t)((bg >> 8) & 0xFF);
     uint8_t b_bg = (uint8_t)(bg & 0xFF);
@@ -195,10 +195,14 @@ void fx_draw_text_c(int x, int y, const char *s, fx_color_t fg, fx_color_t bg)
                 uint8_t r = (p >> 16) & 0xFF;
                 uint8_t g = (p >> 8) & 0xFF;
                 uint8_t b = p & 0xFF;
-                uint8_t fr = (r * alpha + r_bg * (255 - alpha)) / 255;
-                uint8_t fg_v = (g * alpha + g_bg * (255 - alpha)) / 255;
-                uint8_t fb = (b * alpha + b_bg * (255 - alpha)) / 255;
-                argb_buf[ty * w + tx] = 0xFF000000 | (fr << 16) | (fg_v << 8) | fb;
+                if (nobg) {
+                    argb_buf[ty * w + tx] = ((uint32_t)alpha << 24) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+                } else {
+                    uint8_t fr = (r * alpha + r_bg * (255 - alpha)) / 255;
+                    uint8_t fg_v = (g * alpha + g_bg * (255 - alpha)) / 255;
+                    uint8_t fb = (b * alpha + b_bg * (255 - alpha)) / 255;
+                    argb_buf[ty * w + tx] = 0xFF000000 | ((uint32_t)fr << 16) | ((uint32_t)fg_v << 8) | fb;
+                }
             }
         }
     }
@@ -207,8 +211,11 @@ void fx_draw_text_c(int x, int y, const char *s, fx_color_t fg, fx_color_t bg)
         for (int ty = 0; ty < h; ty++)
             for (int tx = 0; tx < w; tx++) {
                 uint32_t p = argb_buf[ty*w+tx];
-                uint8_t fr=(p>>16)&0xFF, fg_v=(p>>8)&0xFF, fb=p&0xFF;
-                fxtk_put_px(x+tx, y+ty, (uint32_t)((fr<<16)|(fg_v<<8)|fb));
+                unsigned a = (p >> 24) & 0xFF;
+                if (!a) continue;                                     /* v2.5.1(H3) */
+                uint32_t rgb = (p >> 16) & 0xFFFFFF;
+                if (a >= 255) fxtk_put_px(x+tx, y+ty, rgb);
+                else fxtk_put_px_alpha(x+tx, y+ty, rgb, (int)a);      /* 按 alpha 混合, 不再铺色块 */
             }
         free(argb_buf);
         return;
@@ -218,7 +225,7 @@ void fx_draw_text_c(int x, int y, const char *s, fx_color_t fg, fx_color_t bg)
         tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, w, h);
         if (tex) {
             SDL_UpdateTexture(tex, NULL, argb_buf, w * 4);
-            SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_NONE);
+            SDL_SetTextureBlendMode(tex, nobg ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
         }
         free(argb_buf);
     }
@@ -226,10 +233,9 @@ void fx_draw_text_c(int x, int y, const char *s, fx_color_t fg, fx_color_t bg)
 
     tc_entry_t *slot = tc_evict();
     if (slot) {
-        char key[256];
-        snprintf(key, sizeof(key), "%s|%06x|%06x", s, (unsigned)fg, (unsigned)bg);
         slot->font = g_font;
-        slot->key = strdup(key);
+        slot->s = strdup(s);                       /* v2.5.1(M4): 完整字符串, 不截断 */
+        slot->fg = fg; slot->bg = bg;
         slot->hash = tc_keyhash(g_font, s, fg, bg);   /* v2.3: 与 lookup 同步维护 */
         slot->w = w; slot->h = h;
         slot->tex = tex;
@@ -241,7 +247,7 @@ void fx_draw_text_c(int x, int y, const char *s, fx_color_t fg, fx_color_t bg)
 
 void fx_draw_text(int x, int y, const char *s)
 {
-    fx_draw_text_c(x, y, s, FX_WHITE, FX_BLACK);
+    fx_draw_text_c(x, y, s, FX_WHITE, FX_TEXT_NOBG);   /* v2.5.1(H3): 与 sokol 一致, 默认透明底 */
 }
 
 int fx_text_width_n(const char *s, int n)
@@ -269,7 +275,7 @@ void fx_draw_text_c_n(int x, int y, const char *s, int n, fx_color_t fg, fx_colo
 static struct { int size; TTF_Font *f; } s_fc[FC_N];
 static void tc_drop_font(TTF_Font *ft)
 { for(int i=0;i<TEXT_CACHE_SIZE;i++) if(s_tc[i].font==ft){ if(s_tc[i].tex)SDL_DestroyTexture(s_tc[i].tex);
-if (s_tc[i].key)free(s_tc[i].key); s_tc[i].tex=NULL;s_tc[i].key=NULL;s_tc[i].font=NULL;s_tc[i].age=0;s_tc[i].hash=0; }
+if (s_tc[i].s)free(s_tc[i].s); s_tc[i].tex=NULL;s_tc[i].s=NULL;s_tc[i].fg=s_tc[i].bg=0;s_tc[i].font=NULL;s_tc[i].age=0;s_tc[i].hash=0; }
   wc_clear();   /* v2.3: 宽度缓存按字体指针索引, 字体销毁后必须失效 (防指针复用读到旧宽度) */ }
 void fxtk_font_set_size(int size)
 {

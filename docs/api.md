@@ -320,7 +320,7 @@
 
 | 函数 | 用法 |
 |---|---|
-| `fx_path_join(dst,cap,a,b)` | 拼路径（自动处理分隔符），返回写入长度。 |
+| `fx_path_join(dst,cap,a,b)` | 拼路径（自动处理分隔符）：成功返回写入长度；**截断/失败返回 -1**（v2.5.1 起；旧版截断返回正数）。 |
 | `fx_path_basename(path)` / `fx_path_ext(path)` | 取文件名 / 扩展名（返回内部/静态缓冲，勿释放）。 |
 | `fx_path_dir(dst,cap,path)` | 取所在目录。 |
 | `fx_dir_app(dst,cap)` | 应用数据目录（偏好/日志放这里）。 |
@@ -396,6 +396,7 @@
 | `fxtk_win_poll()` / `fxtk_win_quit()` / `fxtk_win_time()` | 事件轮询 / 是否退出 / 单调时间。 |
 | `fxtk_win_screen(&w,&h)` | 屏幕像素尺寸（舞台等比缩放/居中用）。 |
 | `fxtk_win_client_offset(id,&ox,&oy)` | 客户区相对外框偏移（Win32 扣标题栏；X11 返回 0）。 |
+| `fx_root_new()` / `fx_root_select(r)` / `fx_root_active()` | 多窗口控件根（v2.5.2）：每扇窗一棵独立控件树，配合 begin/end 内 `fx_poll()` 使用。 |
 
 > 语义/限制：关闭任意窗口 = 退出；X11 only、主屏、最大 8 窗口、输入事件未转发控件层、真 HiDPI 未验证。
 > 完整设计见 [multi-window.md](multi-window.md)。
@@ -456,7 +457,8 @@
 
 - 控件类型 `FX_W_BUTTON/LABEL/PANEL/CANVAS/SLIDER/PROGRESS/CHECKBOX/TAB/GRID/IMAGE/TEXTEDIT/SCROLL`（见 `FX_W_*` 与 `fx_widget_type()`）。
 - 主题色类型 `fx_colorx_t`（语义色，用 `fx_colorx_current()` 取当前主题值）。
-- 按键 `fx_keyev_t` / `FX_KEY_*`；手势事件 `fx_gesture_ev_t`；日志 `fx_log_level_t`。
+- 按键 `fx_keyev_t`（`mod` 位：**bit0 = Ctrl，bit1 = Shift**，v2.5.1 起核心快捷键只认 bit0）/ `FX_KEY_*`；
+  手势事件 `fx_gesture_ev_t`；日志 `fx_log_level_t`。
 - 图片 `fx_img_t`（解码后）/ `fx_image_t`（框架内图片对象，可写像素）。
 - SVG `fx_svg_t`；flex 条目 `fx_flex_item_t`；目录项 `fx_dir_entry_t`。
 - 多窗口标志 `FXTK_WIN_BORDERLESS`；画布内窗口样式 `FX_WM_LINUX/WIN11/TERM/PLAIN`。

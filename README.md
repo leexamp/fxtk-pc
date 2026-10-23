@@ -1,11 +1,11 @@
-# fxtk — 轻量GUI框架 (v2.5)
+# fxtk — 轻量GUI框架 (v2.5.2)
 
 > ## 📖 ENGLISH VERSION AVAILABLE AT [docs_en/README_en.md](docs_en/README_en.md)
 >
 > **[→ Read this README in English](docs_en/README_en.md)**
 
 <p>
-  <img alt="version" src="https://img.shields.io/badge/version-v2.5-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-v2.5.2-blue">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green">
   <img alt="c" src="https://img.shields.io/badge/language-C99-9cf">
   <img alt="platform" src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20ESP32-lightgrey">
@@ -51,7 +51,37 @@
   **CI 里会跑**，但用 `GOLDEN_TOL=1` 并跳过依赖 SDL/字体版本差异的演示页——即 CI 上不是逐像素口径。
 - **能改得动**：所有控件的颜色/圆角/留白集中在 `fxtk_tokens.h`，换风格只改一个文件。
 
+
+## 当前定位与适用边界（v2.5.2，先读这段）
+
+**能用于什么**：需要"单文件、零第三方运行库"的 C GUI —— 控件层（按钮/滑杆/文本/列表/画布/图片/中文文字/
+抗锯齿/滚动/布局/手势）在 PC 上可用；声明式属性宏写法（`name("ok"), text("确定"), x(20)`…）是主要卖点；
+**多真实窗口**（`-DFXTK_MW`）已打通鼠标/键盘输入闭环（见 [交互 demo](examples/mw_interactive.c)）。
+
+**不能当作什么**：不是 LVGL/ImGui 级完整框架。没有窗口管理器、没有多显示器/HiDPI 实机验证、
+多窗口路径没有剪贴板与输入法、PC 端脏区优化默认未启用（整帧重绘）、CI 金图只覆盖 canvas 示例（容差 1，
+跳过依赖 SDL/字体版本的演示页）。MV 是**渲染演示**，不证明交互；交互证明以 `mw_interactive` 为准。
+
+**已知限制（集中列表）**
+- 多真实窗口：**X11 only**（XWayland 可用）、只覆盖主屏、最多 8 窗口、剪贴板/IME 未实现、
+  窗口被系统拖动/缩放后应用不会收到尺寸变化回调；Win32 与 X11 分别实现，行为需各自验证。
+- 控件层：SDF 抗锯齿在"画布+文字+quadwarp 混排"下有已知观感缺陷（`fx_set_widget_aa` 可切换/关闭）；
+  属性冲突、回调生命周期、percent/grid 优先级见 [docs/syntax.md](docs/syntax.md)。
+- 构建：demo 与交互 demo 已有一键 Makefile 目标；MV 程序也提供 `Makefile`（`make` / `make win`）。
+- 验证口径：`make test` 是无头假驱动契约测试；`make golden` 本地容差 0、CI 容差 1 且跳过演示页。
+
+## v2.5.2 新增
+
+- **多真实窗口输入闭环**：鼠标/键盘/右键菜单/滚轮投递到控件层；每扇窗一棵控件树（`fx_root_new/select`），
+  不再需要"一个窗口一份进程"。交互 demo 一键跑：
+  `make -C demo-main mw_interactive && ./demo-main/mw_interactive`，
+  已验证按钮点击、复选框、滑杆拖动、文本框键盘输入、右键菜单、窗口 raise/move/resize。
+- 构建：demo/交互 demo 用 Makefile 目标（一条命令）；MV 示例程序也提供 `Makefile`（`make` / `make win`）。
+- 文档：新增 [docs/syntax.md](docs/syntax.md)（属性冲突/回调生命周期/布局优先级/命名冲突规则）、
+  [docs/multi-window.md](docs/multi-window.md) 输入与限制更新。
+
 ## v2.5 新增
+
 
 - **多真实窗口后端（实验性，独立编译开关 `-DFXTK_MW`）**：一个进程 / 一个 GL 上下文 / N 个原生窗口，
   Windows WGL + Linux GLX；应用只依赖 `fxtk_win.h`；详见 [docs/multi-window.md](docs/multi-window.md)。
@@ -165,6 +195,11 @@ LICENSE            MIT 许可 (第三方许可见各 vendored 文件头部)
 
 ## 快速开始 (Linux)
 
+    make -C demo-main fxtk_sim          # 单窗口 12 页演示
+    make -C demo-main mw_interactive    # 多真实窗口 + 控件输入闭环 demo
+
+> 两条命令即可跑；不需要手写那一长串 gcc 参数。
+
 ```bash
 # 必要依赖: X11/Xcursor + GL —— 默认后端是 sokol, 不依赖 SDL2
 sudo apt install libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev
@@ -228,6 +263,7 @@ cd demo-main && make package     # 或 ../tools/package_release.sh
 - [docs/internals.md](docs/internals.md) — 内部机制（面向源码修改）
 - [docs/windows.md](docs/windows.md) — Windows 编译
 - [docs/multi-window.md](docs/multi-window.md) — 多真实窗口后端（FXTK_MW）
+- [docs/syntax.md](docs/syntax.md) — 属性/回调/布局优先级与命名规则（语法边界）
 - [docs/window-manager.md](docs/window-manager.md) — 画布内窗口管理器（fxtk_wm）
 
 ## 许可
@@ -249,3 +285,13 @@ MIT（示例与文档同许可）。全文见 [LICENSE](LICENSE)。
 **无显示器的确定性渲染**，SDL 的 `SDL_VIDEODRIVER=dummy` 正好提供这个能力；而 sokol 需要真实
 GL 上下文，CI 里起不来。所以 SDL 驱动现在只当"无头假驱动"用，发布产物一律走 sokol
 （也正因如此，Windows 版才能做到单 exe 无第三方 DLL）。
+
+## AI 参与与验证边界（如实说明）
+
+- 本仓库大量代码由 AI 辅助生成（含多窗口后端、部分控件/绘制、文档）。**"能编译"不等于"边界行为正确"**。
+- 已有测试/证据的：无头契约测试（`make test`）、canvas 金图（`make golden`）、
+  sokol/SDL 双 demo 编译、MV 212s 实际播放、多窗口交互 demo 的 xdotool 自动化点击/键盘/菜单/窗口操作。
+- **未系统验证**的：真实 HiDPI、多显示器、非 ASCII 输入法、剪贴板、跨 WM（GNOME/KWin/xfwm）差异、
+  极端尺寸窗口、长时间运行内存增长。用前请按自己的环境做回归。
+
+

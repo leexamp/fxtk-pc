@@ -13,6 +13,9 @@
 static const char *TAG = "fxtk";
 
 fx_widget_t s_root;
+/* v2.5.2: 多窗口各自一棵控件树。缺省仍指向 &s_root(单窗口行为不变)。 */
+static fx_widget_t *s_act_root = &s_root;
+static fx_widget_t *s_ctxpop=NULL,*s_ctx_te=NULL,*s_ctx_root=NULL;   /* v2.5.2: 右键菜单(属于哪棵控件树) */
 static fx_widget_t s_pool[FX_MAX_WIDGETS];
 static const fx_driver_t *s_drv;
 static fx_widget_t *s_pressed = NULL;
@@ -121,10 +124,14 @@ static int te_para_start(const char*,int);
 static int te_para_end(const char*,int);
 static int widget_in_active_page(fx_widget_t *w)
 {
-    for (fx_widget_t *c = w; c->parent && c->parent != &s_root; c = c->parent)
-        if (c->parent->type == FX_W_TAB)
-            return c->page == c->parent->value;
-    return 1;
+    /* v2.5.2: 同时校验"属于当前活动根"——多窗口时焦点控件可能属于另一扇窗,
+     * 不能把按键/重绘作用到别的窗口的树上。 */
+    for (fx_widget_t *c = w; c; c = c->parent) {
+        if (c->parent == s_act_root) return 1;
+        if (!c->parent) return c == s_act_root;
+        if (c->parent->type == FX_W_TAB && c->page != c->parent->value) return 0;
+    }
+    return 0;
 }
 
 /* ================= 控件池 ================= */
@@ -154,6 +161,37 @@ void fxtk_free(fx_widget_t *w)
 void fxtk_link(fx_widget_t *parent, fx_widget_t *child)
 { child->parent = parent; child->sibling = parent->child; parent->child = child; }
 void fx_parent(fx_widget_t *p) { s_parent = p; }
+
+/* ================= v2.5.2: 多窗口控件根 =================
+ * 单窗口应用不需要这些: 缺省根即 &s_root(与旧版完全一致)。
+ * 多真实窗口(FXTK_MW)时, 每个窗口一棵独立的控件树:
+ *   fx_widget_t *r = fx_root_new();
+ *   fx_root_select(r);  fx_parent(r);  ... 建控件 ...
+ *   // 每帧, 在该窗口 begin/end 之间: fx_root_select(r); fx_poll();  (输入/绘制都只作用于这棵树)
+ * 这样同一份控件 API 才能安全地服务多扇窗, 而不是让所有窗口共用一棵全局树。 */
+fx_widget_t *fx_root_new(void)
+{
+    fx_widget_t *r = fxtk_alloc();
+    if (!r) return NULL;
+    r->type = FX_W_PANEL;
+    r->flags = FX_F_VISIBLE;
+    r->bg = s_bg;
+    r->pos_mode = FX_POS_PIXEL;
+    return r;
+}
+void fx_root_select(fx_widget_t *r)
+{
+    if (r == s_act_root) return;
+    fx_widget_t *old = s_act_root;
+    s_act_root = r ? r : &s_root;
+    if (old && old != &s_root) { /* 离开旧根: 清掉属于旧根的悬垂焦点/按压态 */ }
+    /* v2.5.2: 不清 s_focus/s_pressed —— 每帧会为每扇窗轮流 select, 清了的话
+     * 焦点和"按下/抬起跨帧"就永远保不住; 归属检查由 widget_in_active_page 负责。
+     * 只清指向另一棵树的拖拽状态; 右键菜单只在切到别的根的 owner 时关(见下)。 */
+    s_scroll_drag = NULL;   /* 右键菜单不在这里关: 每帧会轮流 select 每扇窗, 关了等于永远弹不出来 */
+    fx_layout(); fx_repaint();
+}
+fx_widget_t *fx_root_active(void) { return s_act_root; }
 
 /* ================= v2.6: 多窗口需要的 z 序控制 =================
  * 绘制顺序 = 子链表的遍历顺序(child 先画); fxtk_link 是头插(最后 link 的最先画 = 最底),
@@ -311,7 +349,7 @@ fx_widget_t *fx_widget_new_impl(int type, fx_attr_t attrs[])
         default: break;
         }
     }
-    fxtk_link(w->grid_ref ? w->grid_ref : (s_parent ? s_parent : &s_root), w);
+    fxtk_link(w->grid_ref ? w->grid_ref : (s_parent ? s_parent : s_act_root), w);
     if (type == FX_W_TEXTEDIT) {
         w->text_cap = 128; w->text_buf = (char*)malloc(128);
         if (w->text_buf) { memcpy(w->text_buf, w->title, 127); w->text_buf[127]=0; }
@@ -334,6 +372,7 @@ fx_widget_t *fx_find(const char *n)
 static void unlink_free(fx_widget_t *w)
 {
     if (!w || w == &s_root) return;
+    if (w == s_act_root) { fx_log(FX_LOG_WARN, "不能删除当前活动窗口根 (先 select 到别的根)"); return; }
     if (w->parent) { fx_widget_t **pp=&w->parent->child; 
     while(*pp && *pp!=w) pp=&(*pp)->sibling;
     if (*pp) *pp=w->sibling; }
@@ -348,6 +387,7 @@ static void unlink_free(fx_widget_t *w)
     for (int i = 0; i < FX_MAX_SCROLL_STATES; i++)
         if (s_scroll_pool[i].w == w) memset(&s_scroll_pool[i], 0, sizeof(s_scroll_pool[i]));
     fxtk_extra_forget(w);   /* v2.3.1: 清 list/drop 模块按指针索引的槽位 (防池复用悬垂) */
+    fxtk_anim_forget(w);    /* v2.5.1(M5): 清按钮/进度/标签页动画槽 (防池复用继承旧动画) */
     if (w->text_buf) { free(w->text_buf); w->text_buf=NULL; }
     if (w->offbuf) { free(w->offbuf); w->offbuf=NULL; }
     fxtk_free(w);
@@ -401,7 +441,7 @@ static void clamp_ctrl(fx_widget_t *c){
 void fxtk_apply_fit(fx_widget_t *w){   /* 绘制期幂等fit: 从父+设计坐标现算, 无反馈 */
     if(!(w->flags&FX_F_FIT) || w->pos_mode!=FX_POS_PIXEL) return;
     if (s_sx1000<=1000 && s_sy1000<=1000) return;
-    fx_widget_t *p = w->parent ? w->parent : &s_root;
+    fx_widget_t *p = w->parent ? w->parent : s_act_root;
     int rx1=p->x1+(int32_t)w->ox1*s_sx1000/1000, ry1=p->y1+(int32_t)w->oy1*s_sy1000/1000;
     int rx2=p->x1+(int32_t)w->ox2*s_sx1000/1000, ry2=p->y1+(int32_t)w->oy2*s_sy1000/1000;
     int csx=s_sx1000>s_maxscale1000?s_maxscale1000:s_sx1000;
@@ -415,10 +455,11 @@ static void layout_children(fx_widget_t *p);
 void fx_layout(void)
 {
     if (!s_drv) return;
-    s_root.x1=0; s_root.y1=0; s_root.x2=(int16_t)(s_drv->width-1); s_root.y2=(int16_t)(s_drv->height-1);
+    if (!s_act_root) s_act_root = &s_root;
+    s_act_root->x1=0; s_act_root->y1=0; s_act_root->x2=(int16_t)(s_drv->width-1); s_act_root->y2=(int16_t)(s_drv->height-1);
     s_sx1000 = (int)((int32_t)s_drv->width*1000/FX_DESIGN_W);
     s_sy1000 = (int)((int32_t)s_drv->height*1000/FX_DESIGN_H);
-    layout_children(&s_root);
+    layout_children(s_act_root);
 }
 static void layout_children(fx_widget_t *p)
 {
@@ -485,7 +526,7 @@ static fx_widget_t *hit_test(fx_widget_t *w, int x, int y)
     for (fx_widget_t *c=w->child; c && !r; c=c->sibling)
         if (c->flags & FX_F_VISIBLE) r = hit_test(c, x, y);
         if (r) return r;
-        if (!(w->flags & FX_F_VISIBLE) || w==&s_root) return NULL;
+        if (!(w->flags & FX_F_VISIBLE) || w==s_act_root) return NULL;
         if (w->type==FX_W_GRID || w->type==FX_W_PANEL || w->type==FX_W_SCROLL) return NULL;
         if (x>=w->x1 && x<=w->x2 && y>=w->y1 && y<=w->y2) return w;
     return NULL;
@@ -494,13 +535,14 @@ static fx_widget_t *hit_test(fx_widget_t *w, int x, int y)
 /* ================= 触摸事件 ================= */
 void fx_touch_press(int x, int y)
 {
+    if (s_ctx_open && s_ctx_root != s_act_root) { if (s_ctxpop) fx_set_visible(s_ctxpop, 0); s_ctx_open = 0; s_ctx_te = NULL; }
     if(s_ctx_open&&s_ctxpop){ int x1,y1,x2,y2; fx_widget_rect(s_ctxpop,&x1,&y1,&x2,&y2);
     if (x>=x1&&x<=x2&&y>=y1&&y<=y2){ int rh=(y2-y1)/5; int idx=(y-y1)/rh;
     if (idx<0)idx=0;
     if (idx>4)idx=4; ctx_do(idx); } else { fx_set_visible(s_ctxpop,0); s_ctx_open=0; fx_repaint(); }
       return; }
 
-    s_pressed = hit_test(&s_root, x, y);
+    s_pressed = hit_test(s_act_root, x, y);
     if (s_pressed && (s_pressed->type==FX_W_TEXTEDIT || s_pressed->type==FX_W_SCROLL || s_pressed->type==FX_W_CANVAS)
         && s_pressed->content_h > (s_pressed->y2 - s_pressed->y1)
         && x >= s_pressed->x2 - 6) {
@@ -518,7 +560,7 @@ void fx_touch_press(int x, int y)
 }
 void fx_touch_release(int x, int y)
 {
-    fx_widget_t *w = hit_test(&s_root, x, y);
+    fx_widget_t *w = hit_test(s_act_root, x, y);
     fx_widget_t *p = s_pressed;
     s_pressed = NULL; s_scroll_drag = NULL;
     if (p) {
@@ -737,13 +779,13 @@ void fxtk_draw_all(void)
 {
     if (!s_drv) return;
     fx_set_color(s_bg); fx_fill_rect(0,0,s_drv->width-1,s_drv->height-1);
-    draw_widget(&s_root,0,0,s_drv->width-1,s_drv->height-1);
+    draw_widget(s_act_root,0,0,s_drv->width-1,s_drv->height-1);
     fx_reset_clip();
-    if (s_ctx_open) ctx_draw_abs();
+    if (s_ctx_open && s_ctx_root == s_act_root) ctx_draw_abs();   /* v2.5.2: 菜单只在它所属窗口画 */
     draw_debug_overlay();
 }
 static void redraw_region(int x1,int y1,int x2,int y2)
-{ fx_set_color(s_bg); fx_fill_rect(x1,y1,x2,y2); draw_widget(&s_root,x1,y1,x2,y2); }
+{ fx_set_color(s_bg); fx_fill_rect(x1,y1,x2,y2); draw_widget(s_act_root,x1,y1,x2,y2); }
 static void draw_canvas_only(fx_widget_t *w)
 {
     /* v2.4.4: 与 draw_widget_inner 一致地做几何门槛 —— 此前这条路径只查可见标志, 退化矩形
@@ -783,8 +825,8 @@ static void draw_canvas_only(fx_widget_t *w)
 #endif
     for (fx_widget_t *c=w->child;c;c=c->sibling) draw_canvas_only(c);
 }
-void fxtk_draw_canvases(void) { if (!s_drv) return; draw_canvas_only(&s_root);
-if (s_ctx_open) { fx_reset_clip(); ctx_draw_abs(); } draw_debug_overlay(); fxtk_draw_flush_all(); }
+void fxtk_draw_canvases(void) { if (!s_drv) return; draw_canvas_only(s_act_root);
+if (s_ctx_open && s_ctx_root == s_act_root) { fx_reset_clip(); ctx_draw_abs(); } draw_debug_overlay(); fxtk_draw_flush_all(); }
 
 /* ================= 系统 API ================= */
 void fx_init(const fx_driver_t *drv)
@@ -795,6 +837,7 @@ void fx_init(const fx_driver_t *drv)
      * 于是该开关对任何应用都成立(显式调用 fx_set_widget_aa 仍然优先, 因为在那之后执行)。 */
     { const char *aa = getenv("FXTK_AA"); if (aa && aa[0]) fx_set_widget_aa(atoi(aa)); }    s_drv=drv; fxtk_draw_set_driver(drv);
     memset(&s_root,0,sizeof(s_root)); s_root.type=FX_W_PANEL; s_root.flags=FX_F_VISIBLE; s_root.bg=s_bg;
+    s_act_root = &s_root;   /* v2.5.2: 重新初始化回到单窗口缺省根 */
     memset(s_pool,0,sizeof(s_pool));
     fxtk_anim_reset();   /* v2.4.4: 四张动画槽表也清零, 避免地址复用后继承死控件状态 */
     memset(s_wipe, 0, sizeof s_wipe);
@@ -815,7 +858,7 @@ void fx_poll(void)
     if (s_drv->wheel_read) {
         int wx,wy,dy;
         while (s_drv->wheel_read(&wx,&wy,&dy)) {
-            fx_widget_t *t = hit_test(&s_root,wx,wy);
+            fx_widget_t *t = hit_test(s_act_root,wx,wy);
             while (t && t->type != FX_W_SCROLL && t->type != FX_W_TEXTEDIT && t->type != FX_W_CANVAS) t = t->parent;
             if (t) {
                 if (t->type == FX_W_CANVAS) {
@@ -878,8 +921,8 @@ void fx_poll(void)
     if(!s_ctxpop){ s_ctxpop=fx_canvas_new(pixel("-2000,-2000","-1900,-1900"),color(FX_WHITE));
     if (s_ctxpop){ fx_set_cb(s_ctxpop,ctx_draw,0); s_ctxpop->pos_mode=FX_POS_FIXED; s_ctxpop->page=-1; fx_set_visible(s_ctxpop,0); } }
     { int rx,ry;
-    if (fxtk_right_click(&rx,&ry)){ fx_widget_t *hw=hit_test(&s_root,rx,ry);
-    if (hw&&hw->type==FX_W_TEXTEDIT){ s_ctx_te=hw; s_ctx_open=1; s_ctx_hl=-1; int mw=64,mh=5*24;
+    if (fxtk_right_click(&rx,&ry)){ fx_widget_t *hw=hit_test(s_act_root,rx,ry);
+    if (hw&&hw->type==FX_W_TEXTEDIT){ s_ctx_te=hw; s_ctx_root=s_act_root; s_ctx_open=1; s_ctx_hl=-1; int mw=64,mh=5*24;
     if (rx+mw>fx_width())rx=fx_width()-mw;
     if (ry+mh>fx_height())ry=fx_height()-mh;
     if (rx<0)rx=0;
@@ -890,7 +933,7 @@ void fx_poll(void)
             s_last_key=ev;
             if (s_focus && s_focus->type==FX_W_TEXTEDIT && ev.down && widget_in_active_page(s_focus)) {
                 int ro=(s_focus->flags&FX_F_READONLY);
-                if (ev.mod && ev.utf8[0]) {
+                if ((ev.mod & 1) && ev.utf8[0]) {   /* v2.5.1(H2): 只有 Ctrl 位才进快捷键; Shift 位(mod&2)只作选择用 */
                     char c=ev.utf8[0]|32; int a,b;
                     if (c=='a') { s_focus->anchor=0; s_focus->caret=te_len(s_focus); }
                     else if (c=='l' && !ro) { if(s_focus->text_buf) s_focus->text_buf[0]=0; s_focus->caret=0; s_focus->anchor=0; }   /* Ctrl+L 清空 (v2.3.1: 只读时禁止) */
@@ -899,7 +942,7 @@ void fx_poll(void)
                         if (n>4095)n=4095; memcpy(cb,s_focus->text_buf+a,(size_t)n); cb[n]=0; s_drv->clip_set(cb); }
                         if (c=='x' && !ro && te_sel(s_focus,&a,&b)) te_del_range2(s_focus,a,b);   /* v2.3.1: 只读时禁止剪切删除 */
                     }
-                    else if (c=='v' && s_drv->clip_get) te_insert(s_focus,s_drv->clip_get());
+                    else if (c=='v' && !ro && s_drv->clip_get) te_insert(s_focus,s_drv->clip_get());   /* v2.5.1(H1): 只读禁止粘贴 */
                 } else if (ev.utf8[0]&&!ro) te_insert(s_focus,ev.utf8);
                 else if (ev.key==FX_KEY_RETURN&&!ro) te_insert(s_focus,"\n");   /* 换行 */
                 else if (ev.key==FX_KEY_BACKSPACE&&!ro) { int a,b;
@@ -1065,7 +1108,7 @@ static void te_caret_scroll(fx_widget_t *w){
     if (w->scroll_y<0)w->scroll_y=0;
 }
 
-static fx_widget_t *s_ctxpop=NULL,*s_ctx_te=NULL;
+/* v2.5.2: s_ctxpop/s_ctx_te/s_ctx_root 已提前声明在文件顶部 (root_select 要用) */
 static void ctx_do(int idx){ fx_widget_t *w=s_ctx_te;
 if (!w)return; int a,b; int ro=(w->flags&FX_F_READONLY);
 if (idx==0){ if(te_sel(w,&a,&b)&&s_drv->clip_set){ static char cb[4096]; int n=b-a;

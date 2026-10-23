@@ -258,7 +258,7 @@ int fx_path_join(char *dst, int cap, const char *a, const char *b)
     int need_sep = al > 0 && !is_sep(a[al - 1]) && b[0] && !is_sep(b[0]);
     int n = snprintf(dst, (size_t)cap, "%s%s%s", a, need_sep ? "/" : "", b);
     if (n < 0) { dst[0] = 0; return -1; }
-    if (n >= cap) { dst[cap - 1] = 0; return cap - 1; }
+    if (n >= cap) { dst[cap - 1] = 0; return -1; }   /* v2.5.1(L1): 截断不再伪装成功 */
     return n;
 }
 
@@ -743,7 +743,7 @@ int fx_prefs_save(void)
 {
     char dir[512], path[600];
     if (!fx_dir_app(dir, sizeof(dir))) return 0;
-    if (!fx_path_join(path, sizeof(path), dir, "fxtk_prefs.ini")) return 0;
+    if (fx_path_join(path, sizeof(path), dir, "fxtk_prefs.ini") < 0) return 0;   /* v2.5.1(L1): 截断返回 -1 */
     char blob[PREFS_MAX * 200];
     int off = 0;
     for (int i = 0; i < s_prefs_n; i++)
@@ -755,7 +755,7 @@ int fx_prefs_load(void)
 {
     char dir[512], path[600];
     if (!fx_dir_app(dir, sizeof(dir))) return 0;
-    if (!fx_path_join(path, sizeof(path), dir, "fxtk_prefs.ini")) return 0;
+    if (fx_path_join(path, sizeof(path), dir, "fxtk_prefs.ini") < 0) return 0;   /* v2.5.1(L1): 截断返回 -1 */
     int size = 0;
     char *blob = (char *)fx_file_read(path, &size);
     if (!blob) return 0;

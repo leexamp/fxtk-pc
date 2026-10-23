@@ -22,25 +22,118 @@ extern void fxtk_font_init(const char *font_path, int size);
 
 #define FXTK_MW_MAX 8
 
+/* ================= v2.5.2: 多窗口输入 =================
+ * 不直接把原生事件塞进驱动队列 —— 因为一帧里会依次 poll 每扇窗, 直接塞会把 A 窗的事件
+ * 带到 B 窗。这里按窗口暂存, 在 b_begin(id) 时(且驱动队列为空时)一次性投递给 fxtk 驱动,
+ * 应用随后在该窗口 begin/end 之间调 fx_poll(), 控件层就能像单窗口一样收到鼠标/键盘。 */
+#define MW_PEND_MAX 128
+enum { MWP_TOUCH = 0, MWP_MOVE = 1, MWP_WHEEL = 2, MWP_KEY = 3, MWP_RCLICK = 4 };
+typedef struct { int kind, a, b, c, d; fx_keyev_t key; } mwpend_t;
+static mwpend_t s_pend[FXTK_MW_MAX][MW_PEND_MAX];
+static int s_pend_n[FXTK_MW_MAX];
+static void mw_pend_push(int id, int kind, int a, int b, int c, int d, const fx_keyev_t *key)
+{
+    if (id < 0 || id >= FXTK_MW_MAX) return;
+    if (s_pend_n[id] >= MW_PEND_MAX) return;
+    mwpend_t *e = &s_pend[id][s_pend_n[id]++];
+    e->kind = kind; e->a = a; e->b = b; e->c = c; e->d = d;
+    if (key) e->key = *key;
+}
+static void mw_pend_flush(int id)
+{
+    if (id < 0 || id >= FXTK_MW_MAX) return;
+    { static int dbg = -1; if (dbg < 0) dbg = getenv("FXTK_MW_DEBUG") ? 1 : 0;
+      if (dbg && s_pend_n[id]) fprintf(stderr, "[mw] flush win=%d n=%d\n", id, s_pend_n[id]); }
+    /* v2.5.2: 核心 fx_poll 每帧只消费 1 个 touch 事件(if, 不是 while)。若一次投递 press+release,
+     * release 会残留到下一扇窗的 fx_poll 里被错误命中 —— 表现为"点了没反应"。
+     * 这里每帧最多投 1 个 touch 类事件, 其余留在队里下一帧继续; 键盘/滚轮是 while 消费, 全投。 */
+    int touches = 0, keep = 0;
+    int blocked = fxtk_sokol_input_touch_pending();   /* 上一帧的 touch 还没被消费: 先投键盘/滚轮/右键 */
+    for (int i = 0; i < s_pend_n[id]; i++) {
+        mwpend_t *e = &s_pend[id][i];
+        int is_touch = (e->kind == MWP_TOUCH || e->kind == MWP_MOVE);
+        if (is_touch && (blocked || touches >= 1)) { s_pend[id][keep++] = *e; continue; }
+        if (is_touch) touches++;
+        if (e->kind == MWP_TOUCH)      fxtk_sokol_input_touch(e->a, e->b, e->c);
+        else if (e->kind == MWP_MOVE)  fxtk_sokol_input_touch_move(e->a, e->b, e->c);
+        else if (e->kind == MWP_WHEEL) fxtk_sokol_input_wheel(e->a, e->b, e->c);
+        else if (e->kind == MWP_KEY)   fxtk_sokol_input_key(&e->key);
+        else if (e->kind == MWP_RCLICK) fxtk_sokol_input_right_click(e->a, e->b);
+    }
+    s_pend_n[id] = keep;
+}
+
 #ifdef _WIN32
 /* ============================== Windows / WGL ============================== */
 #include <windows.h>
 #include <GL/gl.h>
 static HGLRC s_ctx; static HDC s_dc0; static int s_pf = 0; static PIXELFORMATDESCRIPTOR s_pfd;
 static int s_quit = 0;
+static int mw_id_of_hwnd(HWND h);   /* 定义在 W[] 之后 */
 static LRESULT CALLBACK mw_wndproc(HWND hw, UINT msg, WPARAM wp, LPARAM lp)
 {
+    int id = mw_id_of_hwnd(hw);
     switch (msg) {
     case WM_CLOSE:     s_quit = 1; return 0;        /* 关闭任一窗口 = 退出整个程序 */
     case WM_DESTROY:   PostQuitMessage(0); return 0;
-    case WM_KEYDOWN:   if (wp == VK_ESCAPE) s_quit = 1; return 0;
     case WM_ERASEBKGND: return 1;
+    case WM_KEYDOWN: {
+        if (wp == VK_ESCAPE) { s_quit = 1; return 0; }
+        int mod = ((GetKeyState(VK_CONTROL) & 0x8000) ? 1 : 0) | ((GetKeyState(VK_SHIFT) & 0x8000) ? 2 : 0);
+        int kc = 0;
+        switch (wp) {
+        case VK_BACK: kc = FX_KEY_BACKSPACE; break;
+        case VK_RETURN: kc = FX_KEY_RETURN; break;
+        case VK_LEFT: kc = FX_KEY_LEFT; break;
+        case VK_RIGHT: kc = FX_KEY_RIGHT; break;
+        case VK_UP: kc = FX_KEY_UP; break;
+        case VK_DOWN: kc = FX_KEY_DOWN; break;
+        case VK_HOME: kc = FX_KEY_HOME; break;
+        case VK_END: kc = FX_KEY_END; break;
+        case VK_DELETE: kc = FX_KEY_DELETE; break;
+        default: break;
+        }
+        fx_keyev_t ke; memset(&ke, 0, sizeof ke); ke.down = 1; ke.mod = mod;
+        if (kc) { ke.key = kc; mw_pend_push(id, MWP_KEY, 0, 0, 0, 0, &ke); }
+        else if (mod & 1) {   /* Ctrl+C/V/X/A/L 快捷键 (字符输入走 WM_CHAR) */
+            char c = 0;
+            if (wp >= 'A' && wp <= 'Z') { c = (char)(wp - 'A' + 'a'); if (!strchr("cvxal", c)) c = 0; }
+            if (c) { ke.utf8[0] = c; mw_pend_push(id, MWP_KEY, 0, 0, 0, 0, &ke); }
+        }
+        return 0;
+    }
+    case WM_CHAR: {
+        if (wp < 32 || (GetKeyState(VK_CONTROL) & 0x8000)) return 0;
+        wchar_t wc = (wchar_t)wp; char u8[8]; int n = WideCharToMultiByte(CP_UTF8, 0, &wc, 1, u8, (int)sizeof u8, NULL, NULL);
+        if (n > 0 && n < (int)sizeof u8) {
+            fx_keyev_t ke; memset(&ke, 0, sizeof ke); ke.down = 1;
+            memcpy(ke.utf8, u8, (size_t)n); ke.utf8[n] = 0;
+            mw_pend_push(id, MWP_KEY, 0, 0, 0, 0, &ke);
+        }
+        return 0;
+    }
+    case WM_MOUSEMOVE:
+        mw_pend_push(id, MWP_MOVE, (int)(short)LOWORD(lp), (int)(short)HIWORD(lp), (wp & MK_LBUTTON) ? 1 : 0, 0, NULL);
+        return 0;
+    case WM_LBUTTONDOWN:
+        mw_pend_push(id, MWP_TOUCH, (int)(short)LOWORD(lp), (int)(short)HIWORD(lp), 1, 0, NULL); return 0;
+    case WM_LBUTTONUP:
+        mw_pend_push(id, MWP_TOUCH, (int)(short)LOWORD(lp), (int)(short)HIWORD(lp), 0, 0, NULL); return 0;
+    case WM_RBUTTONDOWN:
+        mw_pend_push(id, MWP_RCLICK, (int)(short)LOWORD(lp), (int)(short)HIWORD(lp), 0, 0, NULL); return 0;
+    case WM_MOUSEWHEEL: {
+        POINT pt; pt.x = (int)(short)LOWORD(lp); pt.y = (int)(short)HIWORD(lp);
+        ScreenToClient(hw, &pt);
+        mw_pend_push(id, MWP_WHEEL, pt.x, pt.y, (int)(short)HIWORD(wp) / 120 * 40, 0, NULL);
+        return 0;
+    }
     }
     return DefWindowProcW(hw, msg, wp, lp);   /* 窗口是 Unicode 的, 必须用 W 版默认过程 */
 }
 typedef struct { HWND hw; HDC dc; int w, h, shown; } mwwin_t;
 static mwwin_t W[FXTK_MW_MAX]; static int NW_ = 0, s_cur = -1;
 static int s_inited = 0;
+static int mw_id_of_hwnd(HWND h) { for (int i = 0; i < NW_; i++) if (W[i].hw == h) return i; return -1; }
 
 int fxtk_mw_init(void)
 {
@@ -173,6 +266,38 @@ static GLXContext ctx; static GLXFBConfig *fbc; static XVisualInfo *vi;
 static Colormap cmap; static Atom wm_delete;
 static mwwin_t W[FXTK_MW_MAX]; static int NW_ = 0, s_cur = -1, s_quit = 0, s_inited = 0;
 static double now_s(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return ts.tv_sec + ts.tv_nsec * 1e-9; }
+static int mw_id_of_window(Window w) { for (int i = 0; i < NW_; i++) if (W[i].win == w) return i; return -1; }
+static void x11_key_event(int id, XKeyEvent *ke, int mod)
+{
+    KeySym ks = XLookupKeysym(ke, 0);
+    fx_keyev_t ev; memset(&ev, 0, sizeof ev); ev.down = 1; ev.mod = mod;
+    int kc = 0;
+    switch (ks) {
+    case XK_BackSpace: kc = FX_KEY_BACKSPACE; break;
+    case XK_Return: case XK_KP_Enter: kc = FX_KEY_RETURN; break;
+    case XK_Left: kc = FX_KEY_LEFT; break;
+    case XK_Right: kc = FX_KEY_RIGHT; break;
+    case XK_Up: kc = FX_KEY_UP; break;
+    case XK_Down: kc = FX_KEY_DOWN; break;
+    case XK_Home: kc = FX_KEY_HOME; break;
+    case XK_End: kc = FX_KEY_END; break;
+    case XK_Delete: kc = FX_KEY_DELETE; break;
+    default: break;
+    }
+    if (kc) { ev.key = kc; mw_pend_push(id, MWP_KEY, 0, 0, 0, 0, &ev); return; }
+    if (mod & 1) {
+        char c = 0;
+        if (ks >= XK_a && ks <= XK_z) { c = (char)ks; if (!strchr("cvxal", c)) c = 0; }
+        if (c) { ev.utf8[0] = c; mw_pend_push(id, MWP_KEY, 0, 0, 0, 0, &ev); }
+        return;
+    }
+    char buf[8]; KeySym dummy;
+    int n = XLookupString(ke, buf, (int)sizeof buf, &dummy, NULL);
+    if (n > 0 && n < (int)sizeof buf && (unsigned char)buf[0] >= 32) {
+        memcpy(ev.utf8, buf, (size_t)n); ev.utf8[n] = 0;
+        mw_pend_push(id, MWP_KEY, 0, 0, 0, 0, &ev);
+    }
+}
 
 int fxtk_mw_init(void)
 {
@@ -236,7 +361,8 @@ int fxtk_mw_window_create(const fxtk_mw_desc *d)
     int i = NW_++;
     XSetWindowAttributes swa; memset(&swa, 0, sizeof swa);
     swa.colormap = cmap; swa.background_pixel = 0; swa.border_pixel = 0;
-    swa.event_mask = ExposureMask | StructureNotifyMask;
+    swa.event_mask = ExposureMask | StructureNotifyMask | ButtonPressMask | ButtonReleaseMask |
+                     PointerMotionMask | KeyPressMask | KeyReleaseMask | FocusChangeMask;
     swa.override_redirect = (d->flags & FXTK_MW_BORDERLESS) ? True : False;
     Window w = XCreateWindow(dpy, RootWindow(dpy, scr), d->x, d->y, (unsigned)d->w, (unsigned)d->h,
         0, vi->depth, InputOutput, vi->visual,
@@ -280,11 +406,35 @@ sg_environment fxtk_mw_environment(void)
 }
 void fxtk_mw_poll(void)
 {
+    static int dbg = -1;
+    if (dbg < 0) dbg = getenv("FXTK_MW_DEBUG") ? 1 : 0;
     while (XPending(dpy)) {
         XEvent e; XNextEvent(dpy, &e);
-        if (e.type == ClientMessage && (Atom)e.xclient.data.l[0] == wm_delete) s_quit = 1;
-        if (e.type == DestroyNotify) s_quit = 1;
-        if (e.type == KeyPress) { if (XLookupKeysym(&e.xkey, 0) == XK_Escape) s_quit = 1; }
+        if (dbg) fprintf(stderr, "[mw] ev type=%d win=%lu\n", e.type, (unsigned long)e.xany.window);
+        if (e.type == ClientMessage && (Atom)e.xclient.data.l[0] == wm_delete) { s_quit = 1; continue; }
+        if (e.type == DestroyNotify) { s_quit = 1; continue; }
+        int id = mw_id_of_window(e.xany.window);
+        if (id < 0) continue;
+        int mod = ((e.xkey.state & ControlMask) ? 1 : 0) | ((e.xkey.state & ShiftMask) ? 2 : 0);
+        switch (e.type) {
+        case KeyPress:
+            if (XLookupKeysym(&e.xkey, 0) == XK_Escape) { s_quit = 1; break; }
+            x11_key_event(id, &e.xkey, mod);
+            break;
+        case ButtonPress:
+            if (e.xbutton.button == Button3) mw_pend_push(id, MWP_RCLICK, e.xbutton.x, e.xbutton.y, 0, 0, NULL);
+            else if (e.xbutton.button == Button4 || e.xbutton.button == Button5)
+                mw_pend_push(id, MWP_WHEEL, e.xbutton.x, e.xbutton.y, e.xbutton.button == Button4 ? 40 : -40, 0, NULL);
+            else if (e.xbutton.button == Button1) mw_pend_push(id, MWP_TOUCH, e.xbutton.x, e.xbutton.y, 1, 0, NULL);
+            break;
+        case ButtonRelease:
+            if (e.xbutton.button == Button1) mw_pend_push(id, MWP_TOUCH, e.xbutton.x, e.xbutton.y, 0, 0, NULL);
+            break;
+        case MotionNotify:
+            mw_pend_push(id, MWP_MOVE, e.xmotion.x, e.xmotion.y, (e.xmotion.state & Button1Mask) ? 1 : 0, 0, NULL);
+            break;
+        default: break;
+        }
     }
 }
 int fxtk_mw_quit_requested(void) { return s_quit; }
@@ -324,6 +474,9 @@ static void b_begin(int id)
     /* 关键: 在该窗口绘制前就把驱动的屏幕尺寸切过来,
      * 否则文本纹理槽/像素层仍按上一个窗口的尺寸分配 → 文字错位/花屏 */
     fxtk_sokol_apply_size(fxtk_mw_width(id), fxtk_mw_height(id));
+    /* v2.5.2: 把本窗口暂存的输入投递给控件层 —— 键盘/滚轮/右键总是投, touch 类
+     * 若上一帧还有残留则留在本窗口队里(防串窗), 不阻塞其它类型(否则连续 mousemove 会让键盘饿死) */
+    mw_pend_flush(id);
 }
 static void b_end(int id)
 {

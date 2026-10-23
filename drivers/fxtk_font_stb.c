@@ -23,6 +23,7 @@
 /* 框架钩子 (fxtk_draw.c 提供) */
 extern int  fxtk_is_offing(void);
 extern void fxtk_put_px(int x, int y, uint32_t c);
+extern void fxtk_put_px_alpha(int x, int y, uint32_t c, int a);   /* v2.5.1(H3) */
 extern void fxtk_text_blit(void *tex, int x, int y, int w, int h);
 
 #define FONT_MAX  8
@@ -208,9 +209,12 @@ static unsigned char *rasterize(font_t *f, const char *s, fx_color_t fg, fx_colo
     /* 字节序(2026-09 修正): sokol 的 SG_PIXELFORMAT_RGBA8 是标准 RGBA 布局 —— 内存第 0 字节 = R。
      * 以前这里按 B,G,R 写(说是"实测"), 那是被回读路径的双重互换骗了: 结果彩色文字/彩色底反色
      * (蓝字变橙字), 而且与顶点色互相矛盾。纹理与顶点现在统一成【byte0 = R】。 */
-    for (int i = 0; i < w * h; i++) {
-        px[i*4+0] = br; px[i*4+1] = bgc; px[i*4+2] = bb;
-        px[i*4+3] = nobg ? 0 : 255;
+    if (nobg) {
+        /* v2.5.1(H3): 透明底像素存【前景色】+ alpha=0; 离屏路径按 alpha 做 src-over,
+         * 不再把背景色 RGB 写进缓冲(旧行为会让透明底变成实心色块)。 */
+        for (int i = 0; i < w * h; i++) { px[i*4+0] = fr; px[i*4+1] = fgc; px[i*4+2] = fb; px[i*4+3] = 0; }
+    } else {
+        for (int i = 0; i < w * h; i++) { px[i*4+0] = br; px[i*4+1] = bgc; px[i*4+2] = bb; px[i*4+3] = 255; }
     }
 
     int baseline = (int)(f->ascent * f->scale + 0.5f) + 1;
@@ -252,16 +256,23 @@ static unsigned char *rasterize(font_t *f, const char *s, fx_color_t fg, fx_colo
     return px;
 }
 
+/* v2.5.1(M4): 缓存键用 64 位 FNV-1a(字符串+字号+前景+背景) 的定长十六进制,
+ * 不再 snprintf("%s") 截断到 256 字节 —— 两个长前缀字符串不会再共用同一张纹理。 */
+static void tc_make_key(char out[32], font_t *f, const char *s, fx_color_t fg, fx_color_t bg)
+{
+    uint64_t h = 1469598103934665603ULL;
+    for (const unsigned char *p = (const unsigned char *)s; *p; p++) { h ^= *p; h *= 1099511628211ULL; }
+    h ^= (uint64_t)(unsigned)(f ? f->size : 0) * 1099511628211ULL;
+    h ^= (uint64_t)(unsigned)fg * 1099511628211ULL;
+    h ^= (uint64_t)(unsigned)bg * 1099511628211ULL;
+    snprintf(out, 32, "%016llx", (unsigned long long)h);
+}
 static tc_t *tc_find(font_t *f, const char *s, fx_color_t fg, fx_color_t bg)
 {
+    char key[32];
+    tc_make_key(key, f, s, fg, bg);
     for (int i = 0; i < TC_MAX; i++)
-        if (s_tc[i].key && s_tc[i].f == f && strcmp(s_tc[i].key, s) == 0 &&
-            s_tc[i].w == 0 /* 占位 */ ) { }
-    /* 键里必须含颜色: 用组合键比较 */
-    char key[256];
-    snprintf(key, sizeof(key), "%d|%06x|%06x|%s", f ? f->size : 0, (unsigned)fg, (unsigned)bg, s);
-    for (int i = 0; i < TC_MAX; i++)
-        if (s_tc[i].key && strcmp(s_tc[i].key, key) == 0) { s_tc[i].age = ++s_clock; return &s_tc[i]; }
+        if (s_tc[i].key && s_tc[i].f == f && strcmp(s_tc[i].key, key) == 0) { s_tc[i].age = ++s_clock; return &s_tc[i]; }
     return NULL;
 }
 
@@ -282,7 +293,11 @@ static void draw_pixels_offscreen(const unsigned char *px, int w, int h, int x, 
     for (int j = 0; j < h; j++)
         for (int i = 0; i < w; i++) {
             const unsigned char *p = &px[((size_t)j * w + i) * 4];
-            fxtk_put_px(x + i, y + j, ((uint32_t)p[0] << 16) | ((uint32_t)p[1] << 8) | p[2]);
+            unsigned a = p[3];
+            if (!a) continue;                                    /* v2.5.1(H3): 透明像素不写 */
+            uint32_t rgb = ((uint32_t)p[0] << 16) | ((uint32_t)p[1] << 8) | p[2];
+            if (a >= 255) fxtk_put_px(x + i, y + j, rgb);
+            else fxtk_put_px_alpha(x + i, y + j, rgb, (int)a);   /* 抗锯齿边缘按 alpha 混合 */
         }
 }
 
@@ -298,8 +313,8 @@ void fx_draw_text_c(int x, int y, const char *s, fx_color_t fg, fx_color_t bg)
         unsigned char *px = rasterize(f, s, fg, bg, &w, &h);
         if (!px) return;
         e = tc_alloc();
-        char key[256];
-        snprintf(key, sizeof(key), "%d|%06x|%06x|%s", f->size, (unsigned)fg, (unsigned)bg, s);
+        char key[32];
+        tc_make_key(key, f, s, fg, bg);   /* v2.5.1(M4): 定长哈希键 */
         e->key = strdup(key);
         e->f = f; e->w = w; e->h = h; e->px = px; e->age = ++s_clock;
         fxtk_text_created++;

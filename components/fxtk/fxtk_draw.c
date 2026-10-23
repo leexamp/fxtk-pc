@@ -310,6 +310,29 @@ void fxtk_put_px(int x, int y, uint32_t c)
     s_line[x] = c;
 }
 
+/* v2.5.1(H3): 带 alpha 的像素写入 (离屏画布上做 src-over 混合)。
+ * 离屏路径(文字透明底/半透明图元)必须走这里, 否则 alpha 被丢掉 → 透明底变成实心色块。
+ * 非离屏时只有 a>=255 才等价于普通写入; 半透明由 GPU 混合负责(纹理路径), 这里不猜底色。 */
+void fxtk_put_px_alpha(int x, int y, uint32_t c, int a)
+{
+    if (!s_drv || a <= 0) return;
+    if (a > 255) a = 255;
+    if (!(s_offing && s_offbuf_active)) {
+        if (a >= 255) fxtk_put_px(x, y, c);
+        return;
+    }
+    if (x < s_clip_x1 || x > s_clip_x2 || y < s_clip_y1 || y > s_clip_y2) return;
+    x += s_ox; y += s_oy;
+    if (x < 0 || y < 0 || x >= s_offw || y >= s_offh) return;
+    uint32_t *d = &s_offbuf_active[(size_t)y * s_offw + x];
+    uint32_t dr = (*d >> 16) & 0xFF, dg = (*d >> 8) & 0xFF, db = *d & 0xFF;
+    uint32_t sr = (c >> 16) & 0xFF, sg = (c >> 8) & 0xFF, sb = c & 0xFF;
+    uint32_t r = (sr * (uint32_t)a + dr * (uint32_t)(255 - a)) / 255u;
+    uint32_t g = (sg * (uint32_t)a + dg * (uint32_t)(255 - a)) / 255u;
+    uint32_t b = (sb * (uint32_t)a + db * (uint32_t)(255 - a)) / 255u;
+    *d = 0xFF000000u | (r << 16) | (g << 8) | b;
+}
+
 void fxtk_draw_set_driver(const fx_driver_t *drv)
 {
     s_drv = drv;

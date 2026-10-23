@@ -85,3 +85,9 @@ fx_label_new(percent("0.02,0.01","0.98,0.09"), title("fxtk 演示 · 标签页")
 
 > 实测边界（本机 GNOME+XWayland）：移动/居中精确 (0,0)、置顶生效、去标题栏无效。
 > **不要**在 init_cb 里操作窗口；EWMH 请求要给 WM 处理时间。完整列表见 [api.md](api.md) 第 16 节。
+
+### v2.5.1 输入语义（缺陷报告 H1/H2）
+
+- `fx_textedit_set_readonly(w,1)` 现在**所有**改写路径都被拦截（键入/退格/删除/剪切/**Ctrl+V 粘贴**/ Ctrl+L 清空）。
+- `fx_keyev_t.mod`：bit0=Ctrl、bit1=Shift；核心快捷键判断只认 bit0 —— **Shift+字母只产生文本**，不会被当成全选/粘贴/剪切。
+

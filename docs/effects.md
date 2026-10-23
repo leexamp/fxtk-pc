@@ -84,3 +84,9 @@ fx_image_tint(pic, FX_RGB(0,200,255), 90);   /* 染色成青色系 */
 | `fx_quad_homography(src8,dst8,m9)` / `fx_quad_corner_weights(xy8,d4)` / `fx_mat3_invert(m,out)` | 单应矩阵 / 四角权重 / 3×3 求逆。 |
 
 > 完整签名见 [api.md](api.md) 第 10、17 节。
+
+### v2.5.1 渲染一致性
+
+`fx_draw_text()` 的默认背景统一为 `FX_TEXT_NOBG`（sokol 与 SDL 一致）；透明底与抗锯齿边缘
+在离屏画布（`fx_canvas_enable_buf` / 开 AA 的画布）上按 alpha 做 src-over 混合，不再出现实心色块。
+

@@ -1,5 +1,70 @@
 # Changelog
 
+## v2.5.2（多窗口输入闭环 + 多根控件树 + 交互 demo）
+
+> 复核：`make test` / `make -C demo-main mw_interactive` / `make golden`（GOLDEN_SKIP_DEMO=1）；
+> 交互 demo 已用 Xvfb + xdotool 自动化验证按钮/复选/滑杆/键盘/右键菜单/窗口 raise·move·resize。
+
+### 新增
+
+- **多真实窗口输入闭环（FXTK_MW）**：X11（Button/Key/Motion/Wheel）与 Win32（WM_*）原生事件按窗口暂存，
+  在 `fxtk_win_begin()` 投递给 `fxtk_sokol_driver` 的输入队列，`fx_poll()` 后控件层即可收到鼠标/键盘。
+  驱动新增内部注入接口：`fxtk_sokol_input_touch/touch_move/wheel/key/right_click`（声明在 `fxtk_mw.h`）。
+- **多根控件树**：`fx_root_new()` / `fx_root_select()` / `fx_root_active()` —— 每扇窗一棵独立控件树，
+  单窗口应用不受影响（缺省根仍是 `&s_root`）。
+- **交互 demo**：`examples/mw_interactive.c` + `make -C demo-main mw_interactive`（一键构建）；
+  含按钮/复选框/滑杆/文本框/右键菜单 + 窗口 raise/move/resize。
+- 文档：`docs/multi-window.md` 补输入与多根用法、限制更新；`docs/syntax.md`（属性/回调/布局优先级规则）；
+  README 增 "当前定位/适用边界/已知限制/AI 验证边界"。
+
+### 修复
+
+- 输入事件曾是全局队列：一帧轮询多扇窗会把 A 窗 press/release 串到 B 窗（表现为"点了没反应"）；
+  现按窗口暂存 + 每次只投 1 个 touch 事件，其余下帧投递。
+- 连续 mousemove 会让键盘事件饿死（flush 被 touch 残留阻塞）；现键盘/滚轮/右键始终投递。
+- `fx_root_select()` 每帧调用会清 `s_pressed`/`s_focus`，导致跨帧点击和键盘输入丢失；已改为保留状态，
+  只按"是否属于当前根"过滤。
+- 右键菜单原本在窗口轮询切换时被立即关闭；现记录 owner root，只在该窗绘制，切到别的根时才收起。
+
+## v2.5.1（代码审查缺陷修复）
+
+> 依据第三方代码审查报告逐项修复（H1/H2/H3/M1–M5/L1–L3）。
+> 复核：`make test`（新增第 17 节：只读+剪贴板 / Shift+字母 / SVG 属性边界 / 池耗尽回归）、
+> `make golden`（GOLDEN_SKIP_DEMO=1）、sokol 与 SDL 两个 demo 均编译通过、MV 示例实测无文字色块。
+
+### 高优先级（可复现）
+
+- **H1 只读输入框可被 Ctrl+V 绕过**：`fx_poll` 键盘分支补 `!ro`，与 Ctrl+X/右键菜单统一；
+  回归用例：只读框注入 Ctrl+V 后内容不变。
+- **H2 SDL 后端把 Shift+字母当 Ctrl 快捷键**：核心快捷键判断改为只认 `mod & 1`（Ctrl 位），
+  SDL 驱动伪快捷键事件也只由 `mod & 1` 触发；Shift 位（bit1）只用于选区/光标语义。
+  回归用例：Shift+V 不再粘贴、后续普通字符仍能输入。
+- **H3 离屏画布文字变实心色块**：
+  - `fxtk_font_stb.c`：透明底像素改为「前景色 RGB + alpha=0」；离屏路径按 `fxtk_put_px_alpha()`
+    做 src-over 混合（此前直接写 RGB，把 alpha 丢掉）；
+  - 新增 `fxtk_put_px_alpha()`（`fxtk_draw.c`）；
+  - `fxtk_font.c`（SDL）实现透明底：保留 alpha、纹理 `BLENDMODE_BLEND`、离屏按 alpha 混合；
+  - `fx_draw_text()` 默认背景统一为 `FX_TEXT_NOBG`（SDL 版此前是黑底，与 sokol 不一致）。
+
+### 中优先级
+
+- **M1 SVG 属性越界**：`sv_attr/sv_num/sv_attr_str/sv_transform/sv_style_from_tag` 全部带元素区间
+  `[tag,end)`，`memcmp` 限定搜索；前一个图元不再继承后一个图元的属性。回归用例已加。
+- **M2 list/drop 条目字符串泄漏**：`fxtk_extra_forget()` 回收槽位前 free `items[]`；
+  弹层槽（owner!=0）的别名指针不重复 free，属主槽先关弹层断别名。
+- **M3 池耗尽时 `fx_drop_new_p/fx_list_new_p` 空指针崩溃**：工厂判空返回 NULL。回归用例已加。
+- **M4 文本纹理缓存 key 截断**：sokol 字体用 64 位 FNV 定长键；SDL 字体改为保存完整字符串 + 哈希比较；
+  长前缀字符串不再串图。
+- **M5 动画槽不随控件销毁回收**：新增 `fxtk_anim_forget()`，`unlink_free()` 里与
+  `fxtk_extra_forget` 一起调用，清按钮/进度/标签页三组槽位。
+
+### 低优先级 / 测试
+
+- **L1 `fx_path_join()` 截断返回 -1**（原返回正数被误判成功）；内部两处调用改为 `< 0` 判失败。
+- **L2 Win32 并行 for**：记录实际创建线程数，只 join 已创建的句柄；并 memset 句柄数组。
+- **L3 无头测试临时目录**：Windows 用 `GetTempPathA`，POSIX 用 `TMPDIR`，默认 `/tmp`；
+  打印实际目录，Windows 本地三项误报消除。
+
 ## v2.5（后端升级 + 单窗口行为 + 多真实窗口）
 
 > 复核方式：`make` + `make test` + `make fxtk_sim_en` + `make window-test` + `make golden`（无头金图用 `GOLDEN_SKIP_DEMO=1`）。

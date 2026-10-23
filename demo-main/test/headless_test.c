@@ -27,6 +27,10 @@
  * 另有一份 -DFXTK_BACKEND_STUB 变体 (make test 会一并运行)。
  
 */
+/* v2.5.1(L3): Windows 临时目录 */
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include "fxtk.h"
 #include "fxtk_desktop.h"
 #include "fxtk_image.h"
@@ -60,9 +64,21 @@ static void drv_fill_rect(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, ui
     if (x1 >= x0 && y1 >= y0) s_fill_px += (long)(x1 - x0 + 1) * (long)(y1 - y0 + 1);
 }
 static int  drv_touch_read(int *x, int *y, int *pressed) {(void)x;(void)y;(void)pressed; return 0;}
-static int  drv_key_read(fx_keyev_t *ev) {(void)ev; return 0;}
-static void drv_clip_set(const char *s) {(void)s;}
-static const char *drv_clip_get(void) { return ""; }
+/* v2.5.1 评审回归(H1/H2): 假驱动支持注入按键序列与剪贴板内容 */
+#define KQ_MAX 16
+static fx_keyev_t s_kq[KQ_MAX]; static int s_kqn = 0, s_kqi = 0;
+static char s_clip[128] = "";
+static fx_keyev_t kev(int key, const char *utf8, int mod)
+{
+    fx_keyev_t ev; memset(&ev, 0, sizeof ev);
+    ev.key = key; ev.down = 1; ev.mod = mod;
+    if (utf8) snprintf(ev.utf8, sizeof ev.utf8, "%s", utf8);
+    return ev;
+}
+static void kq_push(fx_keyev_t ev) { if (s_kqn < KQ_MAX) s_kq[s_kqn++] = ev; }
+static int  drv_key_read(fx_keyev_t *ev) { if (s_kqi >= s_kqn) return 0; *ev = s_kq[s_kqi++]; return 1; }
+static void drv_clip_set(const char *s) { snprintf(s_clip, sizeof s_clip, "%s", s ? s : ""); }
+static const char *drv_clip_get(void) { return s_clip; }
 static void drv_set_title(const char *s) {(void)s;}
 static int  drv_wheel_read(int *x, int *y, int *dy) {(void)x;(void)y;(void)dy; return 0;}
 static void drv_blit_img(const uint32_t *px,int w,int h,int dx,int dy,int dw,int dh,int dark) {(void)px;(void)w;(void)h;(void)dx;(void)dy;(void)dw;(void)dh;(void)dark;}
@@ -296,7 +312,17 @@ int main(void) {
 
         /* --- 文件读写往返 + 追加 --- */
         const char *td = getenv("FXTK_TEST_DIR");
-        if (!td || !td[0]) td = "/tmp";
+        if (!td || !td[0]) {
+#ifdef _WIN32
+            static char wtmp[512];
+            DWORD wn = GetTempPathA((DWORD)sizeof wtmp, wtmp);
+            td = (wn > 0) ? wtmp : ".";
+#else
+            const char *envt = getenv("TMPDIR");
+            td = (envt && envt[0]) ? envt : "/tmp";
+#endif
+        }
+        printf("  [info] 临时目录 = %s (可用 FXTK_TEST_DIR 覆盖)\n", td);
         char fp[320];
         fx_path_join(fp, sizeof fp, td, "fxtk_backend_test.bin");
         const char payload[] = "fxtk-backends-往返";
@@ -507,6 +533,63 @@ int main(void) {
         if (s_last_fill_c == (uint32_t)want) printf("  [ok]   填充颜色按原样送达驱动 (0x%06X)\n", (unsigned)want);
         else { printf("  [FAIL] 颜色不符: 得到 0x%06X, 期望 0x%06X\n", (unsigned)s_last_fill_c, (unsigned)want); fails++; }
         printf("  [info] 全程 push_pixels 累计像素 = %ld (离屏画布路径若跑到, 这里应 > 0)\n", s_push_total);
+    }
+
+    /* [17] v2.5.1 评审回归: 输入/解析/池耗尽 (缺陷报告 H1/H2/M1/M3) */
+    printf("[17] 评审回归: 输入 / SVG / 池耗尽\n");
+    {
+        /* H1: 只读输入框按 Ctrl+V 不得改写内容 */
+        fx_widget_t *te = fx_textedit_new(pixel("10,10","300,40"), name("rev_ro"), title("abc"));
+        if (te) {
+            fx_set_focus(te);
+            fx_textedit_set_readonly(te, 1);
+            snprintf(s_clip, sizeof s_clip, "PASTED");
+            s_kqn = s_kqi = 0; kq_push(kev(0, "v", 1));
+            fx_poll();
+            const char *t = fx_textedit_text(te); if (!t) t = "";
+            if (strstr(t, "PASTED") == NULL) printf("  [ok]   只读框 Ctrl+V 被拒绝 (H1)\n");
+            else { printf("  [FAIL] 只读框被 Ctrl+V 改写: %s (H1)\n", t); fails++; }
+            fx_delete(name("rev_ro"));
+        } else { printf("  [SKIP] 无法创建 textedit (H1)\n"); }
+
+        /* H2: Shift+字母不是 Ctrl 快捷键, 不得触发粘贴 */
+        fx_widget_t *te2 = fx_textedit_new(pixel("10,50","300,80"), name("rev_shift"), title("abc"));
+        if (te2) {
+            fx_set_focus(te2);
+            snprintf(s_clip, sizeof s_clip, "PASTED");
+            s_kqn = s_kqi = 0; kq_push(kev(0, "v", 2));     /* Shift+V */
+            fx_poll();
+            const char *t = fx_textedit_text(te2); if (!t) t = "";
+            if (strstr(t, "PASTED") == NULL) printf("  [ok]   Shift+V 不当作粘贴 (H2)\n");
+            else { printf("  [FAIL] Shift+V 触发了粘贴: %s (H2)\n", t); fails++; }
+            s_kqn = s_kqi = 0; kq_push(kev(0, "Z", 0));     /* 普通字符仍能输入 */
+            fx_poll();
+            t = fx_textedit_text(te2);
+            if (t && strchr(t, 'Z')) printf("  [ok]   Shift 后普通字符仍能输入 (H2)\n");
+            else { printf("  [FAIL] 普通字符未输入 (H2)\n"); fails++; }
+            fx_delete(name("rev_shift"));
+        } else { printf("  [SKIP] 无法创建 textedit (H2)\n"); }
+
+        /* M1: 前一个 rect 缺省属性不得继承后一个 rect 的 x/y */
+        fx_svg_t *sv = fx_svg_parse("<svg viewBox='0 0 24 24'><rect width='10' height='10'/><rect x='40' y='40' width='4' height='4'/></svg>");
+        float bx1 = -1, by1 = -1, bx2 = -1, by2 = -1;
+        int svok = sv && fx_svg_shape_count(sv) >= 2 &&
+                   fx_svg_shape_bbox(sv, 0, &bx1, &by1, &bx2, &by2) &&
+                   fabsf(bx1) < 0.01f && fabsf(by1) < 0.01f &&
+                   fabsf(bx2 - 10) < 0.01f && fabsf(by2 - 10) < 0.01f;
+        if (svok) printf("  [ok]   SVG 属性不越过元素边界 (M1)\n");
+        else { printf("  [FAIL] SVG shape[0] bbox=(%g,%g)-(%g,%g), 期望 (0,0)-(10,10) (M1)\n", bx1, by1, bx2, by2); fails++; }
+        if (sv) fx_svg_free(sv);
+    }
+
+    /* M3: 控件池耗尽时 list/drop 工厂必须返回 NULL 而不是崩溃 */
+    {
+        int made = 0;
+        while (made < 8200 && fx_label_new(pixel("0,0","1,1"), title("x"))) made++;
+        fx_widget_t *dp = fx_drop_new_p("0,0","10,10", -1);
+        fx_widget_t *lp = fx_list_new_p("0,0","10,10", -1);
+        if (!dp && !lp) printf("  [ok]   池耗尽时 list/drop 工厂返回 NULL 不崩溃 (M3, 已建 %d 控件)\n", made);
+        else { printf("  [FAIL] 池耗尽后工厂返回非 NULL (drop=%p list=%p) (M3)\n", (void*)dp, (void*)lp); fails++; }
     }
 
     printf("== done: %s (%d fail) ==\n", fails ? "FAIL" : "PASS", fails);    return fails ? 1 : 0;

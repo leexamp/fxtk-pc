@@ -1,8 +1,9 @@
 # 多真实窗口（FXTK_MW）— 设计、接口与维护
 
-> 状态：**实验性、独立分支**（`feat/multi-window`）。默认后端仍是单窗口 sokol_app；多窗口是
-> 在 `drivers/` 里**换掉平台层**的第二个后端，不影响现有单窗口路径与体积。
-> 参考实现/压测用例：MV 仓库 `mv/pv/v2/single/movie.c`（6 个窗口、每帧移动/缩放、81 句画面）。
+> 状态：已合并 main，**v2.5.2 起鼠标/键盘事件会转发给控件层**（每窗一棵独立控件树），并带一个可交互 demo。
+> 默认后端仍是单窗口 sokol_app；多窗口是 `drivers/` 里**换掉平台层**的第二个后端，不影响现有单窗口路径与体积。
+> 参考实现：MV 仓库 `mv/pv/v2/single/movie.c`（6 窗、212s 渲染压测）；
+> 交互参考：[examples/mw_interactive.c](../examples/mw_interactive.c)（按钮/滑杆/文本框/右键菜单/窗口控制）。
 
 ## 1. 它解决什么
 
@@ -79,6 +80,40 @@ Windows（MinGW-w64；Linux 上交叉编译同理加前缀）：
 - **应用坐标 ≠ 外框坐标**：`fxtk_win_move` 传的是窗口外框位置；想对齐"客户区"用
   `fxtk_win_client_offset` 自行扣掉（Win32 标题栏约 30–40px，X11 由 WM 处理、偏移返回 0）。
 
+### 4.1 多窗口里的控件 UI（v2.5.2）
+
+核心控件层原本只有一棵全局根。多窗口下给每扇窗建一棵独立根，并在该窗口的 begin/end 之间调 `fx_poll()`：
+
+```c
+static fx_widget_t *roots[2];
+/* 建窗后: */
+roots[0] = fx_root_new();
+fx_root_select(roots[0]); fx_parent(roots[0]);
+fx_button_new(pixel("16,50","200,86"), title("点击我"), call(on_click));
+
+/* 每帧: */
+while (!fxtk_win_quit()) {
+    fxtk_win_poll();                       /* 收原生事件(按窗口暂存) */
+    for (int i = 0; i < 2; i++) {
+        fxtk_win_begin(win[i]);            /* 切 GL 上下文/尺寸, 并把本窗事件投给驱动 */
+        fx_root_select(roots[i]);          /* 切控件树 */
+        fx_repaint();                      /* demo 用整窗重绘; 可按需改脏区 */
+        fx_poll();                         /* 处理输入 + 布局 + 绘制 */
+        fxtk_win_end(win[i]);              /* 合成 + SwapBuffers */
+    }
+    fx_sleep_ms(8);
+}
+```
+
+输入链路：原生事件 → 后端按窗口排队 → `b_begin` 投递 → 驱动队列 → `fx_poll` → 控件层；
+文本输入(WM_CHAR / XLookupString)、Ctrl+C/V/X/A/L、右键菜单、滚轮都在这个链路上。
+
+一键构建/运行：
+
+    make -C demo-main mw_interactive && ./demo-main/mw_interactive
+
+![多窗口交互 demo](mw_interactive.png)
+
 ## 5. 后端实现要点（维护者看）
 
 - 一进程一 GL 上下文；每个窗口 `CreateWindow` + 同一个 pixel format，渲染前 `make_current`。
@@ -91,16 +126,19 @@ Windows（MinGW-w64；Linux 上交叉编译同理加前缀）：
 - 已知限制（如实写）：
   - **X11 only**，未做 Wayland；
   - 只覆盖主屏，未处理多显示器；
-  - 目前**不把鼠标/键盘事件转发给 fxtk 控件层**（MV 不需要交互；要做交互需补事件队列）；
   - 最大窗口数 `FXTK_MW_MAX = 8`；
   - 真 HiDPI 未验证（沿用 DPI-unaware + 系统缩放）；
-  - 没有窗口图标/最小化状态/每窗口独立消息回调。
+  - 没有窗口图标/最小化状态/每窗口独立消息回调；
+  - **剪贴板在 MW 下未实现**（右键菜单"粘贴/复制"目前是空操作）；中文输入法(IME)在 sokol/MW 路径同样未接；
+  - 窗口被用户拖动/缩放后，应用侧不会收到尺寸变化回调（demo 的窗口缩放由应用自己调 `fxtk_win_resize`）。
 
 ## 6. 验证
 
-- MV 用例：`mv/pv/v2/single/`，6 窗口 + 每句动画 + 全片 212s（含窗口缩放/移动/闪白），跑通即说明后端可用；
-- 冒烟：编译后运行它，检查（a）多窗口标题栏与内容正常（b）任意窗口关闭能退出（c）连续 resize 不闪/不崩；
-- 见 MV 仓库 `mv/pv/v2/single/MAINTENANCE.md` 第 5、6 节的"已知坑/回归命令"。
+- **交互闭环**：`make -C demo-main mw_interactive` 后运行；已验证（Xvfb + xdotool 自动化）：
+  按钮点击、复选框、滑杆拖动、文本框键盘输入（ASCII）、右键菜单、窗口 raise/move/resize；
+- MV 用例：`mv/pv/v2/single/`，6 窗口渲染 + 全片 212s（窗口缩放/移动/闪白），验证渲染与后端稳定性；
+- 冒烟：多窗口标题栏/内容正常、关任意窗退出、连续 resize 不闪/不崩；
+- 已知坑/回归命令见 MV 仓库 `mv/pv/v2/single/MAINTENANCE.md` 第 5、6 节。
 
 ## 附：与画布内窗口管理器（`fxtk_wm`）的区别
 

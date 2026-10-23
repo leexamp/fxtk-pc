@@ -247,7 +247,7 @@ void sdl_handle_events(void)
                 default: break;
             }
             if(k&&g_kq_n<FX_KEYQUEUE){fx_keyev_t ev={{0},k,1,mod};g_kq[g_kq_n++]=ev;}
-            else if(mod&&g_kq_n<FX_KEYQUEUE&&(e.key.keysym.sym==SDLK_c||e.key.keysym.sym==SDLK_v||e.key.keysym.sym==SDLK_x||e.key.keysym.sym==SDLK_a)){fx_keyev_t ev={{0},0,1,mod};ev.utf8[0]=(char)e.key.keysym.sym;g_kq[g_kq_n++]=ev;}}
+            else if((mod&1)&&g_kq_n<FX_KEYQUEUE&&(e.key.keysym.sym==SDLK_c||e.key.keysym.sym==SDLK_v||e.key.keysym.sym==SDLK_x||e.key.keysym.sym==SDLK_a))  /* v2.5.1(H2): Shift 组合不当作快捷键 */{fx_keyev_t ev={{0},0,1,mod};ev.utf8[0]=(char)e.key.keysym.sym;g_kq[g_kq_n++]=ev;}}
         else if(e.type==SDL_WINDOWEVENT){ if(e.window.event==SDL_WINDOWEVENT_SIZE_CHANGED||e.window.event==SDL_WINDOWEVENT_RESIZED)sdl_apply_size(e.window.data1,e.window.data2); }
         else if(e.type==SDL_MOUSEBUTTONDOWN){
             mouse_x=e.button.x;mouse_y=e.button.y;mouse_pressed=1;

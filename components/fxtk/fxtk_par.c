@@ -143,6 +143,8 @@ void fx_parallel_for(int n, void (*body)(int lo, int hi, void *ud), void *ud)
     HANDLE   hs[FXTK_PAR_MAX_T];
     par_job_t jobs[FXTK_PAR_MAX_T];
     int chunk = (n + t - 1) / t;
+    int started = 1;   /* v2.5.1(L2): 实际创建到的最大索引+1, join 只等到这里 */
+    memset(hs, 0, sizeof(hs));
 
     for (int i = 1; i < t; i++) {
         int lo = i * chunk;
@@ -152,11 +154,12 @@ void fx_parallel_for(int n, void (*body)(int lo, int hi, void *ud), void *ud)
         jobs[i].body = body; jobs[i].ud = ud; jobs[i].lo = lo; jobs[i].hi = hi;
         hs[i] = CreateThread(NULL, 0, par_trampoline, &jobs[i], 0, NULL);
         if (!hs[i]) body(lo, hi, ud);   /* 失败就本线程代做 */
+        else started = i + 1;
     }
 
     body(0, chunk < n ? chunk : n, ud);
 
-    for (int i = 1; i < t; i++) {
+    for (int i = 1; i < started; i++) {   /* v2.5.1(L2): 未创建的 hs[] 是栈垃圾, 不能等 */
         if (hs[i]) { WaitForSingleObject(hs[i], INFINITE); CloseHandle(hs[i]); }
     }
 }

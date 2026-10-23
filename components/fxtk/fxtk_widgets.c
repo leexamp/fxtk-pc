@@ -580,3 +580,15 @@ void fxtk_anim_reset(void)
     memset(s_pa_disp, 0, sizeof s_pa_disp); memset(s_pa_to, 0, sizeof s_pa_to);
     memset(s_pa_t0, 0, sizeof s_pa_t0); memset(s_pa_init, 0, sizeof s_pa_init);
 }
+
+/* v2.5.1(M5): 控件销毁时清它占用的动画槽 —— 旧实现只在 fx_init 复位,
+ * 运行期删控件后槽位仍指向旧指针, 第 9 个控件起动画静默失效, 地址复用还会继承旧状态。 */
+void fxtk_anim_forget(fx_widget_t *w)
+{
+    if (!w) return;
+    for (int i = 0; i < FX_ANIM_SLOTS; i++) {
+        if (s_bt_w[i] == w) { s_bt_w[i] = NULL; s_bt_v[i] = 0; s_bt_goal[i] = 0; s_bt_t0[i] = 0; }
+        if (s_pa_w[i] == w) { s_pa_w[i] = NULL; s_pa_from[i] = s_pa_disp[i] = 0; s_pa_to[i] = 0; s_pa_t0[i] = 0; s_pa_init[i] = 0; }
+        if (s_ta_w[i] == w) { s_ta_w[i] = NULL; s_ta_t0[i] = 0; s_ta_sel[i] = 0; }
+    }
+}

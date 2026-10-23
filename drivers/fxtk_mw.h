@@ -5,6 +5,7 @@
 #ifndef FXTK_MW_H
 #define FXTK_MW_H
 #include <stdint.h>
+#include "fxtk.h"   /* v2.5.2: 输入注入接口需要 fx_keyev_t */
 
 typedef struct fxtk_mw_desc { const char *title; int x, y, w, h; unsigned flags; } fxtk_mw_desc;
 #define FXTK_MW_BORDERLESS 1u
@@ -36,4 +37,14 @@ void fxtk_mw_sapp_ime_spot(int x, int y);
 
 /* 注册为 fxtk_win 后端 (应用/外壳调用) */
 void fxtk_mw_register(void);
+
+/* v2.5.2: 多窗口输入注入 (由 fxtk_sokol_driver.c 提供; fxtk_sokol_mw.c 调用) */
+void fxtk_sokol_input_touch(int x, int y, int pressed);
+void fxtk_sokol_input_touch_move(int x, int y, int pressed);
+void fxtk_sokol_input_wheel(int x, int y, int dy);
+void fxtk_sokol_input_key(const fx_keyev_t *ev);
+void fxtk_sokol_input_right_click(int x, int y);
+int  fxtk_sokol_input_pending(void);
+int  fxtk_sokol_input_touch_pending(void);
+
 #endif
