@@ -6,11 +6,12 @@
 ## 1. 属性应用顺序与冲突
 
 - 构造宏是变参属性列表：`fx_button_new(A, B, C)` 按 **从左到右** 依次应用 A→B→C。
-- **同一字段后写覆盖先写**。例：`fx_label_new(x(10), x(200))` 最终 x=200；
+- **同一字段后写覆盖先写**。例：`fx_label_new(title("A"), title("B"))` 最终标题是 B；
   `color(red), color(blue)` 最终蓝色。
 - 位置属性有优先级：`pixel / percent / grid` 都写同一个 `pos_mode` 字段 —— **最后出现的那个决定布局方式**，
   不是"pixel 优先"。混合写属于未定义风格，建议一个控件只用一种定位方式。
-- 同名字段不存在"合并"：例如 `pixel("10,10","100,40")` + `w(50)` → w 属性会覆盖 x2 计算，最终宽度按属性顺序决定。
+- 同名字段不存在"合并"：例如 `pixel("10,10","100,40")` 之后再写 `percent(...)`，
+  `pos_mode` 会变成 PERCENT、坐标按百分比重新解释（两个都写属于未定义风格）。
 
 ## 2. call() 回调生命周期
 
@@ -48,7 +49,8 @@
   - `implicit declaration of fx_xxx_new` —— 忘记 `#include "fxtk.h"`（桌面控件还要 `fxtk_desktop.h`）；
   - `invalid use of incomplete typedef` —— 应用层拿 `fx_widget_t*` 直接访问字段；用 API 读取（`fx_get_value` /
     `fx_widget_title` / `fx_widget_rect`）。
-- 属性函数名（`name/x/y/w/h/color/...`）是全局宏/内联函数；自己的符号请避开这些短名。
+- 属性函数名（`pixel/percent/grid/title/name/color/call/line/row/anim...`）是全局函数；
+  自己的符号请避开这些短名（尤其 `name`）。
 
 ## 6. 多窗口相关（v2.5.2）
 

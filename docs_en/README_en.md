@@ -1,141 +1,193 @@
-# fxtk — a tiny, delightful C GUI framework
+# fxtk — a tiny C GUI framework where one widget is one line
 
-<p align="center">
-  <b>A single 377 KB binary with zero third-party DLLs — one header, desktop (sokol/OpenGL) and ESP32 (pure CPU)</b><br>
-  <small>Pure C · attribute-macro-driven UI · 480×272 responsive design · one header of API</small>
-</p>
+> **Attribute macros as the UI language.** Each widget factory expands into a plain C99 compound literal —
+> no XML, no scripting, no code generation. The result is a **single binary with zero third-party DLLs**
+> (377 KB on Linux / 439 KB on Windows).
 
 <p>
-  <img alt="version" src="https://img.shields.io/badge/version-v2.4-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-v2.5.3-blue">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green">
   <img alt="c" src="https://img.shields.io/badge/language-C99-9cf">
-  <img alt="platform" src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20ESP32-lightgrey">
+  <img alt="platform" src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey">
+  <img alt="backend" src="https://img.shields.io/badge/backend-sokol(OpenGL)-brightgreen">
 </p>
 
-> **English edition.** The Chinese docs live in `README.md` / `docs/`; English sources use an `_en`
-> suffix (`docs_en/`, `demo-main/app_en.c`, ...) so both languages sit side by side.
-> **[→ 中文版 README](../README.md)**
+> Verify it yourself: `cd demo-main && make && ldd ./fxtk_sim` — system libraries only,
+> no `SDL2.dll`, no `libwinpthread`.
+>
+> [中文 README](../README.md)
 
-> Verify it yourself: `cd demo-main && make && ldd ./fxtk_sim` — system libs only, no `SDL2.dll`,
-> no `libwinpthread`.
-
-> Note: the framework contains dirty-rect merging code, but it is currently **bypassed by `s_full=1`
-> and therefore inactive** — every repaint request is promoted to a full-frame redraw (so there is no
-> ghosting, but also no dirty-rect optimisation). See the `fx_repaint_rect()` comment in `fxtk.c`.
-
-![canvas demo](screenshot_aa.png)
-![gradient](screenshot_gradient.png)
-![gauge](screenshot_gauge.png)
-![checker](screenshot_checker.png)
-
-## Why fxtk?
-
-- **One header, instant clarity** — a widget is a one-liner: `fx_button_new(pixel("10,10","150,40"), title("Go"), call(on_go))`.
-- **Immediate-mode canvas + retained widgets** — draw anything pixel-by-pixel, or compose declarative controls.
-- **Responsive by default** — author on a 480×272 baseline; the whole UI scales to any window (with a
-  sane 1.6× cap so it stays crisp).
-- **Cross-platform almost for free** — sokol (OpenGL) on PC, `fx_driver_t` abstraction for bare-metal/ESP32.
-- **Tiny footprint** — optional widget compilation (`-DFXTK_WIDGET_XXX=0`) plus `tools/autotrim.sh`
-  drop unused code out (a hello-world example goes 100KB→88KB).
-- **Feature-dense but honest** — AA (scanline), gradient fill, offscreen buffers, GPU raymarching,
-  particles, a headless test target, and a CI pipeline. No global singletons you can't reason about.
-
-## What you can build
-
-| Area | What's in the box |
-|---|---|
-| **Widgets** | button · label · slider · progress · checkbox · grid keypad · canvas · tab · image · textbox · list · dropdown · scroll container |
-| **Canvas** | line/circle/ellipse/arc/round-rect/polygon + **anti-aliasing** (`fx_set_aa(1)`, scanline ~60×) + **gradient fill** + offscreen buffer + `anim(1)` |
-| **Desktop** | text box (multi-line / click-drag select / Ctrl+A C V X / system clipboard / wheel), drag-scroll, right-click menu |
-| **i18n** | `sidebar(FX_TAB_LEFT/RIGHT/TOP/BOTTOM)` puts the tab strip on any edge for long labels; `docs_en/` + `app_en.c` English build (`make fxtk_sim_en`) |
-| **Files (v2.3)** | `fx_fs_pick_dir()` (system folder dialog) + `fx_fs_list()` (list a dir → name/size/date) — the demo's Components page is a real file browser with a smooth scrollbar, hover tooltip, and row select |
-| **Engine** | sprites · rotation · GPU raymarching (3D) · particles · image post-processing |
-
-## Quick start
+## The syntax: one widget per line
 
 ```c
 #include "fxtk.h"
-static void on_go(fx_widget_t *w, void *ud){ (void)w;(void)ud; fx_set_title(w, "Clicked!"); }
-void app_init(void){
-    fx_set_bg(FX_WINDOW_BG);
-    fx_button_new(pixel("10,10","150,40"), title("Go"), color(FX_BTN_BLUE), call(on_go));
+
+/* one callback signature everywhere: void cb(fx_widget_t *w, void *ud) */
+static void on_ok(fx_widget_t *w, void *ud) { (void)ud; fx_set_title(w, "clicked"); }
+static void on_canvas(fx_widget_t *w, void *ud) { (void)w; (void)ud; /* draw with fx_* here */ }
+
+static void build_ui(void)
+{
+    fx_label_new   (pixel("16,12","464,40"),   title("Settings"));
+    fx_button_new  (pixel("16,56","200,96"),   name("ok"),  title("OK"),     call(on_ok));
+    fx_checkbox_new(pixel("16,108","300,140"), name("chk"), title("Enable"), value(1));
+    fx_slider_new  (pixel("16,152","380,168"), name("vol"), value(60));
+    fx_canvas_new  (pixel("16,184","464,264"), name("cv"),  anim(1), call(on_canvas));   /* immediate-mode canvas */
 }
 ```
 
+`pixel("x1,y1","x2,y2")` is expressed on a **480×272 design baseline** and scales proportionally to any
+window size — no manual scaling factors.
+
+### Four rules
+
+1. **An attribute is `function(value)`**, any order; a later attribute wins for the same field.
+2. **Pick one positioning mode**: `pixel(...)` design coords / `percent(...)` parent-relative /
+   `grid(...)` named-grid slices (the last one written wins `pos_mode`).
+3. **Callbacks** are always `void cb(fx_widget_t *w, void *ud)`; `fx_find("ok")` gets the widget back later.
+4. **Pure C99**: the macro expands to `(fx_attr_t[]){ ..., FX_ATTR_END }`. There is no runtime parser —
+   apart from the contents of coordinate strings, everything is checked by the C compiler.
+
+### Attribute cheat sheet
+
+| Kind | Attribute | Notes |
+|---|---|---|
+| Position | `pixel(...)` `percent(...)` `grid(...)` | choose one |
+| Text | `title(s)` / `text(s)` | aliases |
+| Size/align | `line(n)` `row(0/1/2)` | `line` = font size or row count depending on widget; `row` = left/center/right |
+| Style | `color(bg)` `fgcolor(fg)` `border(n)` `radius(n)` `dense()` | defaults look fine |
+| Behaviour | `name(s)` `call(cb)` `value(n)` `page(n)` `maxlen(n)` `anim(n)` | |
+| Tab side | `sidebar(FX_TAB_TOP/LEFT/RIGHT/BOTTOM)` | tab widget only |
+| Image | `image(img)` | |
+
+> Edge cases (attribute conflicts, deleting widgets inside callbacks, duplicate names, common macro
+> compile errors) are written down in **[docs/syntax.md](../docs/syntax.md)** (Chinese).
+> Read it before building a real UI.
+
+### Why this style?
+
+- **Shorter than struct init** — no field names, no ordering to remember; one line per widget.
+- **More direct than XML/scripting** — no parser, no codegen, no extra build step; the debugger shows
+  exactly the code that runs.
+- **More information than immediate mode** — widgets stay in a tree: `fx_find`, mutate, lay out again.
+- **The trade-off** — coordinates are strings, so a typo is not a compile error. That is why the syntax
+  boundaries are documented instead of guessed.
+
+## How it looks
+
+Canvas / anti-aliasing / gradients / custom widget (headless v2.2 renders, no font loading — shapes only):
+
+| AA `fx_set_aa(1)` | Gradient `fx_fill_rect_gradient` | Custom widget (gauge) | Checkerboard |
+|---|---|---|---|
+| ![aa](../screenshot_aa.png) | ![gradient](../screenshot_gradient.png) | ![gauge](../screenshot_gauge.png) | ![checker](../screenshot_checker.png) |
+
+Full 12-page demo (widgets / image warp / pseudo-3D / text input / file browser / particles):
+
+![graph](../graph.png) ![image](../image.png) ![rending](../rending.png) ![texting](../texting.png)
+
+![fxtk demo](../demo.gif)
+
+## Size and dependencies
+
+- **377 KB Linux / 439 KB Windows, single file**; `ldd` / `objdump` show system libraries only.
+- Image decoding (PNG/JPEG/BMP/GIF/TGA/PNM), PNG screenshots, clipboard, file dialogs, RNG, time and
+  preference storage are **inside the framework** (sokol + stb are vendored as source, not DLLs).
+- Size trimming: `-DFXTK_WIDGET_XXX=0` at compile time; `tools/autotrim.sh` scans your sources and
+  emits the flags.
+
+## What is in the box
+
+| Area | Contents |
+|---|---|
+| **Widgets** | button · label · slider · progress · checkbox · grid keypad · canvas · tab · image · textbox · list · dropdown · scroll container · card |
+| **Layout** | `pixel` baseline + responsive scaling · `percent` · `grid` · flex (`FX_POS_FLEX`) |
+| **Canvas (immediate mode)** | line/circle/ellipse/triangle/polygon/arc/round-rect/text/gradient · offscreen buffer · anti-aliasing · transform stack |
+| **Input** | text editing (multi-line, drag-select, Ctrl+A/C/V/X, system clipboard, max length) · wheel routing · animated scroll · scrollbar drag · focus · single-finger gestures |
+| **Rendering** | GPU vertex batching · true perspective quad warp · image post-processing · GPU/CPU raymarching · particles |
+| **Desktop** | single-window always-on-top/borderless/drag/center · real multi-window (`-DFXTK_MW`, X11/Win32) · in-canvas window manager (`fxtk_wm`) |
+
+## Build and run
+
 ```bash
-cd demo-main
-make fxtk_sim        # the 12-page demo (Chinese)
-make fxtk_sim_en     # the English demo (app_en.c, left-sidebar tabs)
-make test            # 9/9 headless assertions, no SDL/window/font
-make canvas_08_files # the cross-platform file-browser example
+# Linux deps (sokol backend — no SDL2 required)
+sudo apt install libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev
+
+make -C demo-main                 # 12-page demo (fxtk_sim)
+make -C demo-main mw_interactive  # multi-window + widget input demo
+make -C demo-main test            # headless unit tests (no window, no font)
+make -C demo-main golden          # canvas golden-image regression (local tolerance 0)
+make -C demo-main bench           # headless render benchmark (no vsync)
+
+make -C demo-main ex01_hello      # any standalone example
 ```
 
-Dependencies (Linux, **default sokol backend — no SDL2 needed**):
-`libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev`. Only the legacy `make fxtk_sim_sdl`
-and the headless targets (`make test` / `make bench` / `make golden`, which use SDL's `dummy`
-video driver) need `libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev`. Windows is cross-compiled
-into a **single exe with no third-party DLLs** via `build_win_sokol.sh`.
-CI (`.github/workflows/ci.yml`) builds + tests on Linux, cross-builds for Windows, and
-smoke-checks the ESP32 path.
+Windows: `demo-main/build_win_sokol.sh` cross-compiles a single exe (CI runs it).
+Start your own app from [your_app/](../your_app/) (`main.c` + `build.sh`).
 
-## Small binaries (v2.3)
+## Verification (including what it does *not* cover)
 
-```bash
-TRIM=$(../tools/autotrim.sh ../examples/ex01_hello.c)   # -> -DFXTK_WIDGET_GRID=0 ...
-gcc -O2 -s $TRIM ... ../examples/ex01_hello.c -o app    # 100KB -> 88KB
+| Target | Covers | Does not cover |
+|---|---|---|
+| `make test` | real OS services + deterministic `FXTK_BACKEND_STUB` variant; layout/hit-test/lifecycle/input/colour-geometry contracts; clean under ASan+UBSan | fake driver never rasterises a framebuffer — **no per-pixel assertions** |
+| `make golden` | 10 canvas golden images, local tolerance 0 | canvas only; widgets/text/textbox/scroll have **no golden images** |
+| `make bench` | 2820 widgets @ 1080p, ~102–130 fps (full-frame redraw) | synthetic scene, not a real app |
+| CI | Linux: build + tests + examples + canvas goldens (`GOLDEN_TOL=1`); Windows: cross-compile | Windows is **compile-only**; multi-window is not in CI |
+
+**Not systematically verified**: real HiDPI, multi-monitor, full non-ASCII IME paths, WM differences
+(GNOME/KWin/xfwm), extreme window sizes, long-run memory growth. Regression-test in your own environment.
+
+> **AI disclosure**: a large part of this repo is AI-assisted (including the multi-window backend, parts of
+> the widget/drawing code and the docs). “It compiles” is not “its edge cases are correct”; the table above
+> separates what has evidence from what does not.
+
+## Known limits
+
+- **Full-frame redraw**: dirty-rect merging exists but is currently bypassed (`s_full=1` in
+  `fx_repaint_rect`) — no ghosting, but no dirty-rect optimisation either.
+- **Widget SDF anti-aliasing** has a known artefact when canvas + text + quad-warp are mixed
+  (`fx_set_widget_aa` toggles it).
+- **Real multi-window**: X11 only (XWayland works), main screen only, max 8 windows, no clipboard/IME,
+  no event callback when the OS moves/resizes a window (since v2.5.3 the backend syncs the client size and
+  re-lays out / repaints on the next frame; poll `fxtk_win_width/height`); Win32 and X11 are separate
+  implementations.
+- **Positioning uses strings**: `pixel("16,56","200,96")` typos are not compile errors
+  (there is no `x()/y()/w()/h()` attribute).
+- **No i18n layer**: the English demo is a copy (`app_en.c`), not runtime language switching.
+- **No** accessibility / RTL / GUI designer; coordinates are `int16`, widget pool is capped at 8192
+  (`-DFX_MAX_WIDGETS`).
+- **ESP32 support was dropped in v2.5.3.** The pure-CPU code paths and `fxtk_backends` stubs remain,
+  but CI and `make` targets are gone; `tools/esp32_smoke.sh` and `components/fxtk/CMakeLists.txt` are
+  archived only (their source lists are stale — do not use them for ESP-IDF builds).
+
+## Layout
+
+```
+components/fxtk/   the framework itself (fxtk.c/draw/widgets/effects/extra/backends + headers)
+drivers/           backends (sokol driver + stb text layer + app shell; SDL2 only for headless tests/goldens)
+your_app/          start your app here (main.c + build.sh)
+demo-main/         12-page demo + toolchain (single Makefile)
+examples/          standalone examples ex01~ex18 + canvas tutorials
+third_party/       vendored sokol (stb lives in components/fxtk/vendor)
+docs/ docs_en/     documentation (Chinese / English)
+test/golden/       golden reference images
+tools/             autotrim / golden / package_release / check_api_docs
 ```
 
-`tools/autotrim.sh` scans your sources for the widget factories you actually call and emits
-`-DFXTK_WIDGET_XXX=0` for every unused type, so unused implementations compile away. Default (no flags)
-builds everything.
+## Docs
 
-## Tests
+- **[docs/syntax.md](../docs/syntax.md)** — attributes/callbacks/layout priority/naming (**read this first**)
+- [quickstart_en.md](quickstart_en.md) · [guide_en.md](guide_en.md) · [api_en.md](api_en.md)
+- [desktop_en.md](desktop_en.md) · [effects_en.md](effects_en.md) · [examples_en.md](examples_en.md)
+- [internals_en.md](internals_en.md) · [windows_en.md](windows_en.md)
+- [multi_window_en.md](multi_window_en.md) · [window_manager_en.md](window_manager_en.md)
+- Full per-function reference (Chinese): [docs/api.md](../docs/api.md)
 
-Headless unit tests (`demo-main/test/headless_test.c`) drive the core through a fake `fx_driver_t`
-(no SDL/window/font) and verify pixel/percent/grid layout, press/release hit callbacks, value
-read/write, widget counting, `fx_find`/`fx_delete`, and the v2.2 canvas API.
+## Backends
+
+sokol (OpenGL) is the default and the only actively developed PC backend. SDL2 is kept only for
+deterministic headless tests / benchmarks / golden images (`SDL_VIDEODRIVER=dummy`); release artifacts
+always use sokol — which is what makes the single-exe Windows build possible.
 
 ## License
 
-MIT.
-
-## Backends (v2.4)
-
-**sokol (OpenGL) is the default and the only actively developed PC backend**; SDL2 is legacy.
-
-| Target | Backend | Purpose |
-|---|---|---|
-| `make` / `make fxtk_sim` | sokol | default demo |
-| `make fxtk_sim_en` | sokol | English demo |
-| `make fxtk_sim_sdl` / `_sdl_en` | SDL2 (legacy) | comparison only |
-
-SDL2 is still in the tree on purpose: `test/bench` and `tools/golden.sh` rely on
-`SDL_VIDEODRIVER=dummy` for deterministic headless rendering (CI has no display and
-sokol needs a real GL context). Shipping artifacts are always sokol — which is also
-what makes the single-file Windows build possible (system DLLs only).
-
-Measurements on this machine (headless, no vsync): stress page saturated at
-2819 widgets / 1920x1080 → **9.0–9.3 ms/frame ≈ 107–111 fps**; 1235 widgets / 1280x720 → 230 fps.
-
-## v2.5 update
-
-- **Multi-window backend (experimental, `-DFXTK_MW`)**: one process / one GL context / N native windows
-  (Win32 WGL + X11 GLX); app-side API is `fxtk_win_*`. Full design/limits:
-  [docs/multi-window.md](../docs/multi-window.md) (Chinese).
-- Summary: [docs_en/multi_window_en.md](multi_window_en.md).
-- Colors: `FX_RGBA(r,g,b,a)` / `fx_color_alpha`; widget z-order: `fxtk_raise / fxtk_lower / fxtk_unlink`.
-- Single-window desktop behavior: `fx_win_*`. Default single-window path and binary size are unchanged.
-
-- In-canvas window manager `fxtk_wm` (single-window, self-drawn windows): [window_manager_en.md](window_manager_en.md) / [docs/window-manager.md](../docs/window-manager.md).
-
-- Per-function reference (signatures/usage): [docs/api.md](../docs/api.md) (Chinese, hand-maintained; CI checks coverage).
-
-## v2.5.2 update
-
-- **Multi-window input is wired**: native mouse/keyboard events are queued per window and delivered in
-  `fxtk_win_begin()`; use one widget root per window (`fx_root_new / fx_root_select`) and call `fx_poll()`
-  inside begin/end. Interactive demo: `make -C demo-main mw_interactive` (buttons/checkbox/slider/textedit/
-  context menu/window raise·move·resize).
-- One-command builds for demos and for the MV app (`make` / `make win` in `mv/pv/v2/single`).
-- Still missing in the multi-window path: clipboard, IME, HiDPI verification; see docs/multi-window.md.
-
+MIT (examples and docs included). Vendored third-party licenses are in the respective file headers.

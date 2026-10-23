@@ -26,7 +26,7 @@
 - `lines`(字号) / `rows`(对齐) / `value` / `page`
 - 计算后矩形 `x1..y2`；父子/兄弟指针
 
-**控件池**：静态数组 `s_pool[FX_MAX_WIDGETS]`，`FX_MAX_WIDGETS`（**PC 默认 8192 ≈ 2.6MB BSS / ESP32 默认 4096 ≈ 1.3MB**；`sizeof(fx_widget_t)` = 328B）。`fxtk_alloc()` 线性找空槽，`fxtk_free()` 标记 `FX_W_NONE`。
+**控件池**：静态数组 `s_pool[FX_MAX_WIDGETS]`，`FX_MAX_WIDGETS`（**PC 默认 8192 ≈ 2.6MB BSS**；`sizeof(fx_widget_t)` = 328B）。`fxtk_alloc()` 线性找空槽，`fxtk_free()` 标记 `FX_W_NONE`。
 
 > **整个 `.bss` 的账**（PC / sokol 版实测 **14.77MB**，控件池只占其中约 2.6MB）：
 > 最大项是驱动的**顶点/索引缓冲** —— `drivers/fxtk_sokol_driver.c` 里

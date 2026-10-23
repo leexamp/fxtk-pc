@@ -116,6 +116,7 @@ void fxtk_draw_label(fx_widget_t *w)
     int x = w->x1;
     if (w->rows == 1) x = w->x1 + (cw - tw) / 2;
     else if (w->rows == 2) x = w->x2 - tw;
+    if (x < w->x1) x = w->x1;   /* v2.5.3: 文字比控件宽时居中/右对齐会算出负数, 裁到控件左边界 */
     /* P5 审美迭代 9/9(标签): 带底色的"色块标签"(如"颜色显示区"那种色条)原为硬直角, 与其它控件不一致。
      * 圆角要【自保护】: 文字是用 fx_draw_text_c 铺一块底色矩形画上去的, 若文字块够到四角就会把圆角重新切方 ——
      * 所以只在"文字块四周留白 ≥ 圆角半径"时才圆, 否则保持方形(宁可不圆, 也不出现半圆角)。 */
@@ -129,7 +130,10 @@ void fxtk_draw_label(fx_widget_t *w)
         if (rad > 0) fx_fill_rect_round(w->x1, w->y1, w->x2, w->y2, rad);
         else         fx_fill_rect(w->x1, w->y1, w->x2, w->y2);
     }
-    fx_color_t tbg = (w->bg == FX_BLACK) ? fx_get_bg() : w->bg;
+    /* v2.5.3: 透明标签(未显式 color())不再先用 fx_get_bg() 铺一块全局底色 —— 面板/画布/卡片底色
+     * 与窗口底色不一致时, 那块底色会在文字周围露出一个方块(README 截图里"文字带白底"就是这个)。
+     * v2.5.1 引入的 FX_TEXT_NOBG 就是为这条路径准备的: 只画字形, 不铺底。 */
+    fx_color_t tbg = (w->bg == FX_BLACK) ? FX_TEXT_NOBG : w->bg;
     if (fs <= 0) fx_draw_text_c(x, w->y1 + (ch - 18) / 2, w->title, w->fg, tbg);
     else fxtk_draw_text_size(fs, x, w->y1 + (ch - th) / 2 + 2, w->title, w->fg, tbg);
 }
@@ -295,7 +299,7 @@ void fxtk_draw_checkbox(fx_widget_t *w)
         fx_draw_line(w->x1 + box / 2 - 1, by + box - 4, w->x1 + box - 4, by + 2);
     }
     if (w->title[0]) {
-        fx_color_t text_bg = (w->bg != FX_BLACK) ? w->bg : fx_get_bg();
+        fx_color_t text_bg = (w->bg != FX_BLACK) ? w->bg : FX_TEXT_NOBG;   /* v2.5.3: 透明底, 同 label */
         fx_draw_text_c(w->x1 + box + FX_TOK_TEXT_PAD_X, by, w->title, w->fg, text_bg);
     }
 }

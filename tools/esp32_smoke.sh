@@ -1,8 +1,11 @@
 #!/bin/bash
 # ============================================================
+# ⚠️ 已停用 (v2.5.3): fxtk 不再维护 ESP32 路径, 本脚本与 components/fxtk/CMakeLists.txt
+#    仅作历史存档保留, 不再被 CI / make 调用。当前唯一目标是 PC (Linux/Windows + sokol)。
+#
 # esp32_smoke.sh — ESP32 侧接口级编译冒烟 (不需要 ESP-IDF 工具链)
 #
-#   ./tools/esp32_smoke.sh      或   make esp32-smoke
+#   ./tools/esp32_smoke.sh        (手动运行, 已不在 CI 里)
 #
 # 做法: 用【最小假 IDF 头】+ `-DESP_PLATFORM` 对框架核心做 -fsyntax-only 检查。
 #   框架在 ESP32 下只用到两个 IDF 符号(esp_log_write / esp_timer_get_time),

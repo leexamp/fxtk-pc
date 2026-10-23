@@ -1,5 +1,52 @@
 # Changelog
 
+## v2.5.3（语法优先的 README + ESP32 下线 + 多窗口缩放修复）
+
+> 复核：`make test`（新增第 18 节：文字底色契约）、`make`（sokol demo 编译通过）、
+> `make golden`（GOLDEN_SKIP_DEMO=1，10/10 容差 0）、Xvfb + `import` 截图对比（控件页标签白底消失；
+> 多窗口窗口从 640x360 连续改 40 个尺寸再回原尺寸，内容始终铺满、无黑带、无崩溃）。
+
+### 文档
+
+- **README 重写：以属性宏语法为第一卖点**。开头即"一个控件就是一行"的可运行片段 + 属性速查表 +
+  "为什么用属性宏"的取舍说明；旧的版本更新流水账收回 `CHANGELOG`，首页只留定位、能力、构建、边界。
+- **ESP32 下线**：删除 README 中的 ESP32 徽章/目标/构建/验证描述，明确写"v2.5.3 起停止支持"；
+  删掉 CI 的 `esp32-smoke` job 与 `make esp32-smoke` 目标；`tools/esp32_smoke.sh`、
+  `components/fxtk/CMakeLists.txt` 标注为"仅历史存档"（后者清单已过期，不可直接用于 IDF 构建）。
+- 修正文档里的**幽灵 API**：`docs/api.md`、`docs/syntax.md` 曾出现不存在的 `x()/y()/w()/h()`
+  属性，统一改成真实的 `pixel(...)` / `percent(...)` / `grid(...)`。
+- 英文 README 同步重写（语法优先、去掉 ESP32、版本号对齐）。
+
+### 修复
+
+- **版本号漂移**：`fxtk.h` 的 `FXTK_VERSION` 一直是 `2.4.4`，而 README/CHANGELOG 已到 2.5.2 ——
+  `tools/package_release.sh` 正是从这个宏取版本号，打出来的包会标错版本。现统一为 `2.5.3`。
+- **标签/复选框文字带底色方块**：`fxtk_draw_label` / `fxtk_draw_checkbox` 在控件未显式 `color()` 时，
+  用 `fx_get_bg()` 的窗口底色先铺一块矩形再画字；面板/卡片/画布底色与窗口底色不一致时，
+  文字周围会露出一个方块（README 截图里"颜色选择器/背景"周围那圈浅灰就是它）。
+  现改用 v2.5.1 就引入的 `FX_TEXT_NOBG`（只画字形、不铺底），显式 `color()` 的色块标签行为不变。
+- **标签文字越界**：居中对齐/右对齐时若文字比控件宽，起始 x 会算成负数、画到控件左边外面；
+  现在裁到控件左边界。
+- **多真实窗口（FXTK_MW）外部缩放后内容缩在左下角、其余区域全黑**（用户截图复现）：
+  X11 后端从未处理 `ConfigureNotify`、Win32 从未处理 `WM_SIZE`，所以用户拖边框/最大化窗口后
+  `W[id].w/h` 仍停在创建值 —— 驱动继续按旧尺寸设置 GL viewport（GL 原点在左下角），
+  新暴露区域自然是黑的。现在两个后端都同步客户区尺寸；`fxtk_sokol_apply_size()` 的多窗口分支
+  补上 `fx_layout()` + `fx_repaint()`（单窗口分支一直有，多窗口分支漏了）,
+  这样即使应用不逐帧换根，缩放后下一帧也会按新尺寸重排重绘。
+- **多窗口尺寸缓存满后泄漏/抖动**：canvas 与 framebuffer 的 24 槽缓存原来"满了就不入缓存"，
+  帧缓冲指针直接丢失（连续缩放泄漏），画布则留在旧槽上原地重建。现在两者都按 LRU 淘汰并释放旧资源，
+  连续 40 次缩放后回到原尺寸仍能命中缓存。
+- **交互 demo 布局越界**：`examples/mw_interactive.c` 的"关闭此窗"按钮写在 y=286..322、
+  "events" 标签写到 y=276，超出 480×272 设计区 —— 按钮永远画不出来、标签被窗口下沿切掉。
+  已移进设计区（关闭按钮与复选框同一行），并重新生成 `docs/mw_interactive.png`。
+
+### 测试
+
+- `headless_test` 新增第 18 节"文字底色契约"：透明标签必须向字体层传 `FX_TEXT_NOBG`，
+  显式 `color()` 的标签必须仍用自身底色 —— 把这次修复钉成回归，不再靠截图肉眼比对。
+- 多窗口缩放走 **Xvfb + xdotool** 人工回归（未进 CI，因为需要 X）：`xdotool windowsize` 连续改 40 个
+  尺寸 → 截图检查内容铺满；再缩回 640x360 验证缓存复用；同时复测 demo 自带 `Resize controls +40`。
+
 ## v2.5.2（多窗口输入闭环 + 多根控件树 + 交互 demo）
 
 > 复核：`make test` / `make -C demo-main mw_interactive` / `make golden`（GOLDEN_SKIP_DEMO=1）；

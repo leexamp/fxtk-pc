@@ -1,7 +1,7 @@
 # fxtk Complete Guide (guide.md)
 
 > This guide covers all of fxtk's common capabilities: from the first window to custom-drawn animation, data widgets, and performance tuning.
-> Environment: pure PC / Linux simulator (`demo-main/`), SDL2 rendering, fully decoupled from ESP32.
+> Environment: PC only (`demo-main/`); the ESP32 path was retired in v2.5.3.
 > Suggested order: Chapters 1–4 → get it running with quickstart → Chapters 5–9 for writing real pages → Chapters 10–14 for deeper topics.
 
 ---
@@ -596,7 +596,7 @@ if (fxtk_fps() >= 30 && n < cap) {
 ```
 
 - `fx_widget_fix(w, x, y)`: switch to **fixed-coordinate mode** (`FX_POS_FIXED`); subsequent `fx_layout()` (triggered by resize/new widget) will not reset it with ox/oy, and it records the movement reference point.
-- The widget pool size comes from `FX_MAX_WIDGETS`: **8192 on PC** (default) and **4096 on ESP32** — the two targets have diverged (see the README). `fxtk_widget_count()` returns the live count; `-DFX_MAX_WIDGETS=N` overrides.
+- The widget pool size comes from `FX_MAX_WIDGETS`: **8192 by default** (the 4096 ESP32 branch has been retired in v2.5.3). `fxtk_widget_count()` returns the live count; `-DFX_MAX_WIDGETS=N` overrides.
 - For dynamic widgets, cache pointers in an array to avoid a linear `fx_find` scan every frame.
 
 ### 10.3 Deleting Widgets
@@ -883,9 +883,8 @@ const char *r = gpu_raymarch_renderer();       /* return the renderer name */
 - **Forensics**: `FXTK_RECTDBG=1` prints primitive parameters together with the active clip rect whenever
   they look degenerate; `./build_dbg.sh` (or `make fxtk_sim_dbg`) compiles the probes in and logs a
   self-test line at startup.
-- **The two targets have diverged**: PC is not constrained by ESP32 resource limits — the same source
-  builds with `FX_MAX_WIDGETS`/`FX_MAX_SCROLL_STATES`/`FX_MAX_EXTRA_WIDGETS` = 8192/64/64 on PC and
-  4096/8/8 on ESP32. Only API/syntax and rendered output are kept in sync.
+- **PC is the only target since v2.5.3** (the ESP32 path was retired). `FX_MAX_WIDGETS` /
+  `FX_MAX_SCROLL_STATES` / `FX_MAX_EXTRA_WIDGETS` default to 8192/64/64 and stay overridable with `-D`.
 - Font scale now matches SDL_ttf (`stbtt_ScaleForMappingEmToPixels`), and the widget-layer SDF
   anti-aliasing is **on by default** (`FXTK_AA=0` disables; A/B cost measured at ~1.6%).
 

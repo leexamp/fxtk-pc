@@ -38,7 +38,9 @@
 
 ## 平台实现矩阵
 
-| 能力 | Linux | Windows | ESP32 | stub 后端 |
+> ESP32 列仅作历史记录：v2.5.3 起 ESP32 路径停止支持，代码里的纯 CPU 分支保留但不再验证。
+
+| 能力 | Linux | Windows | ESP32（已停用） | stub 后端 |
 |---|---|---|---|---|
 | 随机 / 时间 / 路径 | ✅ | ✅ | ✅ | ✅（定种子 + 固定时钟） |
 | 文件读写 | ✅ | ✅ | ✅ | ✅（内存文件系统） |
@@ -56,8 +58,8 @@
 1. 在 `fxtk_backends.c` 里加一个 `#elif defined(YOUR_PLATFORM)` 分支，实现上表里的能力
    （用不到的直接 `return 0` / 置空，**不要假装成功**——调用方靠 `fx_backend_caps()` 判断）。
 2. 核心不需要改动：它只依赖上表的函数签名。
-3. 想验证语法与接口是否齐全，跑 `tools/esp32_smoke.sh`（用假头 + `-DESP_PLATFORM` 做语法级检查，不需要真工具链）
-   —— 它就是这么发现"ESP32 分支缺 FreeRTOS 头"的。
+3. 至少把 `make test` 的真实后端与 `-DFXTK_BACKEND_STUB` 变体各跑一遍；新增分支要能被无头测试覆盖。
+   （`tools/esp32_smoke.sh` 是历史存档：ESP32 路径自 v2.5.3 停用，不再随仓库演进。）
 
 ## 设计约定
 

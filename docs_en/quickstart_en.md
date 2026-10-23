@@ -99,8 +99,8 @@ The demo's "stress test" page automatically adds widgets every frame and lets th
   quad count, fps and which path (GPU/CPU) is in use.
 - **Design tokens**: all control colours, radii and paddings live in
   `components/fxtk/fxtk_tokens.h`; changing that one file restyles every control.
-- **Headless verification**: `make test` (unit tests, real + stub backend), `make golden`
-  (pixel regression), `make esp32-smoke` (ESP32 interface smoke test without the IDF toolchain).
+- **Headless verification**: `make test` (unit tests, real + stub backend) and `make golden`
+  (pixel regression; CI runs it with `GOLDEN_SKIP_DEMO=1`).
 
 > The other English documents in this folder predate v2.4 and describe the v2.3 API surface;
 > the Chinese `docs/ROADMAP_v2.4.md` is the authoritative per-version status.

@@ -112,13 +112,4 @@ jobs:
       - name: Cross-build demo with widget trimming (--autotrim)
         run: cd demo-main && bash ./build_win_sokol.sh --autotrim
 
-  # v2.4: ESP32 侧接口级编译冒烟 (不需要 ESP-IDF 工具链; 抓隐式声明等"侥幸编过"的问题)
-  esp32-smoke:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: ESP32 接口级冒烟
-        # v2.4.5: 这一行要求 tools/esp32_smoke.sh 在 git 里带可执行位。
-        # 此前全仓库 *.sh 都是 100644, ./ 直呼会 "Permission denied"(exit 126) ——
-        # 该 job 长期是红的, 而本地却跑得通(开发机文件系统上恰好是 755, 把问题盖住了)。
-        run: ./tools/esp32_smoke.sh
+  # v2.5.3: esp32-smoke job 已移除 —— fxtk 不再维护 ESP32 路径 (仅 PC: Linux/Windows + sokol)。

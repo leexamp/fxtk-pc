@@ -14,7 +14,8 @@
 - **绘制上下文**：所有立即模式绘制必须在 `fx_frame_begin()` 与 `fx_frame_end()` 之间（或在 `fx_canvas_begin/end`、
   控件回调、`fx_wm_draw` 的内容回调里）。绘制只对"当前目标"生效（窗口画布 / 离屏画布）。
 - **控件**：用属性宏（C99 compound literal）创建，末尾自动补 `FX_ATTR_END`；例如
-  `fx_widget_t *b = fx_button_new(name("ok"), text("确定"), x(20), y(20), w(120), h(44), call(on_ok));`
+  `fx_widget_t *b = fx_button_new(pixel("20,20","140,64"), name("ok"), text("确定"), call(on_ok));`
+  （坐标用 `pixel("x1,y1","x2,y2")` / `percent(...)` / `grid(...)`，没有 `x()/y()/w()/h()` 这类属性。）
 - **缩放**：框架按 `fx_ui_scale()` 自动缩放控件；`fx_set_max_scale()` 限制上限；避免在业务里手算倍数。
 - **能力查询**：后端可选能力（GPU 圆角、raymarch、图片 GPU 形变等）先查 `fx_*_available()`；缺失时是安全空操作。
 - **版本**：本文对应 v2.5；多窗口（`fxtk_win_*`）需要独立后端 `-DFXTK_MW`。
@@ -478,7 +479,7 @@ static void on_frame(void) {
 }
 int main(void) {
     fx_init(&my_driver);          // 后端驱动（sokol/sdl/stub）
-    fx_button_new(name("ok"), text("确定"), x(20), y(180), w(120), h(44));
+    fx_button_new(pixel("20,180","140,224"), name("ok"), text("确定"));
     for (;;) {
         if (backend_should_quit()) break;
         fx_poll();                // 处理输入/布局/绘制（内部调 on_frame）

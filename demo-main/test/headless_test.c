@@ -111,8 +111,12 @@ static fx_driver_t s_drv = {
 };
 
 /* ---------- 文字/纹理桩 (无 SDL/字体, 均为 no-op) ---------- */
+/* v2.5.3: 记录最后一次文字绘制传下来的底色, 供"透明文字不得铺底色"的契约断言使用。 */
+static uint32_t s_last_text_bg = 0;
+static int      s_last_text_bg_valid = 0;
 void fx_draw_text(int x, int y, const char *s) {(void)x;(void)y;(void)s;}
-void fx_draw_text_c(int x, int y, const char *s, fx_color_t fg, fx_color_t bg) {(void)x;(void)y;(void)s;(void)fg;(void)bg;}
+void fx_draw_text_c(int x, int y, const char *s, fx_color_t fg, fx_color_t bg)
+{ (void)x;(void)y;(void)s;(void)fg; s_last_text_bg = bg; s_last_text_bg_valid = 1; }
 void fx_draw_text_c_n(int x, int y, const char *s, int n, fx_color_t fg, fx_color_t bg) {(void)x;(void)y;(void)s;(void)n;(void)fg;(void)bg;}
 int  fx_text_width(const char *s) {(void)s; return 0;}
 int  fx_text_width_n(const char *s, int n) {(void)s;(void)n; return 0;}
@@ -121,6 +125,9 @@ int  fxtk_text_width_size(int size, const char *t) {(void)size;(void)t; return 0
 void *fxtk_font_size(int size) {(void)size; return NULL;}
 int  fxtk_font_height(int size) {(void)size; return 0;}
 void fxtk_font_set_size(int size) {(void)size;}
+
+/* v2.5.3: 文字底色契约测试需要直接调"单个控件的绘制函数", 不跑整帧 */
+void fxtk_draw_label(fx_widget_t *w);
 
 /* ---------- SDL 驱动才有的符号桩 ---------- */
 int  fxtk_fps(void) { return 60; }
@@ -580,6 +587,27 @@ int main(void) {
         if (svok) printf("  [ok]   SVG 属性不越过元素边界 (M1)\n");
         else { printf("  [FAIL] SVG shape[0] bbox=(%g,%g)-(%g,%g), 期望 (0,0)-(10,10) (M1)\n", bx1, by1, bx2, by2); fails++; }
         if (sv) fx_svg_free(sv);
+    }
+
+    /* [18] v2.5.3: 文字底色契约 —— 透明标签/复选框不得先铺一块全局底色
+     * 背景: fxtk_draw_label 原先用 fx_get_bg() 当文字底色, 面板/卡片底色与窗口底色不一致时,
+     * 文字周围会露出一块方块(README 截图里可见)。改为 FX_TEXT_NOBG, 这里把契约钉死。 */
+    printf("[18] 文字底色契约 (v2.5.3)\n");
+    {
+        fx_widget_t *lb = fx_label_new(pixel("100,140","300,162"), name("lbl_nobg"), title("透明标签"));
+        fx_layout();
+        s_last_text_bg_valid = 0; fxtk_draw_label(lb);
+        if (s_last_text_bg_valid && s_last_text_bg == (uint32_t)FX_TEXT_NOBG)
+            printf("  [ok]   透明标签传 FX_TEXT_NOBG (不铺底色)\n");
+        else { printf("  [FAIL] 透明标签文字底色 = 0x%08X, 期望 FX_TEXT_NOBG\n", (unsigned)s_last_text_bg); fails++; }
+
+        fx_widget_t *lc = fx_label_new(pixel("100,180","300,202"), name("lbl_chip"), title("色块标签"),
+                                       color(FX_RGB(255, 90, 0)));
+        fx_layout();
+        s_last_text_bg_valid = 0; fxtk_draw_label(lc);
+        if (s_last_text_bg_valid && s_last_text_bg == (uint32_t)FX_RGB(255, 90, 0))
+            printf("  [ok]   色块标签仍用自身底色 (不受透明化影响)\n");
+        else { printf("  [FAIL] 色块标签文字底色 = 0x%08X, 期望 0xFF5A00\n", (unsigned)s_last_text_bg); fails++; }
     }
 
     /* M3: 控件池耗尽时 list/drop 工厂必须返回 NULL 而不是崩溃 */
