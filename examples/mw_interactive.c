@@ -51,8 +51,10 @@ static void build_controls(fx_widget_t *r)
     fx_checkbox_new(pixel("16,150","320,180"), name("cb"), title("勾选我"), call(on_check));
     fx_slider_new(pixel("16,190","500,210"), name("sl"), value(40), call(on_slider));
     lbl_slider = fx_label_new(pixel("16,218","500,244"), name("slv"), title("slider: 40"));
-    lbl_events = fx_label_new(pixel("16,250","500,276"), name("ev"), title("events: 0"));
-    fx_button_new(pixel("16,286","200,322"), name("quit"), title("关闭此窗"), call(on_quit));
+    /* v2.5.3: 这两行原来写到 y=276/322, 超出 480x272 设计高度 —— "关闭此窗"按钮永远画不出来,
+     * "events" 标签在窗口下沿被切掉。移进设计区: 关闭按钮与复选框同一行, events 收在底部。 */
+    lbl_events = fx_label_new(pixel("16,240","500,264"), name("ev"), title("events: 0"));
+    fx_button_new(pixel("324,148","464,180"), name("quit"), title("关闭此窗"), call(on_quit));
 }
 
 static void build_panel(fx_widget_t *r)

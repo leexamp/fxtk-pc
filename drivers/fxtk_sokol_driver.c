@@ -119,6 +119,11 @@ static sg_image s_mw_img[24];
 static sg_view  s_mw_attach[24], s_mw_tex[24];
 static int s_mw_w[24], s_mw_h[24], s_mw_n = 0, s_cvi = 0;
 static int s_mw_clear[24];
+/* v2.5.3: 尺寸缓存(画布/帧缓冲)都按"尺寸"索引, 上限 24。用户拖拽缩放会持续产生新尺寸,
+ * 满了必须淘汰最久未用的那一项 —— 早先"满了就放弃入缓存"会让旧帧缓冲指针直接丢失(内存泄漏),
+ * 画布缓存满则原地重建, 导致两个窗口来回切时每帧销毁/重建纹理。 */
+static int s_mw_cvuse[24];          /* 画布槽最近使用序号 */
+static int s_mw_use_clock = 0;      /* 单调递增的使用序号 */
 #define MW_NEED_CLEAR (s_need_clear || s_mw_clear[s_cvi])
 #define s_canvas_img    (s_mw_img[s_cvi])
 #define s_canvas_attach (s_mw_attach[s_cvi])
@@ -126,9 +131,20 @@ static int s_mw_clear[24];
 #define s_canvas_w      (s_mw_w[s_cvi])
 #define s_canvas_h      (s_mw_h[s_cvi])
 static void canvas_select(void){
-    for (int i = 0; i < s_mw_n; i++) if (s_mw_w[i] == s_w && s_mw_h[i] == s_h) { s_cvi = i; return; }
-    if (s_mw_n < 24) { s_cvi = s_mw_n++; s_mw_w[s_cvi] = s_w; s_mw_h[s_cvi] = s_h;
-        s_mw_img[s_cvi].id = SG_INVALID_ID; s_mw_clear[s_cvi] = 1; }
+    for (int i = 0; i < s_mw_n; i++) if (s_mw_w[i] == s_w && s_mw_h[i] == s_h) {
+        s_mw_cvuse[i] = ++s_mw_use_clock; s_cvi = i; return; }
+    int slot;
+    if (s_mw_n < 24) slot = s_mw_n++;
+    else {   /* v2.5.3: 满了按 LRU 淘汰(并释放它的纹理), 而不是把 s_cvi 留在旧槽上 */
+        slot = 0; for (int i = 1; i < 24; i++) if (s_mw_cvuse[i] < s_mw_cvuse[slot]) slot = i;
+        if (s_mw_img[slot].id != SG_INVALID_ID) {
+            sg_destroy_view(s_mw_attach[slot]); sg_destroy_view(s_mw_tex[slot]);
+            sg_destroy_image(s_mw_img[slot]);
+            s_mw_img[slot].id = SG_INVALID_ID;
+        }
+    }
+    s_cvi = slot; s_mw_w[slot] = s_w; s_mw_h[slot] = s_h; s_mw_clear[slot] = 1;
+    s_mw_cvuse[slot] = ++s_mw_use_clock;
 }
 #else
 static sg_image s_canvas_img;
@@ -1395,6 +1411,7 @@ int  fxtk_sokol_vtx_count(void) { return s_vb_n; }
 /* 多窗口模式: 不同窗口尺寸来回切换, 帧缓冲按尺寸缓存, 避免每帧 malloc/free */
 static uint32_t *s_mw_fb[24];
 static int s_mw_fbw[24], s_mw_fbh[24], s_mw_fbn = 0;
+static int s_mw_fbuse[24];   /* v2.5.3: LRU 序号, 缓存满时淘汰最久未用尺寸的帧缓冲 */
 #endif
 
 void fxtk_sokol_apply_size(int w, int h)
@@ -1415,14 +1432,31 @@ void fxtk_sokol_apply_size(int w, int h)
 #ifdef FXTK_MW
     {   int found = 0;
         for (int i = 0; i < s_mw_fbn; i++) if (s_mw_fbw[i] == w && s_mw_fbh[i] == h) {
-            s_fb = s_mw_fb[i]; s_fb_w = w; s_fb_h = h; s_dirty = 0; found = 1; break; }
+            s_fb = s_mw_fb[i]; s_fb_w = w; s_fb_h = h; s_dirty = 0;
+            s_mw_fbuse[i] = ++s_mw_use_clock; found = 1; break; }
         if (!found) {
+            int slot;
+            if (s_mw_fbn < 24) slot = s_mw_fbn++;
+            else {   /* v2.5.3: 满了淘汰最久未用的尺寸(跳过当前正在用的缓冲), 释放旧内存防泄漏 */
+                slot = -1;
+                for (int i = 0; i < 24; i++) {
+                    if (s_mw_fb[i] == s_fb) continue;             /* 当前缓冲不能释放 */
+                    if (slot < 0 || s_mw_fbuse[i] < s_mw_fbuse[slot]) slot = i;
+                }
+                if (slot < 0) slot = 0;
+                free(s_mw_fb[slot]); s_mw_fb[slot] = NULL;
+            }
             s_fb = NULL; s_fb_w = s_fb_h = 0; s_dirty = 0;
             fb_ensure();
-            if (s_mw_fbn < 24) { s_mw_fb[s_mw_fbn] = s_fb; s_mw_fbw[s_mw_fbn] = w; s_mw_fbh[s_mw_fbn] = h; s_mw_fbn++; }
+            s_mw_fb[slot] = s_fb; s_mw_fbw[slot] = w; s_mw_fbh[slot] = h;
+            s_mw_fbuse[slot] = ++s_mw_use_clock;
         }
     }
     s_need_clear = 1;
+    /* v2.5.3: 多窗口分支之前漏了重排+重绘。应用若只用一个控件根(不逐帧 fx_root_select 换根),
+     * 外部缩放窗口后布局会停在旧尺寸 —— 表现为内容缩在左下角、其余区域全黑(实测 900x600 复现)。 */
+    fx_layout();
+    fx_repaint();
 #else
     free(s_fb); s_fb = NULL; s_fb_w = s_fb_h = 0; s_dirty = 0;
     fb_ensure();

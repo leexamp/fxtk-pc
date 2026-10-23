@@ -70,6 +70,7 @@ static void mw_pend_flush(int id)
 static HGLRC s_ctx; static HDC s_dc0; static int s_pf = 0; static PIXELFORMATDESCRIPTOR s_pfd;
 static int s_quit = 0;
 static int mw_id_of_hwnd(HWND h);   /* 定义在 W[] 之后 */
+static void mw_note_size(int id, int w, int h);   /* v2.5.3: WM_SIZE 同步客户区尺寸, 定义在 W[] 之后 */
 static LRESULT CALLBACK mw_wndproc(HWND hw, UINT msg, WPARAM wp, LPARAM lp)
 {
     int id = mw_id_of_hwnd(hw);
@@ -127,6 +128,9 @@ static LRESULT CALLBACK mw_wndproc(HWND hw, UINT msg, WPARAM wp, LPARAM lp)
         mw_pend_push(id, MWP_WHEEL, pt.x, pt.y, (int)(short)HIWORD(wp) / 120 * 40, 0, NULL);
         return 0;
     }
+    case WM_SIZE:   /* v2.5.3: 用户拖边框/最大化窗口时同步客户区尺寸, 否则仍按旧尺寸绘制 */
+        if (wp != SIZE_MINIMIZED) mw_note_size(id, (int)LOWORD(lp), (int)HIWORD(lp));
+        return 0;
     }
     return DefWindowProcW(hw, msg, wp, lp);   /* 窗口是 Unicode 的, 必须用 W 版默认过程 */
 }
@@ -134,6 +138,8 @@ typedef struct { HWND hw; HDC dc; int w, h, shown; } mwwin_t;
 static mwwin_t W[FXTK_MW_MAX]; static int NW_ = 0, s_cur = -1;
 static int s_inited = 0;
 static int mw_id_of_hwnd(HWND h) { for (int i = 0; i < NW_; i++) if (W[i].hw == h) return i; return -1; }
+static void mw_note_size(int id, int w, int h)
+{ if (id >= 0 && id < NW_ && w > 0 && h > 0) { W[id].w = w; W[id].h = h; } }   /* v2.5.3 */
 
 int fxtk_mw_init(void)
 {
@@ -432,6 +438,13 @@ void fxtk_mw_poll(void)
             break;
         case MotionNotify:
             mw_pend_push(id, MWP_MOVE, e.xmotion.x, e.xmotion.y, (e.xmotion.state & Button1Mask) ? 1 : 0, 0, NULL);
+            break;
+        case ConfigureNotify:   /* v2.5.3: 外部缩放/最大化窗口时同步客户区尺寸 */
+            if (e.xconfigure.width > 0 && e.xconfigure.height > 0 &&
+                (e.xconfigure.width != W[id].w || e.xconfigure.height != W[id].h)) {
+                W[id].w = e.xconfigure.width;
+                W[id].h = e.xconfigure.height;
+            }
             break;
         default: break;
         }

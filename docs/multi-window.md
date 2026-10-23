@@ -117,8 +117,9 @@ while (!fxtk_win_quit()) {
 ## 5. 后端实现要点（维护者看）
 
 - 一进程一 GL 上下文；每个窗口 `CreateWindow` + 同一个 pixel format，渲染前 `make_current`。
-- 每窗口 canvas/framebuffer 按**尺寸**缓存（24 槽）。**不要逐帧改窗口尺寸**：每个新尺寸都会新建
-  缓存，连续 resize 会打爆缓存并触发 sokol 校验 panic（表现为闪屏/黑窗/崩溃）。
+- 每窗口 canvas/framebuffer 按**尺寸**缓存（24 槽）。v2.5.3 起缓存满时按 LRU 淘汰（同时释放
+  帧缓冲/纹理），因此用户拖拽窗口连续缩放不会泄漏或撑爆缓存；仍不建议应用**每帧**改尺寸
+  （每帧换一个新尺寸会一直走淘汰路径，浪费带宽）。
 - **必须关 vsync**：N 个窗口串行 `SwapBuffers`，若开 vsync 会互相等垂直同步，帧率掉到
   `60/N`；帧率由应用自己的 fps 上限控制。
 - 窗口事件走原生 API：Win32 `PeekMessageW/DispatchMessageW`（`WM_CLOSE`/`WM_DESTROY`/ESC）；
@@ -130,7 +131,9 @@ while (!fxtk_win_quit()) {
   - 真 HiDPI 未验证（沿用 DPI-unaware + 系统缩放）；
   - 没有窗口图标/最小化状态/每窗口独立消息回调；
   - **剪贴板在 MW 下未实现**（右键菜单"粘贴/复制"目前是空操作）；中文输入法(IME)在 sokol/MW 路径同样未接；
-  - 窗口被用户拖动/缩放后，应用侧不会收到尺寸变化回调（demo 的窗口缩放由应用自己调 `fxtk_win_resize`）。
+  - 窗口被用户拖动/缩放后**没有事件回调**；v2.5.3 起后端会同步客户区尺寸，下一帧自动重排/重绘，
+    应用可轮询 `fxtk_win_width/height` 取新尺寸（此前不处理 ConfigureNotify/WM_SIZE，放大后内容
+    会缩在左下角、其余区域全黑）。窗口被移动(x/y)不触发重绘。
 
 ## 6. 验证
 
@@ -138,6 +141,8 @@ while (!fxtk_win_quit()) {
   按钮点击、复选框、滑杆拖动、文本框键盘输入（ASCII）、右键菜单、窗口 raise/move/resize；
 - MV 用例：`mv/pv/v2/single/`，6 窗口渲染 + 全片 212s（窗口缩放/移动/闪白），验证渲染与后端稳定性；
 - 冒烟：多窗口标题栏/内容正常、关任意窗退出、连续 resize 不闪/不崩；
+- **外部缩放**（v2.5.3）：Xvfb + xdotool 把窗口从 640x360 连改 40 个尺寸后回到原尺寸，内容始终铺满、
+  无黑带、缓存复用正常；应用侧 `fxtk_win_resize` 路径同样复测；
 - 已知坑/回归命令见 MV 仓库 `mv/pv/v2/single/MAINTENANCE.md` 第 5、6 节。
 
 ## 附：与画布内窗口管理器（`fxtk_wm`）的区别
