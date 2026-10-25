@@ -257,7 +257,7 @@ static void on_scroll_view(fx_widget_t *w, void *ud) {
     for (int i = first; i < 60; i++) {
         int y = i * row_h - off;
         if (y > ch) break;
-        char t[64]; snprintf(t, sizeof(t), "Row %d content (scroll with the wheel)", i + 1);
+        char t[64]; snprintf(t, sizeof(t), "Row %d content (wheel / drag to scroll)", i + 1);
         if (i & 1) {
             fx_set_color(FX_RGB(33, 150, 243));
             fx_fill_rect(10, y + 4, cw - 20, y + row_h - 6);

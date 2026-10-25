@@ -105,6 +105,33 @@ function app_init()
     assert(drop)
     fx_drop_add(drop, "x")
 
+    -- v2.5.5: 统一滚动 API / 触摸开关
+    local sc = fx_scroll_new(pixel("10,10", "200,200"), name("scroll0"))
+    assert(sc, "scroll_new")
+    fx_scroll_content(sc, 1000)
+    fx_widget_set_rect(sc, 10, 10, 200, 200)
+    local smax = fx_scroll_max(sc)
+    assert(smax == 1000 - 191, "scroll max = " .. tostring(smax))
+    assert(fx_scroll_view_h(sc) == 191)
+    fx_scroll_set(sc, 100)
+    assert(fx_scroll_offset(sc) == 100, "scroll_set")
+    fx_scroll_to(sc, 300)
+    for _ = 1, 80 do fx_scroll_update(sc, 1000) end
+    assert(math.abs(fx_scroll_offset(sc) - 300) <= 1, "scroll_to = " .. tostring(fx_scroll_offset(sc)))
+    fx_scroll_to_bottom(sc)
+    for _ = 1, 400 do fx_scroll_update(sc, 1000) end
+    assert(fx_scroll_offset(sc) == smax, "scroll_to_bottom")
+    fx_scroll_by(sc, -40)
+    for _ = 1, 400 do fx_scroll_update(sc, 1000) end
+    assert(fx_scroll_offset(sc) == smax - 40, "scroll_by")
+    assert(type(fx_touch_capable()) == "boolean")
+    fx_set_touch_mode(0)
+    assert(fx_touch_capable() == false)
+    fx_set_touch_mode(1)
+    assert(fx_touch_capable() == true)
+    fx_set_touch_mode(-1)
+    fx_delete(sc)   -- 只测 API: 删掉, 别挡住后面的点击命中测试
+
     -- flex
     local panel = fx_panel_new(pixel("300,150", "460,230"), name("panel"))
     assert(panel)

@@ -13,6 +13,9 @@ static const fx_driver_t *s_drv;
 static fx_color_t s_color = FX_WHITE;
 static int16_t s_clip_x1 = 0, s_clip_y1 = 0, s_clip_x2 = 32767, s_clip_y2 = 32767;
 static int s_ox = 0, s_oy = 0;
+/* v2.5.5: 是否正在画布回调里(坐标是局部的 0..cw-1). 用于让 fx_scrollbar_draw 这类
+ * "既可能被普通控件调用、又可能被画布回调调用"的工具函数自动选对坐标系。 */
+static int s_cv_active = 0;
 static int s_framing = 0;
 
 /* 【核心修复】动态行缓冲：窗口超过 512 宽时自动扩容，不再溢出闪退 */
@@ -368,6 +371,7 @@ void fx_reset_clip(void)
 void fx_canvas_begin(fx_widget_t *cv)
 {
     if (!cv) return;
+    s_cv_active++;
     if (s_offing) {
         s_ox = 0; s_oy = 0;
         fx_set_clip(0, 0, s_offw - 1, s_offh - 1);
@@ -379,9 +383,12 @@ void fx_canvas_begin(fx_widget_t *cv)
 
 void fx_canvas_end(void)
 {
+    if (s_cv_active > 0) s_cv_active--;
     s_ox = 0; s_oy = 0;
     fx_reset_clip();
 }
+/* v2.5.5: 供工具函数判断当前是否在画布回调内(局部坐标) */
+int fxtk_canvas_active(void) { return s_cv_active > 0; }
 
 void fxtk_off_begin(fx_widget_t *cv)
 {

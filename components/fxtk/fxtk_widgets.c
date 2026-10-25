@@ -506,16 +506,15 @@ void fxtk_draw_textedit(fx_widget_t *w)
     }
     se[nl-1] = len;
     int total_h = nl * lh + 8;
-    w->content_h = (int16_t)(total_h > 32000 ? 32000 : total_h);
     int vis_h = w->y2 - w->y1 - 10;
-    if (w->scroll_y < 0) w->scroll_y = 0;
-    if (w->scroll_y > total_h - vis_h && total_h > vis_h) w->scroll_y = (int16_t)(total_h - vis_h);
+    /* v2.5.5: 输入框也走统一滚动引擎(滚轮/拖动滚动条/缓动/夹取与列表一致) */
+    int off = fxtk_scroll_step(w, total_h, vis_h);
 
     int a = w->caret, b = w->anchor;
     if (a > b) { int t = a; a = b; b = t; }
 
     /* 逐行绘制 (只画可见行) */
-    int ty0 = w->y1 + 5 - w->scroll_y;
+    int ty0 = w->y1 + 5 - off;
     for (int L = 0; L < nl; L++) {
         int y = ty0 + L * lh;
         if (y + lh < w->y1 + 2 || y > w->y2 - 2) continue;
@@ -547,17 +546,8 @@ void fxtk_draw_textedit(fx_widget_t *w)
          * 都已含文本框原点; 早先这里又加了 w->x1/w->y1, 原点多算一遍 → 候选窗整体偏下一个框高。 */
         fx_set_ime_pos(cx, cy + 20);
     }
-/* TE-SCROLLBAR */
-if (total_h > vis_h) {
-int rw2 = w->x2 - 2;
-int th = vis_h * vis_h / total_h;
-if (th < 20) th = 20;
-int ty = w->y1 + 2 + (int)((long)w->scroll_y * (w->y2 - w->y1 - 4 - th) / (total_h - vis_h));
-fx_set_color(FX_TOK_BORDER);
-fx_fill_rect(rw2 - 3, w->y1 + 2, rw2, w->y2 - 2);
-fx_set_color(FX_TOK_TEXT_DIM);
-fx_fill_rect(rw2 - 3, ty, rw2, ty + th);
-}
+/* v2.5.5: 统一滚动条(与滚动容器/列表同一套宽度/最小滑块/配色) */
+fx_scrollbar_draw(w, off, total_h);
     if (w->text_max > 0) {
         int n = 0;
         for (int k = 0; k < len; n++) {

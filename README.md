@@ -6,7 +6,7 @@
 > Lua 源码 vendored，不依赖系统 liblua），C 核心语义不变。
 
 <p>
-  <img alt="version" src="https://img.shields.io/badge/version-v2.5.4-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-v2.5.5-blue">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green">
   <img alt="c" src="https://img.shields.io/badge/language-C99-9cf">
   <img alt="platform" src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey">
@@ -145,7 +145,7 @@ make -C demo-main lua-test   # 无头绑定自检（SDL dummy，无需窗口/字
 | **控件** | 按钮 / 标签 / 滑条 / 进度条 / 复选框 / 网格键盘 / 画布 / 标签页 / 图片 / 输入框 / 列表 / 下拉 / 滚动容器 / 卡片 |
 | **布局** | `pixel` 设计坐标 + 响应式缩放 / `percent` / `grid` / 弹性布局（`FX_POS_FLEX`） |
 | **画布（立即模式）** | 线/圆/椭圆/三角/多边形/圆弧/圆角矩形/文字/渐变 / 离屏缓冲 / 抗锯齿 / 变换栈 |
-| **输入** | 文本编辑（换行、跨行框选、Ctrl+A/C/V/X、系统剪贴板、字数上限）/ 滚轮路由 / 带动画滚动 / 滚动条拖拽 / 焦点管理 / 单指手势 |
+| **输入** | 文本编辑（换行、跨行框选、Ctrl+A/C/V/X、系统剪贴板、字数上限）/ 统一滚动（容器·列表·下拉·输入框·画布同一套：滚轮 + 缓动 + 滚动条拖拽）/ 触摸屏拖动滚动（检测到触摸屏才启用，带惯性）/ 焦点管理 / 单指手势 |
 | **渲染** | GPU 顶点批 / 真透视四边形形变 / 图像后处理（翻转/灰度/染色/亮度）/ GPU & CPU 光追、粒子 |
 | **桌面** | 单窗口置顶/无边框/拖动/居中；多真实窗口（`-DFXTK_MW`，X11/Windows）/ 画布内窗口管理器（`fxtk_wm`） |
 

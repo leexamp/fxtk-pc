@@ -1,6 +1,6 @@
 # Lua 绑定（fxtk + Lua 5.4）
 
-> **核心：fxtk-pc-v2.5（C99，`FXTK_VERSION` = 2.5.4，语义未改）。**
+> **核心：fxtk-pc-v2.5（C99，`FXTK_VERSION` = 2.5.5，语义未改）。**
 > Lua 不是重写版，而是绑定层：控件、画布、图片、输入、后端服务仍由 C 核心实现；
 > 本仓库多做了一件事——让同一套 API 可以被 Lua 5.4 直接调用，并提供一个 12 页的 Lua 演示。
 
@@ -121,6 +121,8 @@ C 与 Lua 的对应：
 | `fx_last_key(&k)` | `local k = fx_last_key()`（表：`k.key`、`k.utf8`） |
 | `fx_gesture_poll(&ev)` | `local ev = fx_gesture_poll()`（表或 nil） |
 | `fx_image_size(img,&w,&h)` | `local w,h = fx_image_size(img)` |
+| `fx_scroll_offset/max/view_h(w)` | 同名，返回整数；`fx_scroll_update(w,h)` 也返回偏移 |
+| `fx_touch_capable()` / `fx_set_touch_mode(n)` | 同名；前者返回 boolean（n: -1 自动 / 0 关 / 1 开） |
 
 属性本身也是 Lua 函数，返回带 `__fx` 标记的 table；控件构造函数接受 `...` 个属性。
 不传属性时等价于 C 的默认值。

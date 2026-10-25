@@ -80,7 +80,16 @@ static int  drv_key_read(fx_keyev_t *ev) { if (s_kqi >= s_kqn) return 0; *ev = s
 static void drv_clip_set(const char *s) { snprintf(s_clip, sizeof s_clip, "%s", s ? s : ""); }
 static const char *drv_clip_get(void) { return s_clip; }
 static void drv_set_title(const char *s) {(void)s;}
-static int  drv_wheel_read(int *x, int *y, int *dy) {(void)x;(void)y;(void)dy; return 0;}
+/* v2.5.5: 假驱动支持注入滚轮, 供"统一滚动路由"端到端测试(fx_poll → 控件 step) */
+#define WQ_MAX 8
+static int s_wq[WQ_MAX][3]; static int s_wqn = 0, s_wqi = 0;
+static void wq_push(int x, int y, int dy) { if (s_wqn < WQ_MAX) { s_wq[s_wqn][0]=x; s_wq[s_wqn][1]=y; s_wq[s_wqn][2]=dy; s_wqn++; } }
+static int drv_wheel_read(int *x, int *y, int *dy)
+{
+    if (s_wqi >= s_wqn) return 0;
+    *x = s_wq[s_wqi][0]; *y = s_wq[s_wqi][1]; *dy = s_wq[s_wqi][2];
+    s_wqi++; return 1;
+}
 static void drv_blit_img(const uint32_t *px,int w,int h,int dx,int dy,int dw,int dh,int dark) {(void)px;(void)w;(void)h;(void)dx;(void)dy;(void)dw;(void)dh;(void)dark;}
 static void drv_set_clip_rect(int x1,int y1,int x2,int y2) {(void)x1;(void)y1;(void)x2;(void)y2;}
 static void drv_fill_tri(int x1,int y1,int x2,int y2,int x3,int y3,uint32_t c) {(void)x1;(void)y1;(void)x2;(void)y2;(void)x3;(void)y3;(void)c;}
@@ -154,6 +163,7 @@ static void check_rect(const char *what, fx_widget_t *w, int x1,int y1,int x2,in
 int main(void) {
     int fails = 0;
     fx_init(&s_drv);
+    fx_set_touch_mode(0);   /* v2.5.5: 测试基线=桌面(鼠标拖动不是滚动), [20] 里再显式开触摸 */
 
     printf("== fxtk headless test ==\n");
 
@@ -642,6 +652,107 @@ int main(void) {
         fx_set_design_pixel(480, 272);   /* 恢复默认, 不影响后续用例 */
         fx_get_design_pixel(NULL, NULL); /* 允许不取值 */
         printf("  [ok]   fx_get_design_pixel(NULL,NULL) 不崩溃\n");
+    }
+
+    /* [20] v2.5.5: 统一滚动 —— 滚动容器/列表 共用同一状态机: 滚轮/缓动/触摸拖动/惯性/夹取 */
+    printf("[20] 统一滚动: 缓动/夹取/触摸拖动/惯性/列表\n");
+    {
+        fx_set_touch_mode(1);   /* 本节模拟触摸屏(桌面没触摸屏时不进拖动滚动路径) */
+        fx_widget_t *sc = fx_scroll_new(pixel("10,10","300,200"), name("u_scroll"));
+        fx_scroll_content(sc, 800);
+        fx_layout();
+        fx_repaint(); fx_poll();                       /* 一帧绘制: 统一引擎记录内容/视口 */
+        int base_y1 = 0, base_y2 = 0;
+        fx_widget_rect(sc, NULL, &base_y1, NULL, &base_y2);
+        int vh = fx_scroll_view_h(sc), mx = fx_scroll_max(sc);
+        if (vh == base_y2 - base_y1 + 1 && mx == 800 - vh && vh > 100)
+            printf("  [ok]   视口高 %d / 最大偏移 %d (内容 800)\n", vh, mx);
+        else { printf("  [FAIL] 视口/上限: vh=%d max=%d (期望 %d/%d)\n", vh, mx, base_y2-base_y1+1, 800-(base_y2-base_y1+1)); fails++; }
+
+        fx_scroll_to(sc, 200);                         /* 目标定位 → 逐帧缓动收敛 */
+        for (int i = 0; i < 80; i++) fx_scroll_update(sc, 800);
+        int off = fx_scroll_offset(sc);
+        if (off >= 198 && off <= 200) printf("  [ok]   fx_scroll_to 缓动收敛 (offset=%d)\n", off);
+        else { printf("  [FAIL] fx_scroll_to 停在 %d, 期望 200\n", off); fails++; }
+
+        fx_scroll_to(sc, 99999);                       /* 目标超上限 → 夹到 max */
+        for (int i = 0; i < 400; i++) fx_scroll_update(sc, 800);
+        off = fx_scroll_offset(sc);
+        if (off == mx) printf("  [ok]   目标超上限被夹到 max (%d)\n", off);
+        else { printf("  [FAIL] 上限夹取 offset=%d max=%d\n", off, mx); fails++; }
+
+        fx_scroll_set(sc, 0);                          /* 触摸拖动: 1:1 跟手 + 松手惯性 */
+        fx_touch_press(150, 150);
+        fx_touch_move(150, 130);
+        fx_touch_move(150, 90);
+        int during = fx_scroll_offset(sc);
+        fx_touch_release(150, 90);
+        for (int i = 0; i < 60; i++) fx_scroll_update(sc, 800);
+        int after = fx_scroll_offset(sc);
+        if (during >= 55 && during <= 65) printf("  [ok]   触摸拖动 1:1 跟手 (拖 60 → offset=%d)\n", during);
+        else { printf("  [FAIL] 拖动跟手 offset=%d 期望≈60\n", during); fails++; }
+        if (after >= during) printf("  [ok]   松手惯性继续前冲 (%d → %d)\n", during, after);
+        else { printf("  [FAIL] 惯性方向错: %d → %d\n", during, after); fails++; }
+
+        /* 容器内轻点仍是点击(按钮回调), 拖动不误触发 */
+        fx_parent(sc);
+        fx_button_new(pixel("30,30","140,80"), name("u_btn"), title("U"), call(on_sc_hit));
+        fx_parent(NULL);
+        fx_layout();
+        fx_scroll_set(sc, 0);
+        fx_repaint(); fx_poll();
+        s_sc_hit = 0;
+        fx_touch_press(60, 40); fx_touch_release(60, 40);
+        if (s_sc_hit) printf("  [ok]   轻点仍是点击(未被滚动吞掉)\n");
+        else { printf("  [FAIL] 轻点未触发回调\n"); fails++; }
+        s_sc_hit = 0;
+        fx_touch_press(60, 40); fx_touch_move(60, 10); fx_touch_release(60, 10);
+        if (!s_sc_hit) printf("  [ok]   拖动超过阈值后不触发点击\n");
+        else { printf("  [FAIL] 拖动仍触发了点击\n"); fails++; }
+
+        /* 桌面模式(无触摸屏): 鼠标拖动不能被接管为滚动 */
+        fx_set_touch_mode(0);
+        fx_scroll_set(sc, 30);
+        fx_repaint(); fx_poll();
+        fx_touch_press(150, 150); fx_touch_move(150, 100); fx_touch_release(150, 100);
+        for (int i = 0; i < 20; i++) fx_scroll_update(sc, 800);
+        if (fx_scroll_offset(sc) == 30) printf("  [ok]   桌面模式: 鼠标拖动不滚动 (保持 30)\n");
+        else { printf("  [FAIL] 桌面模式被拖动滚动 offset=%d\n", fx_scroll_offset(sc)); fails++; }
+        fx_set_touch_mode(1);   /* 后面列表拖动仍按触摸屏测 */
+
+        /* 列表: 同一引擎(像素偏移), 触摸拖动 + 夹取 */
+        fx_widget_t *lst = fx_list_new("10,210","300,266");
+        for (int i = 0; i < 30; i++) fx_list_add(lst, "row");
+        fx_layout(); fx_repaint(); fx_poll();
+        int lmax = fx_scroll_max(lst);
+        if (lmax > 0) printf("  [ok]   列表内容高接入统一引擎 (max=%d)\n", lmax);
+        else { printf("  [FAIL] 列表 max=0\n"); fails++; }
+        fx_scroll_to(lst, 50);
+        for (int i = 0; i < 80; i++) { fx_repaint(); fx_poll(); }
+        int loff = fx_scroll_offset(lst);
+        if (loff >= 48 && loff <= 50) printf("  [ok]   列表像素滚动 offset=%d\n", loff);
+        else { printf("  [FAIL] 列表 offset=%d 期望 50\n", loff); fails++; }
+        fx_scroll_set(lst, 0); fx_repaint(); fx_poll();
+        fx_touch_press(150, 240); fx_touch_move(150, 220); fx_touch_move(150, 200); fx_touch_release(150, 200);
+        for (int i = 0; i < 60; i++) { fx_repaint(); fx_poll(); }
+        loff = fx_scroll_offset(lst);
+        if (loff >= 35) printf("  [ok]   列表触摸拖动+惯性 offset=%d\n", loff);
+        else { printf("  [FAIL] 列表拖动 offset=%d 期望>=35\n", loff); fails++; }
+        fx_scroll_to_top(lst);
+        for (int i = 0; i < 120; i++) { fx_repaint(); fx_poll(); }
+        if (fx_scroll_offset(lst) == 0) printf("  [ok]   fx_scroll_to_top 回到 0\n");
+        else { printf("  [FAIL] to_top offset=%d\n", fx_scroll_offset(lst)); fails++; }
+
+        /* 滚轮统一路由: fx_poll 找到光标下可滚控件 → 控件 step 消费增量(像素) */
+        fx_scroll_set(sc, 100);
+        fx_repaint(); fx_poll();
+        wq_push(150, 100, -40);                        /* 滚轮上滚 40px */
+        fx_poll();
+        for (int i = 0; i < 60; i++) { fx_repaint(); fx_poll(); }
+        int woff = fx_scroll_offset(sc);
+        if (woff >= 138 && woff <= 140) printf("  [ok]   滚轮路由到滚动容器 (100 +40 → %d)\n", woff);
+        else { printf("  [FAIL] 滚轮容器 offset=%d 期望≈140\n", woff); fails++; }
+        fx_set_touch_mode(0);   /* 恢复桌面基线, 不污染后续测试 */
     }
 
     /* M3: 控件池耗尽时 list/drop 工厂必须返回 NULL 而不是崩溃 */

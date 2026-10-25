@@ -75,6 +75,14 @@
 - 按下/移动/释放分发到最顶层命中控件；弹层优先捕获。
 - 键盘入队 `g_kq`（64 项 FIFO）；滚轮累积 `g_wheel_pix`。
 - 功能键映射：SDL sym → `FX_KEY_*`；Ctrl+Shift 状态进 `mod` 位。
+- **统一滚动（v2.5.5）**：`fx_poll` 把滚轮增量路由到光标下最近的 `FX_W_SCROLL/FX_W_TEXTEDIT/FX_W_CANVAS`
+  （画布保持旧语义，回调可自己 `fx_wheel_take` 处理缩放），控件在自己的绘制里调用
+  `fxtk_scroll_step()` 消费增量并推进缓动；触摸拖动由 `s_touch_sc` 候选 + 8px 阈值接管，
+  松手速度存 `vel` 做惯性。状态池 `s_scroll_pool[FX_MAX_SCROLL_STATES]` 按控件指针索引，
+  池满时退化为"无缓动直滚"并 LOG_WARN（不会两个控件互踩）。
+- **触摸屏判定**：`fx_touch_capable()` 首次调用时检测并缓存（Linux `/sys/class/input/*/device/properties`
+  的 `INPUT_PROP_DIRECT`，触摸板是 `INPUT_PROP_POINTER` 不算；Windows `GetSystemMetrics(SM_MAXIMUMTOUCHES)`）；
+  `fx_set_touch_mode()` / `FXTK_TOUCH` 可强制覆盖。桌面没有触摸屏时拖动滚动完全不启用。
 
 ## 弹层
 

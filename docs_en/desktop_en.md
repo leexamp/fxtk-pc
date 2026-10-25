@@ -17,7 +17,7 @@ The top of the interface is a `tab` tab bar (the selected tab is **raised in 3D*
 | Paint | Drawable canvas + pen-color buttons | touch/mouse drag drawing, offscreen buffer |
 | Key-mouse | Real-time keyboard/mouse status | **hover coordinates updated in real time**, key echo |
 | Stress test | Moving widgets + **dynamic growth** | auto-adds one widget when frame rate has headroom; can hold thousands at full screen |
-| Scroll | 60-row virtual scrolling | `fx_scroll_update` core scrolling (target + 25% interpolation), scroll bar thumb can be dragged |
+| Scroll | 60-row virtual scrolling | unified scroll engine: pixel offset + easing/momentum; wheel, scrollbar drag and (on touchscreens) finger drag |
 | Components | List/dropdown/multi-font-size | dropdown pops up upward, popup scrolling stays within bounds |
 | Particles | Tens of thousands of particles | offscreen half-size + GPU blit upscale |
 
@@ -34,8 +34,8 @@ The top of the interface is a `tab` tab bar (the selected tab is **raised in 3D*
 - **3D tabs**: selected tab has dark text on a bright background + top highlight + bottom bright line (raised), unselected tabs are recessed on a dark background, and there is a shadow separator line between the tab bar and the content area.
 - **Right-click menu**: right-clicking anywhere pops up a top-level menu (always on top, never occluded by the page), with items such as copy/paste.
 - **Hover**: moving the mouse (without pressing) updates the coordinates, shown in real time on the key-mouse page.
-- **Dropdown**: automatically pops upward near the bottom; the popup scrolls; no "chin" when collapsed.
-- **List**: mouse wheel scroll + click to select, the selected row is highlighted.
+- **Dropdown**: automatically pops upward near the bottom; the popup scrolls (wheel/scrollbar/touch drag); no "chin" when collapsed.
+- **List**: scroll by wheel/scrollbar/touch drag + click to select; shares one scroll state machine with scroll containers.
 - **Dragging**: widgets on the stress-test page can be dragged, single-pass drawing without flicker.
 
 ## Layout syntax

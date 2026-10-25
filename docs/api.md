@@ -127,6 +127,8 @@
 |---|---|
 | `fx_touch_press(x,y)` / `fx_touch_move(x,y)` / `fx_touch_release(x,y)` | 把触摸/鼠标事件喂给框架（驱动调用，或自己模拟点击）。 |
 | `fx_touch_state(&x,&y,&pressed)` | 查询当前触摸状态。 |
+| `fx_touch_capable()` | 当前是否按触摸屏处理（自动检测：Linux 看输入设备的 INPUT_PROP_DIRECT，Windows 看 SM_MAXIMUMTOUCHES；`FXTK_TOUCH=1` 可强制开）。 |
+| `fx_set_touch_mode(on)` | 覆盖触摸判定：`-1` 自动（默认）、`0` 强制关、`1` 强制开。关掉时鼠标拖动保持旧语义，不会被当成滚动。 |
 | `fx_set_focus(w)` / `fx_get_focus()` | 设置/读取键盘焦点控件。 |
 | `fx_focus_blink()` | 焦点光标是否处于闪烁亮态（自绘文本框用）。 |
 | `fx_last_key()` | 最近一次按键事件。 |
@@ -235,12 +237,22 @@
 
 ## 11. 滚动 / 列表 / 下拉
 
+> v2.5.5 起 **滚动容器 / 列表 / 下拉 / 输入框 / 自绘画布 共用同一套滚动引擎**：偏移是像素、滚轮转多少滚多少、
+> 滚动条外观一致、触摸拖动 1:1 跟手并在松手后带惯性（仅检测到触摸屏时启用，见 §5 `fx_touch_capable`）。
+> 列表/下拉/输入框已内部接好；自绘画布仍需每帧调用一次 `fx_scroll_update` 声明内容高。
+
 | 函数 | 用法 |
 |---|---|
-| `fx_scroll_content(w,content_h)` | 设置滚动容器内容总高（触发滚动条/惯性）。 |
-| `fx_scroll_update(w,content_h)` | 滚动容器每帧调用：返回可滚动偏移（内部做缓动），并处理滚轮/拖拽。 |
-| `fx_scrollbar_draw(w,off,content_h)` | 自绘滚动条（`off` 当前偏移）。 |
-| `fx_set_scroll(w,off)` | 设置滚动偏移（拖滚动条时用；走同一套缓动）。 |
+| `fx_scroll_offset(w)` | 当前像素偏移（等价于旧 `fx_scroll_update` 的返回值）。 |
+| `fx_scroll_max(w)` | 最大偏移（内容高 − 视口高，已夹取）。 |
+| `fx_scroll_view_h(w)` | 视口高（输入框已扣掉上下内边距）。 |
+| `fx_scroll_to(w,off)` | 设目标偏移，逐帧缓动到位。 |
+| `fx_scroll_set(w,off)` | 立即定位（拖滚动条 / 回到顶部用，无缓动）。 |
+| `fx_scroll_by(w,dy)` / `fx_scroll_to_top(w)` / `fx_scroll_to_bottom(w)` | 相对滚动 / 到顶 / 到底（缓动）。 |
+| `fx_scroll_content(w,content_h)` | 声明内容总高（滚动容器可省略：按子控件包围盒自动推导）。 |
+| `fx_scroll_update(w,content_h)` | 自绘画布每帧调用：消费滚轮/推进缓动，返回像素偏移；不调用则画布不滚。 |
+| `fx_scrollbar_draw(w,off,content_h)` | 画统一滚动条；在画布回调里自动使用局部坐标（无需自己换算）。 |
+| `fx_set_scroll(w,off)` | 旧名，等价 `fx_scroll_set`。 |
 | `fx_list_new(r1,r2)` / `fx_drop_new(r1,r2)` | 新建列表/下拉框（`r1/r2` 为两行区标题）。 |
 | `fx_list_add(w,t)` / `fx_drop_add(w,t)` | 追加一行。 |
 | `fx_list_set_cb(w,cb)` | 行点击回调 `cb(widget, ud)`。 |

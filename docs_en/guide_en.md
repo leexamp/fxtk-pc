@@ -539,21 +539,38 @@ else if (k.key == FX_KEY_RETURN) ...  /* Enter */
 
 Function-key enum: `FX_KEY_BACKSPACE/RETURN/ESCAPE/LEFT/RIGHT/HOME/END/UP/DOWN/DELETE`.
 
-### 9.3 Wheel and Core Scrolling
+### 9.3 Wheel and Unified Scrolling (v2.5.5)
 
-The driver accumulates wheel pixel deltas (`fx_poll` auto-routes them to the widget under the cursor). **For custom-drawn scrolling, a one-line library API is recommended**:
+**Scroll containers / lists / dropdowns / text edits / custom-drawn canvases now share one scroll engine**:
+offsets are in pixels, wheel deltas map 1:1 to pixels, the scrollbar looks the same everywhere, touch drag is
+1:1 with momentum on release, and offsets are clamped to `0..fx_scroll_max(w)`.
+Lists/dropdowns/text edits are wired internally — **applications write no scrolling code**; only custom-drawn
+canvases declare their content height each frame:
 
 ```c
-int off = fx_scroll_update(w, total);   /* core scrolling: wheel/interpolation/repaint all in the library, returns current offset */
-fx_scrollbar_draw(w, off, total);       /* library scrollbar: track+thumb, supports mouse drag */
+int off = fx_scroll_update(w, total);   /* custom canvas: consumes wheel / advances easing, returns pixel offset */
+fx_scrollbar_draw(w, off, total);       /* unified scrollbar (canvas callbacks use local coords automatically) */
+```
+
+Positioning API (works on containers/lists/text edits/canvases):
+
+```c
+fx_scroll_to(w, 120);        /* target offset, eased per frame */
+fx_scroll_set(w, 0);         /* jump immediately (scrollbar drag / back to top) */
+fx_scroll_by(w, -40);        /* relative by 40px (positive = content moves up) */
+fx_scroll_to_bottom(w);      /* jump to the end */
+int off = fx_scroll_offset(w), max = fx_scroll_max(w);
 ```
 
 Key points:
-- **Feel**: target pixels accumulate + 25% interpolation per frame (rc-build feel); it settles quickly when the wheel stops, no inertia lag;
-- **Zero repaint**: it does not request a repaint when the offset is unchanged;
-- **Multiple widgets**: an internal 8-slot state pool lets multiple canvases scroll in parallel;
-- **Drag**: the scrollbar thumb supports mouse drag (including on custom-drawn canvases; the state pool syncs while dragging);
-- The low-level primitive `int dy = fx_wheel_take(w);` is still available when you need fully manual control.
+- **Feel**: target pixels + 35% interpolation per frame; after a touch release, momentum uses 0.92 friction per frame and stops at the edge;
+- **Zero repaint**: no repaint is requested while the integer offset stays the same;
+- **Multiple widgets**: the state pool really uses `FX_MAX_SCROLL_STATES` (64 on desktop / 8 on small memory; older releases mistakenly looped over only the first 8 slots);
+- **Scrollbar**: one geometry/token set for every scrollable widget, and thumbs are draggable (canvas/list/text edit/container);
+- **Touchscreens**: dragging takes over only after 8px (taps still click) and only when a touchscreen is detected;
+  desktop mouse drags keep their old meaning. Auto-detection: Linux uses `INPUT_PROP_DIRECT` (touchpads excluded),
+  Windows uses `SM_MAXIMUMTOUCHES`; force it with `fx_set_touch_mode(1/0)` or `FXTK_TOUCH=1`;
+- The low-level primitive `int dy = fx_wheel_take(w);` is still available for fully manual control (e.g. 3D zoom).
 
 ---
 
@@ -854,7 +871,8 @@ fx_button_new(pixel("10,10","200,50"), title("Item 1"), call(...));
 fx_scroll_content(sc, 1200);         /* total content height (pixels), scrollable only when exceeded */
 ```
 
-When you need finer control, use smooth scrolling: `int off = fx_scroll_update(w, content_h)` (target pixels + 25% per-frame interpolation), combined with `fx_scrollbar_draw(w, off, content_h)` to draw the scrollbar.
+The content height is optional too: containers derive it from the children bounding box. For programmatic positioning use `fx_scroll_to/set/by/to_top/to_bottom(w)`;
+custom-drawn canvases still call `int off = fx_scroll_update(w, content_h)` each frame to declare content height and get the offset, plus `fx_scrollbar_draw(w, off, content_h)` for the same scrollbar look as containers/lists.
 
 ### GPU Ray Tracing (3D page)
 

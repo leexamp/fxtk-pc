@@ -625,21 +625,36 @@ else if (k.key == FX_KEY_RETURN) ...  /* 回车 */
 
 功能键枚举：`FX_KEY_BACKSPACE/RETURN/ESCAPE/LEFT/RIGHT/HOME/END/UP/DOWN/DELETE`。
 
-### 9.3 滚轮与核心滚动
+### 9.3 滚轮与统一滚动（v2.5.5）
 
-驱动累积滚轮像素增量（`fx_poll` 自动路由到光标下的控件）。**推荐自绘滚动直接用一行库 API**：
+**滚动容器 / 列表 / 下拉 / 输入框 / 自绘画布 现在是同一套滚动引擎**：偏移是像素、滚轮转多少滚多少、
+滚动条外观与最小滑块一致、触摸拖动 1:1 跟手并在松手后带惯性、偏移夹取在 `0..fx_scroll_max(w)`。
+列表/下拉/输入框内部已接好，**应用不写任何滚动代码**；只有自绘画布需要每帧声明内容高：
 
 ```c
-int off = fx_scroll_update(w, total);   /* 核心滚动: 滚轮/插值/重绘全在库内, 返回当前偏移 */
-fx_scrollbar_draw(w, off, total);       /* 库滚动条: 轨道+滑块, 支持鼠标拖拽 */
+int off = fx_scroll_update(w, total);   /* 自绘画布每帧调用: 消费滚轮/推进缓动, 返回像素偏移 */
+fx_scrollbar_draw(w, off, total);       /* 统一滚动条(画布回调里自动用局部坐标) */
+```
+
+应用层常用定位 API（容器/列表/输入框/画布都能用）：
+
+```c
+fx_scroll_to(w, 120);        /* 目标偏移, 逐帧缓动 */
+fx_scroll_set(w, 0);         /* 立即回到顶部(拖滚动条/切目录用) */
+fx_scroll_by(w, -40);        /* 相对滚 40px(正=内容上滚) */
+fx_scroll_to_bottom(w);      /* 直接到底 */
+int off = fx_scroll_offset(w), max = fx_scroll_max(w);
 ```
 
 要点：
-- **手感**：目标像素累积 + 每帧 25% 插值（rc 版手感），滚轮停后快速收尾，无惯性滞留；
-- **零重绘**：偏移不变时不请求重绘；
-- **多控件**：内部 8 槽状态池，多个画布可并行滚动；
-- **拖拽**：滚动条滑块支持鼠标拖动（含自绘画布，拖动时同步状态池）；
-- 底层原语 `int dy = fx_wheel_take(w);` 仍可用，需要完全自控时再手动处理。
+- **手感**：目标像素 + 每帧 35% 插值；触摸松手后按 0.92/帧摩擦做惯性，到边界即停不会冲过头；
+- **零重绘**：整数偏移不变时不请求重绘；
+- **多控件**：状态池真正用满 `FX_MAX_SCROLL_STATES`（PC 64 / 小内存 8；旧版错误地只循环前 8 个槽）；
+- **滚动条**：所有可滚控件同一套几何/配色，滑块支持鼠标拖动（画布/列表/输入框/容器都能拖）；
+- **触摸屏**：拖动超过 8px 才接管（不影响点击）；只在检测到触摸屏时启用，桌面鼠标拖动保持旧语义。
+  自动检测：Linux 看输入设备 `INPUT_PROP_DIRECT`（触摸板不算），Windows 看 `SM_MAXIMUMTOUCHES`；
+  也可 `fx_set_touch_mode(1/0)` 或环境变量 `FXTK_TOUCH=1` 强制开关；
+- 底层原语 `int dy = fx_wheel_take(w);` 仍可用，需要完全自控（如 3D 缩放）时再手动处理。
 
 ---
 
@@ -941,7 +956,8 @@ fx_button_new(pixel("10,10","200,50"), title("第 1 项"), call(...));
 fx_scroll_content(sc, 1200);         /* 内容总高(像素), 超出才可滚 */
 ```
 
-需要更细控制时用平滑滚动：`int off = fx_scroll_update(w, content_h)`（目标像素 + 25% 逐帧插值），配合 `fx_scrollbar_draw(w, off, content_h)` 画滚动条。
+内容高也可以不写：容器会按子控件包围盒自动推导。需要程序化定位时用 `fx_scroll_to/set/by/to_top/to_bottom(w)`；
+自绘画布仍用 `int off = fx_scroll_update(w, content_h)` 每帧声明内容高并取偏移，配合 `fx_scrollbar_draw(w, off, content_h)` 画滚动条（与容器/列表同一套外观）。
 
 ### GPU 光追（3D 页）
 

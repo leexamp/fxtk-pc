@@ -76,6 +76,16 @@ For people who want to modify the source / port it. For application development,
 - Press/move/release are dispatched to the top-most hit widget; popups capture with priority.
 - Keyboard is enqueued into `g_kq` (64-entry FIFO); the wheel accumulates `g_wheel_pix`.
 - Function key mapping: SDL sym → `FX_KEY_*`; Ctrl+Shift state goes into the `mod` bits.
+- **Unified scrolling (v2.5.5)**: `fx_poll` routes wheel deltas to the nearest `FX_W_SCROLL/FX_W_TEXTEDIT/FX_W_CANVAS`
+  under the cursor (canvases keep the old contract; callbacks may call `fx_wheel_take` themselves for zoom).
+  Each widget calls `fxtk_scroll_step()` from its draw path to consume the delta and advance easing. Touch drag
+  uses an `s_touch_sc` candidate plus an 8px slop before taking over; release velocity is stored in `vel`
+  for momentum. The state pool `s_scroll_pool[FX_MAX_SCROLL_STATES]` is indexed by widget pointer; when full it
+  degrades to direct (non-eased) scrolling with a LOG_WARN instead of aliasing two widgets.
+- **Touchscreen detection**: `fx_touch_capable()` detects and caches on first use (Linux reads
+  `INPUT_PROP_DIRECT` from `/sys/class/input/*/device/properties`; touchpads are `INPUT_PROP_POINTER` and do not
+  count; Windows uses `GetSystemMetrics(SM_MAXIMUMTOUCHES)`). `fx_set_touch_mode()` / `FXTK_TOUCH` override it.
+  Without a detected touchscreen, drag-to-scroll is not enabled at all.
 
 ## Popups
 

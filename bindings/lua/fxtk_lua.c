@@ -603,12 +603,23 @@ static int l_fx_drop_new_p(lua_State *L)
 }
 static int l_fx_drop_add(lua_State *L) { fx_drop_add(check_widget(L,1), check_str(L,2)); return 0; }
 
-/* ---- scroll ---- */
+/* ---- scroll (v2.5.5: 统一滚动 API) ---- */
 static int l_fx_scroll_content(lua_State *L) { fx_scroll_content(check_widget(L,1), check_int(L,2)); return 0; }
 static int l_fx_scroll_update(lua_State *L) { lua_pushinteger(L, fx_scroll_update(check_widget(L,1), check_int(L,2))); return 1; }
+static int l_fx_scroll_offset(lua_State *L) { lua_pushinteger(L, fx_scroll_offset(check_widget(L,1))); return 1; }
+static int l_fx_scroll_max(lua_State *L) { lua_pushinteger(L, fx_scroll_max(check_widget(L,1))); return 1; }
+static int l_fx_scroll_view_h(lua_State *L) { lua_pushinteger(L, fx_scroll_view_h(check_widget(L,1))); return 1; }
+static int l_fx_scroll_to(lua_State *L) { fx_scroll_to(check_widget(L,1), check_int(L,2)); return 0; }
+static int l_fx_scroll_set(lua_State *L) { fx_scroll_set(check_widget(L,1), check_int(L,2)); return 0; }
+static int l_fx_scroll_by(lua_State *L) { fx_scroll_by(check_widget(L,1), check_int(L,2)); return 0; }
+static int l_fx_scroll_to_top(lua_State *L) { fx_scroll_to_top(check_widget(L,1)); return 0; }
+static int l_fx_scroll_to_bottom(lua_State *L) { fx_scroll_to_bottom(check_widget(L,1)); return 0; }
 static int l_fx_set_scroll(lua_State *L) { fx_set_scroll(check_widget(L,1), check_int(L,2)); return 0; }
 static int l_fx_scrollbar_draw(lua_State *L) { fx_scrollbar_draw(check_widget(L,1), check_int(L,2), check_int(L,3)); return 0; }
 static int l_fx_wheel_take(lua_State *L) { lua_pushinteger(L, fx_wheel_take(check_widget(L,1))); return 1; }
+/* v2.5.5: 触摸屏能力/开关 */
+static int l_fx_touch_capable(lua_State *L) { lua_pushboolean(L, fx_touch_capable()); return 1; }
+static int l_fx_set_touch_mode(lua_State *L) { fx_set_touch_mode(check_int(L,1)); return 0; }
 
 /* ---- canvas 状态 ---- */
 static int l_fx_canvas_size(lua_State *L)
@@ -1192,9 +1203,19 @@ static const luaL_Reg fxtk_core_funcs[] = {
     {"fx_drop_add", l_fx_drop_add},
     {"fx_scroll_content", l_fx_scroll_content},
     {"fx_scroll_update", l_fx_scroll_update},
+    {"fx_scroll_offset", l_fx_scroll_offset},
+    {"fx_scroll_max", l_fx_scroll_max},
+    {"fx_scroll_view_h", l_fx_scroll_view_h},
+    {"fx_scroll_to", l_fx_scroll_to},
+    {"fx_scroll_set", l_fx_scroll_set},
+    {"fx_scroll_by", l_fx_scroll_by},
+    {"fx_scroll_to_top", l_fx_scroll_to_top},
+    {"fx_scroll_to_bottom", l_fx_scroll_to_bottom},
     {"fx_set_scroll", l_fx_set_scroll},
     {"fx_scrollbar_draw", l_fx_scrollbar_draw},
     {"fx_wheel_take", l_fx_wheel_take},
+    {"fx_touch_capable", l_fx_touch_capable},
+    {"fx_set_touch_mode", l_fx_set_touch_mode},
     /* canvas */
     {"fx_canvas_size", l_fx_canvas_size},
     {"fx_canvas_enable_buf", l_fx_canvas_enable_buf},

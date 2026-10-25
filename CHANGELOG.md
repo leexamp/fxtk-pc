@@ -1,5 +1,40 @@
 # Changelog
 
+## v2.5.5（统一滚动：容器/列表/下拉/输入框/画布同一套引擎 + 触摸屏拖动）
+
+> **核心仍是 fxtk-pc-v2.5（C99，`FXTK_VERSION` = 2.5.5）。** 旧 API 全部保留（`fx_scroll_update` /
+> `fx_scrollbar_draw` / `fx_set_scroll` / `fx_scroll_content` / `fx_wheel_take`），语义向后兼容。
+> 本版把"滚动"从四套各写各的实现收敛成一套状态机，并补上触摸屏拖动/惯性。
+
+### 新增
+
+- **统一滚动引擎（内部 `fxtk_scroll_step`）**：滚动容器、列表/下拉、输入框、自绘画布共用同一套
+  `off/tgt/vel` 状态：像素偏移、每帧 35% 缓动、滚轮增量 1:1、边界夹取、整数偏移不变时不重绘。
+- **新公开滚动 API**：`fx_scroll_offset` / `fx_scroll_max` / `fx_scroll_view_h` / `fx_scroll_to`（缓动）/
+  `fx_scroll_set`（立即）/ `fx_scroll_by` / `fx_scroll_to_top` / `fx_scroll_to_bottom`。
+- **统一滚动条**：所有可滚控件同一套几何（宽 3px、滑块最小 20px）与配色（`FX_TOK_SCROLL_TRACK/THUMB`）；
+  滑块在容器/列表/下拉/输入框/画布上都能鼠标拖动；`fx_scrollbar_draw` 在画布回调里自动切局部坐标。
+- **滚动容器**：内容高可省略（按子控件包围盒自动推导）；自带滚轮与滚动条拖拽，不再需要应用写滚动代码。
+- **列表/下拉**：从"行号×行高"改为像素偏移（首行 + 亚行余量渲染），滚轮/滚动条拖动/触摸拖动与滚动页手感一致；
+  下拉弹层初始偏移定位到选中项前一行。
+- **输入框**：滚轮、滚动条拖动、光标跟随、拖出边界自动滚动统一走引擎。
+- **触摸屏拖动滚动**：按下记录候选，移动超过 8px 才接管（不影响点击/轻点回调）；1:1 跟手，
+  松手按 0.92/帧摩擦做惯性（±90px/帧封顶），到边界即停。
+- **触摸屏检测与开关**：`fx_touch_capable()` / `fx_set_touch_mode(-1 自动 / 0 关 / 1 开)` / `FXTK_TOUCH=1`。
+  Linux 看输入设备 `INPUT_PROP_DIRECT`（触摸板是 POINTER，不会误判），Windows 看 `SM_MAXIMUMTOUCHES`；
+  桌面无触摸屏时鼠标拖动保持旧语义（框选/拖控件/画笔画线）。
+- **Lua 绑定**：同步暴露上述新滚动 API 与触摸开关（`fx_scroll_offset/max/view_h/to/set/by/to_top/to_bottom`、
+  `fx_touch_capable/fx_set_touch_mode`）。
+
+### 修复
+
+- **滚动状态池只用了 8 个槽**：`scroll_state()` 申请/查找都硬编码 `i < 8`，而池实际是
+  `FX_MAX_SCROLL_STATES`（PC 64），第 9 个并发滚动控件会被误判"池满"并退化成无缓动；现在用满全部槽位。
+- **画布里的滚动条画到屏幕外**：`fx_scrollbar_draw` 在画布回调（局部坐标）里又叠加了一次画布原点，
+  导致滚动条不可见；现在按当前是否在画布回调自动选择局部/绝对坐标。
+- **列表/下拉滚动与滚动容器不一致**：旧的"行号×行高"跳行滚动无法复用缓动/惯性/滚动条拖动，
+  已改为统一像素偏移（拖动时可见"半行"过渡，与滚动页一致）。
+
 ## v2.5.4（Lua 绑定：C 核心 + 同构 Lua 语法 + 12 页 Lua 演示）
 
 > **核心仍是 fxtk-pc-v2.5（C99，`FXTK_VERSION` = 2.5.4，控件/绘制/输入/后端语义未改）。**

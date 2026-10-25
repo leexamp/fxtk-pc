@@ -9,6 +9,11 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#if defined(_WIN32)
+#include <windows.h>       /* v2.5.5: GetSystemMetrics(SM_MAXIMUMTOUCHES) 触摸屏检测 */
+#elif defined(__linux__)
+#include <unistd.h>        /* v2.5.5: access() 扫描 /sys/class/input */
+#endif
 
 static const char *TAG = "fxtk";
 
@@ -45,6 +50,84 @@ static int s_tick = 0, s_blink = 0;
 static fx_widget_t *s_scroll_drag = NULL;
 static fx_widget_t *s_wheel_tgt = NULL;
 static int s_wheel_acc = 0;
+/* v2.5.5: 触摸拖动滚动 —— 按下时记录候选, 移动超过 slop 才接管(避免抢走点击) */
+static fx_widget_t *s_touch_sc = NULL;
+static int s_touch_sc_y0 = 0;
+static int s_touch_sc_active = 0;
+/* v2.5.5: 触摸滚动只在"确实有触摸屏"时启用。
+ * 桌面电脑上用鼠标拖动 = 框选/拖控件/画笔画画, 不能变成滚动; 所以默认按平台检测,
+ * 检测不到就完全不接管, 行为与旧版一致。手动覆盖: fx_set_touch_mode() 或 FXTK_TOUCH=1/0。
+ * 检测优先级: fx_set_touch_mode() > FXTK_TOUCH 环境变量 > 平台自动检测。 */
+static int s_touch_mode = -1;      /* -1 自动, 0 强制关, 1 强制开 */
+static int s_touch_capable = -1;   /* 自动检测结果缓存 */
+
+#if defined(_WIN32)
+#ifndef SM_MAXIMUMTOUCHES
+#define SM_MAXIMUMTOUCHES 95   /* 老 SDK 头文件可能没定义(值固定) */
+#endif
+static int detect_touch_capable(void)
+{
+    return GetSystemMetrics(SM_MAXIMUMTOUCHES) > 0 ? 1 : 0;
+}
+#elif defined(__linux__)
+static int sysfs_hex_bit(const char *path, int bit)
+{
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    char b[256] = {0};
+    size_t n = fread(b, 1, sizeof b - 1, f);
+    fclose(f);
+    if (!n) return 0;
+    unsigned long long v = strtoull(b, NULL, 16);
+    return (int)((v >> bit) & 1ULL);
+}
+static int sysfs_name_has(const char *path, const char *needle)
+{
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    char b[256] = {0};
+    size_t n = fread(b, 1, sizeof b - 1, f);
+    fclose(f);
+    for (size_t i = 0; i < n; i++) if (b[i] >= 'A' && b[i] <= 'Z') b[i] = (char)(b[i] + 32);
+    char low[64] = {0};
+    size_t j = 0;
+    for (; needle[j] && j < sizeof low - 1; j++) low[j] = needle[j];
+    for (size_t k = 0; k < j; k++) if (low[k] >= 'A' && low[k] <= 'Z') low[k] = (char)(low[k] + 32);
+    return strstr(b, low) != NULL;
+}
+static int detect_touch_capable(void)
+{
+    /* 触摸屏在 Linux 输入子系统里带 INPUT_PROP_DIRECT(properties 的 bit 1);
+     * 触摸板是 INPUT_PROP_POINTER(bit 0) —— 所以笔记本不会被误判成触摸屏。
+     * 个别内核不导出 properties, 再用设备名 "touchscreen" 兜底。 */
+    for (int i = 0; i < 64; i++) {
+        char base[128], path[160];
+        snprintf(base, sizeof base, "/sys/class/input/event%d/device", i);
+        if (access(base, F_OK) != 0) continue;
+        snprintf(path, sizeof path, "%s/properties", base);
+        if (sysfs_hex_bit(path, 1)) return 1;
+        snprintf(path, sizeof path, "%s/name", base);
+        if (sysfs_name_has(path, "touchscreen") || sysfs_name_has(path, "touch screen")) return 1;
+    }
+    return 0;
+}
+#else
+static int detect_touch_capable(void) { return 0; }
+#endif
+
+int fx_touch_capable(void)
+{
+    if (s_touch_mode >= 0) return s_touch_mode;       /* 显式覆盖优先 */
+    const char *env = getenv("FXTK_TOUCH");
+    if (env && *env) {
+        int on = (env[0]=='1'||env[0]=='y'||env[0]=='Y'||env[0]=='t'||env[0]=='T');
+        s_touch_capable = on;
+        return on;
+    }
+    if (s_touch_capable < 0) s_touch_capable = detect_touch_capable();
+    return s_touch_capable;
+}
+void fx_set_touch_mode(int on) { s_touch_mode = on; }
 
 /* 响应式缩放: 设计稿尺寸在 backends(fx_design_w/h), 默认 480x272, 由 fx_set_design_pixel() 改 */
 static int s_sx1000 = 1000, s_sy1000 = 1000;
@@ -97,7 +180,27 @@ static void ctx_draw_abs(void){ if(!s_ctxpop)return; int x1,y1,x2,y2; fx_widget_
   fx_set_color(FX_GRAY); fx_draw_rect(x1,y1,x2,y2);
   for(int i=0;i<5;i++){ if(i==s_ctx_hl){fx_set_color(FX_RGB(33,150,243));fx_fill_rect(x1+1,y1+1+i*rh,x2-1,y1+1+i*rh+rh-1);}
     fxtk_draw_text_size(14,x1+6,y1+3+i*rh,s_ctx_items[i], i==s_ctx_hl?FX_WHITE:FX_RGB(40,40,40), i==s_ctx_hl?FX_RGB(33,150,243):FX_WHITE); } }
-typedef struct { fx_widget_t *w; float off, tgt; int last; } fx_scroll_state_t;
+/* v2.5.5: 统一滚动状态 —— 滚动容器 / 列表 / 下拉 / 输入框 / 画布回调 共用同一套状态机:
+ *   off/tgt  : 当前/目标像素偏移 (float, 不受 int16 限制; w->scroll_y 只是兼容快照)
+ *   off += (tgt-off)*0.35  : 滚轮/滚动条拖拽后的缓动
+ *   vel      : 触摸松手后的惯性速度 px/帧 (每帧 *0.92 衰减)
+ *   drag_*   : 触摸拖动: 手指移动多少像素, 内容跟多少像素 (1:1), 8px 阈值避免抢点击
+ *   content_h/view_h : 最近一次声明的内容/视口高 (统一由 fxtk_scroll_step 写入)
+ */
+#define FX_SCROLL_SLOP      8      /* 触摸拖动接管阈值(像素): 小于它仍算点击 */
+#define FX_SCROLL_FRICTION  0.92f  /* 惯性摩擦: 每帧保留 92% 速度 */
+typedef struct {
+    fx_widget_t *w;
+    float off, tgt;
+    int last;
+    int drag_on;        /* 正在触摸拖动 */
+    int drag_y0;        /* 拖动起点手指 y */
+    int drag_off0;      /* 拖动起点偏移 */
+    int drag_started;   /* 已超过阈值, 本次手势归滚动 */
+    float vel;          /* 惯性速度 px/帧 */
+    int last_y;         /* 上一次移动 y (估算速度) */
+    int content_h, view_h;
+} fx_scroll_state_t;
 #ifndef FX_MAX_SCROLL_STATES
 /* v2.4.3: 并发滚动状态数。原先是硬编码 8(为 ESP32 省的), 但两端已分化 ——
  * PC 不必迁就 ESP 的资源约束, 否则用户多开几个带滚轮的列表就会遇到"这个列表滚不动了"这种人为 bug。
@@ -115,6 +218,16 @@ static fx_scroll_state_t s_scroll_pool[FX_MAX_SCROLL_STATES];
 static int s_pool_high = 0;   /* v2.3.1: unlink_free/fx_init 也要清它, 故随 typedef 前移至此 */
 static fx_scroll_state_t *scroll_state(fx_widget_t *w);
 static void scroll_drag_to(fx_widget_t *w, int y);
+/* v2.5.5 统一滚动引擎内部接口 (widgets/extra 也调用) */
+static int  scroll_view_h(fx_widget_t *w);
+static int  scroll_content_h(fx_widget_t *w);
+static void scrollbar_draw_abs(int px, int py, int cw, int ch, int off, int content_h);
+int  fxtk_scroll_step(fx_widget_t *w, int content_h, int view_h);
+static fx_widget_t *wheel_target(int x, int y);
+static fx_widget_t *touch_target(int x, int y);
+static void scroll_touch_begin(fx_widget_t *w, int y);
+static void scroll_touch_drag(fx_widget_t *w, int y);
+static void scroll_touch_end(fx_widget_t *w, int y);
 static void te_sel_para(fx_widget_t*);
 static int te_word_start(const char*,int);
 static int te_word_end(const char*,int);
@@ -566,10 +679,21 @@ void fx_touch_press(int x, int y)
       return; }
 
     s_pressed = hit_test(s_act_root, x, y);
-    if (s_pressed && (s_pressed->type==FX_W_TEXTEDIT || s_pressed->type==FX_W_SCROLL || s_pressed->type==FX_W_CANVAS)
-        && s_pressed->content_h > (s_pressed->y2 - s_pressed->y1)
-        && x >= s_pressed->x2 - 6) {
+    /* v2.5.5: 滚动条拖拽对所有可滚控件统一(容器/列表/下拉/输入框/自绘画布)。
+     * 按下点在最右侧 6px 且内容确实超出视口 → 进入"拖滑块"路径。 */
+    if (s_pressed && x >= s_pressed->x2 - 6
+        && (s_pressed->type==FX_W_TEXTEDIT || s_pressed->type==FX_W_SCROLL || s_pressed->type==FX_W_CANVAS)
+        && scroll_content_h(s_pressed) > scroll_view_h(s_pressed)) {
         s_scroll_drag = s_pressed; scroll_drag_to(s_pressed, y); return;
+    }
+    /* v2.5.5: 触摸拖动滚动的候选(超过 8px 才接管, 不影响普通点击)。
+     * 只在检测到触摸屏时启用; 桌面鼠标拖动保持旧语义(框选/拖控件/画笔画线)。 */
+    s_touch_sc = NULL;
+    s_touch_sc_active = 0;
+    if (fx_touch_capable()) {
+        s_touch_sc = touch_target(x, y);
+        s_touch_sc_y0 = y;
+        if (s_touch_sc) scroll_touch_begin(s_touch_sc, y);
     }
     if (s_pressed && s_pressed->type == FX_W_TEXTEDIT) {
         fx_set_focus(s_pressed);
@@ -584,6 +708,13 @@ void fx_touch_press(int x, int y)
 void fx_touch_release(int x, int y)
 {
     s_last_tx = x; s_last_ty = y;
+    /* v2.5.5: 本次手势已被触摸拖动滚动接管 → 松手只结算惯性, 不触发点击 */
+    if (s_touch_sc_active && s_touch_sc) {
+        scroll_touch_end(s_touch_sc, y);
+        s_touch_sc = NULL; s_touch_sc_active = 0; s_pressed = NULL;
+        return;
+    }
+    s_touch_sc = NULL; s_touch_sc_active = 0;
     fx_widget_t *w = hit_test(s_act_root, x, y);
     fx_widget_t *p = s_pressed;
     s_pressed = NULL; s_scroll_drag = NULL;
@@ -623,14 +754,31 @@ void fx_touch_move(int x, int y)
       if(hl!=s_ctx_hl){ s_ctx_hl=hl; fx_repaint(); } return; }
 
     if (s_scroll_drag) { scroll_drag_to(s_scroll_drag, y); return; }
+    /* v2.5.5: 触摸拖动滚动 —— 超过 8px 阈值才接管, 接管后取消按下态(不会误触发按钮回调),
+     * 之后手指移动多少内容滚多少; 松手在 fx_touch_release 里结算惯性。 */
+    if (s_touch_sc) {
+        int dy = y - s_touch_sc_y0;
+        if (!s_touch_sc_active) {
+            if (dy > FX_SCROLL_SLOP || dy < -FX_SCROLL_SLOP) {
+                s_touch_sc_active = 1;
+                if (s_pressed) { s_pressed->flags &= (uint8_t)~FX_F_PRESSED; redraw_widget_now(s_pressed); s_pressed = NULL; }
+                scroll_touch_drag(s_touch_sc, y);
+                return;
+            }
+        } else { scroll_touch_drag(s_touch_sc, y); return; }
+    }
     if (s_pressed && s_pressed->type == FX_W_TEXTEDIT) {
 fx_widget_t *te=s_pressed;
 int vis=te->y2-te->y1-10, maxs=te->content_h-vis;
 if (maxs<0)maxs=0;
-if (y>te->y2) te->scroll_y+=(int16_t)((y-te->y2)>10?10:(y-te->y2));      /* 拖出下缘=自动下滚 */
-else if (y<te->y1) te->scroll_y-=(int16_t)((te->y1-y)>10?10:(te->y1-y)); /* 拖出上缘=自动上滚 */
-if(te->scroll_y<0)te->scroll_y=0;
-if (te->scroll_y>maxs)te->scroll_y=(int16_t)maxs;
+{   /* v2.5.5: 拖出边界自动滚动也走统一滚动状态(立即定位, 不缓动) */
+   int want = te->scroll_y;
+   if (y>te->y2) want += ((y-te->y2)>10?10:(y-te->y2));
+   else if (y<te->y1) want -= ((te->y1-y)>10?10:(te->y1-y));
+   if (want<0) want=0;
+   if (want>maxs) want=maxs;
+   fx_scroll_set(te, want);
+}
 te_caret_from_xy(te,x,y); int ci=te->caret;
 if (s_sel_mode==1){ te->caret=(ci>=te->anchor)?te_word_end(te->text_buf,ci):te_word_start(te->text_buf,ci); }
 else if(s_sel_mode==2){ te->caret=(ci>=te->anchor)?te_para_end(te->text_buf,ci):te_para_start(te->text_buf,ci); }
@@ -745,21 +893,19 @@ static void draw_widget_inner(fx_widget_t *w, int cx1, int cy1, int cx2, int cy2
             return;
 #endif
         case FX_W_SCROLL: {
+            /* v2.5.5: 滚动容器也走统一引擎 —— 滚轮/触摸拖动/惯性/夹取/滚动条与列表一致。
+             * 没调用过 fx_scroll_content 时按子控件包围盒自动推内容高, 容器开箱即用。 */
+            int vh = w->y2 - w->y1 + 1;
+            int content = scroll_content_h(w);
+            int off = fxtk_scroll_step(w, content, vh);
             fx_set_color(w->bg); fx_fill_rect(w->x1,w->y1,w->x2,w->y2);
-            int dy = -w->scroll_y;
+            int dy = -off;
             for (fx_widget_t *c=w->child; c; c=c->sibling) {
                 c->y1+=(int16_t)dy; c->y2+=(int16_t)dy;
                 draw_widget(c,cx1,cy1+dy,cx2,cy2+dy);
                 c->y1-=(int16_t)dy; c->y2-=(int16_t)dy;   /* 必须还原 */
             }
-            int vis2=y2-y1+1, tot2=w->content_h;
-            if (tot2>vis2) {
-                int th=vis2*vis2/tot2;
-                if (th<20) th=20;
-                int ty=y1+(int)((long)w->scroll_y*(vis2-th)/(tot2-vis2));
-                fx_set_color(FX_GRAY);  fx_fill_rect(x2-4,y1+2,x2-1,y2-2);
-                fx_set_color(FX_LGRAY); fx_fill_rect(x2-4,ty,x2-1,ty+th);
-            }
+            scrollbar_draw_abs(w->x1, w->y1, w->x2 - w->x1 + 1, vh, off, content);
             return; }
 #if FXTK_WIDGET_BUTTON
         case FX_W_BUTTON: fxtk_draw_button(w); break;
@@ -871,6 +1017,7 @@ void fx_init(const fx_driver_t *drv)
      * 重新 fx_init 后弹层指向已清零槽位而失效) */
     s_full=0; s_dirty_n=0; s_last_tx=-1; s_last_ty=-1;
     s_focus=NULL; s_scroll_drag=NULL; s_wheel_tgt=NULL; s_wheel_acc=0;
+    s_touch_sc=NULL; s_touch_sc_y0=0; s_touch_sc_active=0;
     s_ctxpop=NULL; s_ctx_te=NULL; s_ctx_open=0; s_ctx_hl=-1; s_sel_mode=0;
     memset(s_scroll_pool,0,sizeof(s_scroll_pool));
     fxtk_extra_reset();   /* v2.3.1: 清 list/drop 模块静态池与 s_pop 缓存指针 */
@@ -881,27 +1028,17 @@ void fx_poll(void)
 {
     if (!s_drv) return;
     if (s_drv->wheel_read) {
+        /* v2.5.5: 滚轮统一路由 —— 只把增量交给"光标下最近的可滚控件", 由控件 draw 里的
+         * fxtk_scroll_step 用 fx_wheel_take 消费(像素增量, 转多少滚多少)。
+         * 画布保持旧语义(回调可以自己 fx_wheel_take 做缩放/自定义滚动), 列表走同一 step。 */
         int wx,wy,dy;
         while (s_drv->wheel_read(&wx,&wy,&dy)) {
-            fx_widget_t *t = hit_test(s_act_root,wx,wy);
-            while (t && t->type != FX_W_SCROLL && t->type != FX_W_TEXTEDIT && t->type != FX_W_CANVAS) t = t->parent;
-            if (t) {
-                if (t->type == FX_W_CANVAS) {
-                    if (s_wheel_tgt != t) { s_wheel_tgt = t; s_wheel_acc = 0; }
-                    s_wheel_acc += dy;
-                    /* anim 画布本来就会在本帧绘制; 不切换到全量路径, 避免滚动时闪一下 */
-                    if (!(t->flags & FX_F_ANIM))
-                        fx_repaint_rect(t->x1, t->y1, t->x2, t->y2);
-                    continue;
-                }
-                int vis=(t->type==FX_W_TEXTEDIT)?(t->y2-t->y1-10):(t->y2-t->y1);
-                int maxs=t->content_h-vis;
-                if (maxs<0) maxs=0;
-                t->scroll_y-=(int16_t)dy;
-                if (t->scroll_y<0)t->scroll_y=0;
-                if (t->scroll_y>maxs)t->scroll_y=(int16_t)maxs;
-                fx_repaint_rect(t->x1,t->y1,t->x2,t->y2);
-            }
+            fx_widget_t *t = wheel_target(wx,wy);
+            if (!t) continue;
+            if (s_wheel_tgt != t) { s_wheel_tgt = t; s_wheel_acc = 0; }
+            s_wheel_acc += dy;
+            if (!(t->flags & FX_F_ANIM))     /* anim 画布本来每帧就画, 不打断 */
+                fx_repaint_rect(t->x1, t->y1, t->x2, t->y2);
         }
     }
     if (s_drv->touch_read) {
@@ -1128,9 +1265,12 @@ static void te_caret_scroll(fx_widget_t *w){
         if (i2>=w->caret)break;
     }
     int caret_y=line*lh, vis_h=w->y2-w->y1-10;
-    if (caret_y < w->scroll_y) w->scroll_y=(int16_t)caret_y;
-    if (caret_y+lh > w->scroll_y+vis_h) w->scroll_y=(int16_t)(caret_y+lh-vis_h);
-    if (w->scroll_y<0)w->scroll_y=0;
+    int want=w->scroll_y;
+    if (caret_y < want) want=caret_y;
+    if (caret_y+lh > want+vis_h) want=caret_y+lh-vis_h;
+    if (want<0) want=0;
+    { int m=fx_scroll_max(w); if (m>0 && want>m) want=m; }
+    fx_scroll_set(w, want);   /* v2.5.5: 光标跟随走统一滚动状态(立即定位) */
 }
 
 /* v2.5.2: s_ctxpop/s_ctx_te/s_ctx_root 已提前声明在文件顶部 (root_select 要用) */
@@ -1241,23 +1381,27 @@ static void te_caret_from_xy(fx_widget_t *w,int x,int y)
     if (rel<=acc+cw/2)break; acc+=cw;i=j; }
     w->caret=i;
 }
+/* v2.5.5: 滚动条拖拽统一走同一套几何(与 scrollbar_draw_abs 完全一致),
+ * 容器/列表/下拉/输入框的滑块都能拖; 拖动是"立即跟手"(fx_scroll_set), 不缓动。 */
 static void scroll_drag_to(fx_widget_t *w,int y)
 {
-    int vis=(w->type==FX_W_TEXTEDIT)?(w->y2-w->y1-10):(w->y2-w->y1+1);
-    int total=w->content_h;
-    if (total<=vis) return;
-    int track0=w->y1+2, track1=w->y2-2, th=vis*vis/total;
-    if (th<20)th=20;
-    int span=(track1-track0)-th;
-    if (span<=0) return;
-    int sc=(int)(((long)(y-track0-th/2)*(total-vis))/span);
-    if (sc<0)sc=0;
-    if (sc>total-vis)sc=total-vis;
-    if (sc!=w->scroll_y) {
-        w->scroll_y=(int16_t)sc;
-        if (w->type==FX_W_CANVAS) { fx_scroll_state_t *st=scroll_state(w); if (st){ st->tgt=(float)sc; st->off=(float)sc; st->last=sc; } }   /* canvas 滑块拖动: 同步滚动状态池 (v2.3.1: 池满判空) */
-        fx_repaint_rect(w->x1,w->y1,w->x2,w->y2);
-    }
+    if (!w) return;
+    int vis = scroll_view_h(w), total = scroll_content_h(w);
+    int maxs = total - vis;
+    if (maxs <= 0) return;
+    int ch = w->y2 - w->y1 + 1;
+    int track0 = w->y1 + 2, track1 = w->y2 - 2;
+    int track_len = track1 - track0 + 1;
+    if (track_len < 2) return;
+    int th = track_len * ch / total;
+    if (th < 20) th = 20;
+    if (th > track_len) th = track_len;
+    int span = track_len - th;
+    if (span <= 0) return;
+    int sc = (y - track0 - th / 2) * maxs / span;
+    if (sc < 0) sc = 0;
+    if (sc > maxs) sc = maxs;
+    fx_scroll_set(w, sc);
 }
 const char *fx_textedit_get(fx_widget_t *w){return (w&&w->text_buf)?w->text_buf:(w?w->title:"");}
 void fx_textedit_clear(fx_widget_t *w){ if(!w)return;
@@ -1306,64 +1450,248 @@ static int s_grid_lines = 0;
 void fx_set_grid_lines(int on) { s_grid_lines = on; fx_repaint(); }
 int fxtk_grid_lines_on(void) { return s_grid_lines; }
 
-/* ---- 核心丝滑滚动: 目标像素 + 25% 逐帧插值 (rc 手感), 应用层一行调用 ---- */
-/* 状态池: 多控件并行滚动互不干扰 (定义已前移至文件头部静态区, 供 unlink_free/fx_init 清理) */
+/* ==================== v2.5.5: 统一滚动引擎 ====================
+ * 一个状态机同时服务: 滚动容器(fx_scroll_new)、列表/下拉、输入框、自绘画布(on_scroll_view)。
+ * 统一点:
+ *   ① 像素偏移(不是"行号×行高"): 列表/滚动容器/输入框用同一套 off/tgt 缓动;
+ *   ② 滚轮: 统一由 fx_poll 路由 → 控件 draw 里由 step 消费(fx_wheel_take), 转多少像素滚多少;
+ *   ③ 滚动条: 同一套几何/颜色/最小滑块高(fxtk_scrollbar_draw_local), 列表与容器外观一致;
+ *   ④ 触摸: 按下记候选 → 移动超过 8px 接管 → 1:1 跟手 → 松手惯性(0.92/帧衰减) → 夹取 0..max;
+ *   ⑤ 状态池: 真正用满 FX_MAX_SCROLL_STATES(旧代码写着 64 却只循环前 8 个槽)。
+ */
 static fx_scroll_state_t *scroll_state(fx_widget_t *w)
 {
-    for (int i = 0; i < 8; i++)
+    for (int i = 0; i < FX_MAX_SCROLL_STATES; i++)
         if (s_scroll_pool[i].w == w) return &s_scroll_pool[i];
-    for (int i = 0; i < 8; i++)
+    for (int i = 0; i < FX_MAX_SCROLL_STATES; i++)
         if (!s_scroll_pool[i].w) { s_scroll_pool[i].w = w; return &s_scroll_pool[i]; }
-    /* v2.3.1: 池满不再静默别名到 [0] (第 9 个控件会和第 1 个互踩), 由调用方退化处理 */
+    /* 池满不再静默别名到 [0] (两个控件互踩), 由调用方退化处理 */
     fx_log(FX_LOG_WARN, "滚动状态池已满(%d 个并发): 加大 FX_MAX_SCROLL_STATES", FX_MAX_SCROLL_STATES);
     return NULL;
 }
-/* 更新滚动: 返回当前偏移(整数); 滚轮转多少内容滚多少(像素), 停后 25%/帧 收尾
- * 有变化才请求重绘(静止零重绘); 状态池支持多控件并行滚动 */
-int fx_scroll_update(fx_widget_t *w, int content_h)
+
+/* 视口高: 输入框要扣掉上下内边距(与旧逻辑一致), 其他控件就是控件高 */
+static int scroll_view_h(fx_widget_t *w)
 {
     if (!w) return 0;
-    int x1,y1,x2,y2; fx_widget_rect(w,&x1,&y1,&x2,&y2);
-    int ch=y2-y1+1; int maxs=content_h-ch;
-    if (maxs<0)maxs=0;
-    w->content_h = (int16_t)(content_h > 32000 ? 32000 : content_h);   /* 供滑块拖动/滚动条使用 */
+    int vh = w->y2 - w->y1 + 1;
+    if (w->type == FX_W_TEXTEDIT) vh -= 10;
+    if (vh < 1) vh = 1;
+    return vh;
+}
+
+/* 内容高: 用户显式设置优先; 滚动容器没设时按子控件包围盒自动推导(容器开箱即用) */
+static int scroll_content_h(fx_widget_t *w)
+{
+    if (!w) return 0;
+    int auto_h = 0;
+    if (w->type == FX_W_SCROLL) {
+        for (fx_widget_t *c = w->child; c; c = c->sibling) {
+            if (!(c->flags & FX_F_VISIBLE)) continue;
+            int h = c->y2 - w->y1 + 1;
+            if (h > auto_h) auto_h = h;
+        }
+        if (auto_h > 0) {
+            auto_h += 4;                             /* 底部留 4px, 最后一行不贴边 */
+            if (auto_h <= scroll_view_h(w)) auto_h = 0;
+        }
+    }
+    int user_h = w->content_h;
+    if (user_h < 0) user_h = 0;
+    return user_h > auto_h ? user_h : auto_h;
+}
+
+/* 推进一帧: 消费滚轮 → 惯性衰减 → 缓动 → 夹取 → 返回整数偏移(变化时请求重绘) */
+static int scroll_step(fx_widget_t *w, int content_h, int view_h)
+{
+    if (!w) return 0;
+    if (view_h <= 0) view_h = scroll_view_h(w);
+    if (content_h < 0) content_h = scroll_content_h(w);
+    int maxs = content_h - view_h;
+    if (maxs < 0) maxs = 0;
+    w->content_h = (int16_t)(content_h > 32000 ? 32000 : content_h);   /* 兼容旧字段(滚动条/触摸) */
     fx_scroll_state_t *s = scroll_state(w);
-    if (!s) {   /* v2.3.1: 池满退化: 无缓动直滚, 行为仍正确 */
-        int cur = w->scroll_y - (int16_t)fx_wheel_take(w);
+    if (!s) {   /* 池满退化: 无缓动直滚, 行为仍正确 */
+        int cur = w->scroll_y - fx_wheel_take(w);
         if (cur < 0) cur = 0;
         if (cur > maxs) cur = maxs;
         w->scroll_y = (int16_t)cur;
         return cur;
     }
-    s->tgt -= (float)fx_wheel_take(w);          /* 轮上=内容上滚 */
-    if (s->tgt < 0) s->tgt = 0;
-    if (s->tgt > maxs) s->tgt = (float)maxs;
-    s->off += (s->tgt - s->off) * 0.25f;        /* 25% 逐帧插值 */
-    if (s->tgt - s->off > -1 && s->tgt - s->off < 1) s->off = s->tgt;   /* 收敛对齐 */
+    s->content_h = content_h; s->view_h = view_h;
+    int wd = fx_wheel_take(w);                       /* ① 滚轮(转多少像素滚多少) */
+    if (wd) { s->vel = 0.0f; s->tgt -= (float)wd; }
+    if (!s->drag_on) {
+        if (s->vel != 0.0f) {                        /* ② 触摸惯性: 目标随速度前冲, 摩擦衰减 */
+            s->tgt = s->off + s->vel;
+            s->vel *= FX_SCROLL_FRICTION;
+            if (s->vel > -0.35f && s->vel < 0.35f) s->vel = 0.0f;
+        }
+        if (s->tgt < 0) { s->tgt = 0; s->vel = 0; }
+        if (s->tgt > maxs) { s->tgt = (float)maxs; s->vel = 0; }
+        s->off += (s->tgt - s->off) * 0.35f;         /* ③ 缓动 */
+        if (s->tgt - s->off > -1.0f && s->tgt - s->off < 1.0f) s->off = s->tgt;
+    } else {
+        s->tgt = s->off;                             /* ④ 触摸拖动中: 手指直接决定偏移 */
+    }
+    if (s->off < 0) s->off = 0;
+    if (s->off > maxs) s->off = (float)maxs;
     int cur = (int)(s->off + 0.5f);
     if (cur != s->last) {
         s->last = cur;
-        if (!(w->flags & FX_F_ANIM))            /* anim 画布核心自动重绘 */
-            fx_repaint_rect(x1, y1, x2, y2);
+        if (!(w->flags & FX_F_ANIM))                 /* anim 画布由核心每帧重绘 */
+            fx_repaint_rect(w->x1, w->y1, w->x2, w->y2);
     }
     w->scroll_y = (int16_t)cur;
     return cur;
 }
-/* 统一滚动 API: 直接设滚动目标(供滚动条拖拽等), 走同一套 scroll_state 缓动 */
-void fx_set_scroll(fx_widget_t *w, int off){ if(!w)return; fx_scroll_state_t *s=scroll_state(w); 
-if(s){ s->tgt=(float)off; } }
-void fx_scrollbar_draw(fx_widget_t *w,int off,int content_h)
+int  fxtk_scroll_step(fx_widget_t *w, int content_h, int view_h) { return scroll_step(w, content_h, view_h); }
+int  fx_scroll_update(fx_widget_t *w, int content_h) { return scroll_step(w, content_h, -1); }
+
+/* ---- 统一公开 API ---- */
+int fx_scroll_offset(fx_widget_t *w)
 {
-    if(!w)return;
-    int x1,y1,x2,y2; fx_widget_rect(w,&x1,&y1,&x2,&y2);
-    int cw=x2-x1+1,ch=y2-y1+1;
-    if (content_h<=ch)return;
-    int th=ch*ch/content_h;
-    if (th<20)th=20;
-    int ty=(int)((long)off*(ch-th)/(content_h-ch));
-    fx_set_color(FX_GRAY); fx_fill_rect(cw-5,2,cw-2,ch-2);
-    fx_set_color(FX_RGB(33,150,243)); fx_fill_rect(cw-5,2+ty,cw-2,2+ty+th);
+    if (!w) return 0;
+    fx_scroll_state_t *s = scroll_state(w);
+    return s ? (int)(s->off + 0.5f) : (int)w->scroll_y;
 }
+int fx_scroll_max(fx_widget_t *w)
+{
+    if (!w) return 0;
+    int c = scroll_content_h(w), v = scroll_view_h(w);
+    return c > v ? c - v : 0;
+}
+int fx_scroll_view_h(fx_widget_t *w) { return scroll_view_h(w); }
+void fx_scroll_set(fx_widget_t *w, int off)   /* 立即定位(拖滚动条/回到顶部) */
+{
+    if (!w) return;
+    int m = fx_scroll_max(w);
+    if (off < 0) off = 0;
+    if (off > m) off = m;
+    fx_scroll_state_t *s = scroll_state(w);
+    if (s) { s->off = s->tgt = (float)off; s->vel = 0.0f; s->last = off; }
+    w->scroll_y = (int16_t)off;
+    fx_repaint_rect(w->x1, w->y1, w->x2, w->y2);
+}
+void fx_scroll_to(fx_widget_t *w, int off)    /* 目标定位(缓动) */
+{
+    if (!w) return;
+    int m = fx_scroll_max(w);
+    if (off < 0) off = 0;
+    if (off > m) off = m;
+    fx_scroll_state_t *s = scroll_state(w);
+    if (s) { s->tgt = (float)off; s->vel = 0.0f; }
+    else w->scroll_y = (int16_t)off;
+    fx_repaint_rect(w->x1, w->y1, w->x2, w->y2);
+}
+void fx_scroll_by(fx_widget_t *w, int dy) { fx_scroll_to(w, fx_scroll_offset(w) + dy); }
+void fx_scroll_to_top(fx_widget_t *w) { fx_scroll_to(w, 0); }
+void fx_scroll_to_bottom(fx_widget_t *w) { if (w) fx_scroll_to(w, fx_scroll_max(w)); }
+/* 兼容旧名: v2.3 起文档写的是"设滚动目标(走缓动)", 现在用 fx_scroll_to; 这里保留立即语义
+ * (demo 里拖滚动条/切目录要立刻跳回去, 缓动反而"拖泥带水")。 */
+void fx_set_scroll(fx_widget_t *w, int off) { fx_scroll_set(w, off); }
+
+/* ---- 统一滚动条(容器/列表/输入框/自绘画布共用同一几何与配色) ---- */
+static void scrollbar_draw_abs(int px, int py, int cw, int ch, int off, int content_h)
+{
+    if (cw <= 6 || ch <= 8 || content_h <= ch) return;
+    int track0 = py + 2, track1 = py + ch - 2;
+    int track_len = track1 - track0 + 1;
+    if (track_len < 2) return;
+    int th = track_len * ch / content_h;
+    if (th < 20) th = 20;
+    if (th > track_len) th = track_len;
+    int span = track_len - th;
+    if (span < 1) span = 1;
+    int ty = track0 + (int)((long)off * span / (content_h - ch));
+    fx_set_color(FX_TOK_SCROLL_TRACK); fx_fill_rect(px + cw - 6, track0, px + cw - 3, track1);
+    fx_set_color(FX_TOK_SCROLL_THUMB); fx_fill_rect(px + cw - 6, ty, px + cw - 3, ty + th - 1);
+}
+/* 画布回调里的动态坐标(0,0)-(cw-1,ch-1) 专用 */
+void fxtk_scrollbar_draw_local(int cw, int ch, int off, int content_h)
+{
+    scrollbar_draw_abs(0, 0, cw, ch, off, content_h);
+}
+void fx_scrollbar_draw(fx_widget_t *w, int off, int content_h)
+{
+    if (!w) return;
+    /* v2.5.5: 自动适配坐标系 —— 画布回调里坐标是局部的(0..cw-1), 普通控件绘制里是绝对的。
+     * 旧实现只在画布回调里正确; 现在两种调用点都能画对(列表/输入框/容器/自绘画布共用外观)。 */
+    if (fxtk_canvas_active()) {
+        fxtk_scrollbar_draw_local(w->x2 - w->x1 + 1, w->y2 - w->y1 + 1, off, content_h);
+        return;
+    }
+    scrollbar_draw_abs(w->x1, w->y1, w->x2 - w->x1 + 1, w->y2 - w->y1 + 1, off, content_h);
+}
+
+/* ---- 滚轮/触摸命中: 找光标下最近的"可滚动"控件 ---- */
+static fx_widget_t *wheel_target(int x, int y)
+{
+    /* 与 v2.3 行为一致: 任何画布都可能自己消费滚轮(3D 缩放/自绘列表),
+     * 所以画布不做"内容是否超出"的前置判断, 是否滚动由回调决定。 */
+    fx_widget_t *t = hit_test(s_act_root, x, y);
+    while (t && t->type != FX_W_SCROLL && t->type != FX_W_TEXTEDIT && t->type != FX_W_CANVAS) t = t->parent;
+    return t;
+}
+static fx_widget_t *touch_target(int x, int y)
+{
+    /* 触摸拖动只接管"内容确实超过视口"的控件:
+     *  - 画板/粒子这类普通画布 content_h=0, 拖动仍是画笔/交互, 不会被误判成滚动;
+     *  - 输入框拖动=选字, 不接管;
+     *  - 列表/下拉/滚动页/滚动容器 content_h>视口高 → 接管。 */
+    for (fx_widget_t *t = hit_test(s_act_root, x, y); t; t = t->parent) {
+        if (t->type == FX_W_TEXTEDIT) return NULL;
+        if (t->type == FX_W_SCROLL || t->type == FX_W_CANVAS)
+            return scroll_content_h(t) > scroll_view_h(t) ? t : NULL;
+    }
+    return NULL;
+}
+
+/* ---- 触摸滚动状态机(由 fx_touch_press/move/release 调用) ---- */
+static void scroll_touch_begin(fx_widget_t *w, int y)
+{
+    fx_scroll_state_t *s = scroll_state(w);
+    if (!s) return;
+    s->drag_on = 0; s->drag_started = 0;
+    s->drag_y0 = y; s->last_y = y;
+    s->drag_off0 = (int)(s->off + 0.5f);
+    s->vel = 0.0f;
+}
+static void scroll_touch_drag(fx_widget_t *w, int y)
+{
+    fx_scroll_state_t *s = scroll_state(w);
+    if (!s) return;
+    if (!s->drag_started) { s->drag_started = 1; s->drag_on = 1; s->vel = 0.0f; }
+    int m = fx_scroll_max(w);
+    int off = s->drag_off0 - (y - s->drag_y0);       /* 手指上移 = 内容上滚 */
+    if (off < 0) off = 0;
+    if (off > m) off = m;
+    float dy = (float)(s->last_y - y);
+    s->vel = s->vel * 0.55f + dy * 0.45f;            /* 速度低通滤波, 防抖动 */
+    s->last_y = y;
+    if ((int)(s->off + 0.5f) != off) {
+        s->off = (float)off; s->tgt = s->off;
+        fx_repaint_rect(w->x1, w->y1, w->x2, w->y2);
+    }
+}
+static void scroll_touch_end(fx_widget_t *w, int y)
+{
+    fx_scroll_state_t *s = scroll_state(w);
+    if (!s) return;
+    if (!s->drag_started) { s->drag_on = 0; return; }
+    s->drag_on = 0; s->drag_started = 0;
+    s->vel += (float)(s->last_y - y);                /* 最后一小段位移也计入甩动速度 */
+    s->last_y = y;
+    if (s->vel > 90.0f) s->vel = 90.0f;              /* 封顶: 防止一甩甩到天边 */
+    if (s->vel < -90.0f) s->vel = -90.0f;
+    if (s->vel > -0.4f && s->vel < 0.4f) s->vel = 0.0f;
+    fx_repaint_rect(w->x1, w->y1, w->x2, w->y2);
+}
+
+/* ---- 给 widgets/extra 的包装(避免它们依赖 static 符号) ---- */
+fx_widget_t *fxtk_scroll_widget_at(int x, int y) { return touch_target(x, y); }
+int fxtk_scroll_content_of(fx_widget_t *w) { return scroll_content_h(w); }
+int fxtk_scroll_view_of(fx_widget_t *w) { return scroll_view_h(w); }
 
 /* 画布离屏缓冲开关: 大画布/直绘场景关闭以避免放大合成问题 */
 void fx_canvas_set_buf(fx_widget_t *w, int on)

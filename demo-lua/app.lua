@@ -702,7 +702,7 @@ local function on_scroll_view(w)
     for i = first, 59 do
         local y = i * row_h - off
         if y > ch then break end
-        local t = string.format("第 %d 行内容 (滚轮翻我)", i + 1)
+        local t = string.format("第 %d 行内容 (滚轮/拖动翻我)", i + 1)
         if (i & 1) ~= 0 then
             fx_set_color(FX_RGB(33, 150, 243))
             fx_fill_rect(10, y + 4, cw - 20, y + row_h - 6)

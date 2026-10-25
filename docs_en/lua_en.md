@@ -1,6 +1,6 @@
 # Lua binding (fxtk + Lua 5.4)
 
-> **Core: fxtk-pc-v2.5 (C99, `FXTK_VERSION` = 2.5.4, semantics unchanged).**
+> **Core: fxtk-pc-v2.5 (C99, `FXTK_VERSION` = 2.5.5, semantics unchanged).**
 > Lua is a binding layer, not a rewrite: widgets, canvas, images, input and backend services
 > are still implemented in C. This repository adds Lua 5.4 access to the same API and a
 > 12-page Lua demo.
@@ -78,6 +78,8 @@ fx_button_new(pixel("16,56", "200,96"), name("ok"), title("OK"),
 | `fx_canvas_size(w,&w,&h)` | `local w,h = fx_canvas_size(w)` |
 | `fx_touch_state(&x,&y,&p)` | `local x,y,p = fx_touch_state()` |
 | `fx_last_key(&k)` | `local k = fx_last_key()` (`k.key`, `k.utf8`) |
+| `fx_scroll_offset/max/view_h(w)` | same names, return integers; `fx_scroll_update(w,h)` returns the offset |
+| `fx_touch_capable()` / `fx_set_touch_mode(n)` | same names; the first returns a boolean (n: -1 auto / 0 off / 1 on) |
 
 Attributes are Lua functions returning a table tagged with `__fx`. Widget constructors accept
 varargs of attributes. Module style is also available:

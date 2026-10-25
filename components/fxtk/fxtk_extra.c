@@ -12,7 +12,7 @@
 typedef struct {
     fx_widget_t *w;
     char *items[EX_MAXL];
-    int n, sel, scroll, row_h, was_pr, wacc, hov;
+    int n, sel, row_h, was_pr, hov;   /* v2.5.5: 滚动偏移改由统一滚动引擎保存 */
     void (*cb)(fx_widget_t *, void *);
     fx_widget_t *pop, *owner;
 } ex_slot_t;
@@ -43,7 +43,9 @@ static int ex_rh(ex_slot_t *s){ int rh=s->row_h*fxtk_ui_scale()/100;
 if (rh<12)rh=12;
 if (!getenv("FXTK_COMPACT")&&rh>32)rh=32; return rh; }
 #if FXTK_WIDGET_LIST
-static void ex_draw_list(ex_slot_t *s, int cw, int ch)
+/* v2.5.5: 列表/下拉与滚动容器共用同一滚动引擎 —— off 是像素偏移(不是行号),
+ * 行位置 = 1 + i*rh - off, 所以拖动/惯性/滚动条手感与滚动页完全一致。 */
+static void ex_draw_list(ex_slot_t *s, int cw, int ch, int off, int rh)
 {
     /* P5 审美迭代 5/9(列表/下拉): 外框与行高亮原先都是硬直角, 且选中行从 x=1 铺到 cw-2
      * (紧贴外框, 视觉上"顶格"); 与其它控件的圆角语言也不一致。改为圆角外框 + 内缩的圆角行高亮,
@@ -52,17 +54,20 @@ static void ex_draw_list(ex_slot_t *s, int cw, int ch)
     { if (lr > ch/2) lr = ch/2; if (lr > cw/2) lr = cw/2; }
     fx_set_color(s->w?s->w->bg:FX_WHITE); fx_fill_rect_round(0,0,cw-1,ch-1,lr);
     fx_set_color(FX_TOK_LIST_EDGE);       fx_draw_rect_round(0,0,cw-1,ch-1,lr);
-    int vis=(ch-2)/ex_rh(s);
-    if (vis>s->n-s->scroll) vis=s->n-s->scroll;
-    for(int i=0;i<vis;i++){
-        int idx=s->scroll+i, y=1+i*ex_rh(s);
-        if (!s->items[idx]) continue;
-        int mx,my,mp; fx_touch_state(&mx,&my,&mp);
-        int hov=-1; { int lx=mx-s->w->x1, ly=my-s->w->y1;
-        if (lx>=0&&lx<cw&&ly>=1&&ly<ch-1) hov=(ly-1)/ex_rh(s)+s->scroll; }
-        /* 行高亮: 内缩 2px 的圆角胶囊, 不再顶格贴住外框(与标签页选中态同一套语言) */
-        int hy0 = y, hy1 = y + ex_rh(s) - 1;
-        int sel_or_hov = (idx==s->sel) ? 1 : (idx==hov ? 2 : 0);
+    {   /* 悬停行: 与像素偏移同源, 拖动时高亮不跳行 */
+        int mx,my,mp; fx_touch_state(&mx,&my,&mp); int hv=-1;
+        int lx=mx-s->w->x1, ly=my-s->w->y1;
+        if (lx>=0&&lx<cw&&ly>=1&&ly<ch-1) hv=(ly-1+off)/rh;
+        if (hv!=s->hov){ s->hov=hv; fx_repaint_rect(s->w->x1,s->w->y1,s->w->x2,s->w->y2); }
+    }
+    int first = rh > 0 ? off / rh : 0;
+    for (int i = first; i < s->n; i++) {
+        int y = 1 + i * rh - off;
+        if (y > ch - 1) break;
+        if (y + rh < 1) continue;
+        if (!s->items[i]) continue;
+        int hy0 = y, hy1 = y + rh - 1;
+        int sel_or_hov = (i==s->sel) ? 1 : (i==s->hov ? 2 : 0);
         if (sel_or_hov) {
             int hr = FX_TOK_RADIUS_S; int hh = hy1 - hy0 + 1;
             if (hr > hh/2 - 1) hr = hh/2 - 1;
@@ -70,21 +75,11 @@ static void ex_draw_list(ex_slot_t *s, int cw, int ch)
             fx_set_color(sel_or_hov==1 ? FX_TOK_PRIMARY : FX_TOK_LIST_HOVER);
             fx_fill_rect_round(3, hy0 + 1, cw - 6, hy1 - 1, hr);
         }
-        fx_draw_text_c(FX_TOK_TEXT_PAD_X, y+3, s->items[idx],
-                       idx==s->sel ? FX_TOK_ON_PRIMARY : FX_TOK_TEXT,
-                       idx==s->sel ? FX_TOK_PRIMARY   : (idx==hov ? FX_TOK_LIST_HOVER : (s->w?s->w->bg:FX_WHITE)));
+        fx_draw_text_c(FX_TOK_TEXT_PAD_X, y+3, s->items[i],
+                       i==s->sel ? FX_TOK_ON_PRIMARY : FX_TOK_TEXT,
+                       i==s->sel ? FX_TOK_PRIMARY   : (i==s->hov ? FX_TOK_LIST_HOVER : (s->w?s->w->bg:FX_WHITE)));
     }
-    { int mx,my,mp; fx_touch_state(&mx,&my,&mp); int hv=-1; int lx=mx-s->w->x1, ly=my-s->w->y1;
-    if (lx>=0&&lx<cw&&ly>=1&&ly<ch-1) hv=(ly-1)/ex_rh(s)+s->scroll;
-    if (hv!=s->hov){ s->hov=hv; fx_repaint_rect(s->w->x1,s->w->y1,s->w->x2,s->w->y2); } }
-    int total=s->n*ex_rh(s);
-    if (total>ch-2){
-        int th=(ch-2)*(ch-2)/total;
-        if (th<12)th=12;
-        int ty=1+(long)s->scroll*ex_rh(s)*(ch-2-th)/(total-(ch-2));
-        fx_set_color(FX_TOK_SCROLL_TRACK); fx_fill_rect(cw-4,1,cw-2,ch-2);
-        fx_set_color(FX_TOK_SCROLL_THUMB); fx_fill_rect(cw-4,ty,cw-2,ty+th);
-    }
+    fxtk_scrollbar_draw_local(cw, ch, off, s->n * rh);   /* 与容器/输入框同一套滚动条 */
 }
 static void ex_list_cb(fx_widget_t *w, void *ud)
 {
@@ -92,20 +87,18 @@ static void ex_list_cb(fx_widget_t *w, void *ud)
     if (!s)return;
     int x1,y1,x2,y2; fx_widget_rect(w,&x1,&y1,&x2,&y2);
     int cw=x2-x1+1, ch=y2-y1+1;
-    int maxs=s->n-(ch-2)/ex_rh(s);
-    if (maxs<0)maxs=0;
-    { int dy=fx_wheel_take(w); s->wacc+=dy; int dr=s->wacc/ex_rh(s); s->wacc-=dr*ex_rh(s); s->scroll-=dr; }
-    if(s->scroll<0)s->scroll=0;
-    if (s->scroll>maxs)s->scroll=maxs;
+    int rh = ex_rh(s);
+    /* v2.5.5: 滚轮/触摸拖动/惯性/滚动条拖拽全部由统一引擎处理(与滚动容器/输入框同一套) */
+    int off = fxtk_scroll_step(w, s->n * rh, ch);   /* 视口=控件高(与 fx_scroll_max 一致) */
     int mx,my,mp; fx_touch_state(&mx,&my,&mp);
     int pr=(fx_pressed()==w);
     if (s->was_pr&&!pr&&mx>=x1&&mx<=x2&&my>=y1&&my<=y2){
-        int i=(my-y1-1)/ex_rh(s)+s->scroll;
+        int i=(my-y1-1+off)/rh;
         if (i>=0&&i<s->n){ s->sel=i;
         if (s->cb)s->cb(w,(void*)(intptr_t)i); }
     }
     s->was_pr=pr;
-    ex_draw_list(s,cw,ch);
+    ex_draw_list(s,cw,ch,off,rh);
 }
 fx_widget_t *fx_list_new_p(const char*r1,const char*r2,int pg)
 {
@@ -174,22 +167,19 @@ static void ex_pop_cb(fx_widget_t *w, void *ud)
     }
     int x1,y1,x2,y2; fx_widget_rect(w,&x1,&y1,&x2,&y2);
     int cw=x2-x1+1, ch=y2-y1+1;
+    int rh = ex_rh(s);
     int mx,my,mp; fx_touch_state(&mx,&my,&mp);
     int inside=mx>=x1&&mx<=x2&&my>=y1&&my<=y2;
     int pr=(fx_pressed()==w);
     if (mp&&!inside&&!pr){ ex_close_pop(o); return; }
-    int maxs=s->n-(ch-2)/ex_rh(s);
-    if (maxs<0)maxs=0;
-    { int dy=fx_wheel_take(w); s->wacc+=dy; int dr=s->wacc/ex_rh(s); s->wacc-=dr*ex_rh(s); s->scroll-=dr; }
-    if(s->scroll<0)s->scroll=0;
-    if (s->scroll>maxs)s->scroll=maxs;
+    int off = fxtk_scroll_step(w, s->n * rh, ch);   /* v2.5.5: 统一滚动(视口=控件高) */
     if (s->was_pr&&!pr&&inside){
-        int i=(my-y1-1)/ex_rh(s)+s->scroll;
+        int i=(my-y1-1+off)/rh;
         if (i>=0&&i<s->n){ o->sel=i; void(*cb)(fx_widget_t*,void*)=o->cb; ex_close_pop(o);
         if (cb)cb(o->w,(void*)(intptr_t)i); return; }
     }
     s->was_pr=pr;
-    ex_draw_list(s,cw,ch);
+    ex_draw_list(s,cw,ch,off,rh);
 }
 static void ex_drop_cb(fx_widget_t *w, void *ud)
 {
@@ -221,9 +211,11 @@ static void ex_drop_cb(fx_widget_t *w, void *ud)
                 ps->owner=w;
                 for(int i=0;i<s->n;i++)ps->items[i]=s->items[i];
                 ps->n=s->n; ps->sel=s->sel; ps->row_h=s->row_h;
-                ps->scroll=s->sel>0?s->sel-1:0;
                 s_pop->page=w->page;
                 fx_widget_set_rect(s_pop,x1,py1,x2,py1+H-1);
+                /* v2.5.5: 弹层初始滚动到选中项前一行, 走统一滚动状态 */
+                fx_scroll_content(s_pop, s->n * ex_rh(ps));
+                if (ps->n > 0) fx_scroll_set(s_pop, (s->sel>1?s->sel-1:0) * ex_rh(ps));
                 s->pop=s_pop;
             }
         }

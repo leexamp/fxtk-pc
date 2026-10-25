@@ -6,7 +6,7 @@
 > API from scripts (`bindings/lua` + `demo-lua/`, Lua vendored, no system liblua); the C core is unchanged.
 
 <p>
-  <img alt="version" src="https://img.shields.io/badge/version-v2.5.4-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-v2.5.5-blue">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green">
   <img alt="c" src="https://img.shields.io/badge/language-C99-9cf">
   <img alt="platform" src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey">
@@ -148,7 +148,7 @@ Full 12-page demo (widgets / image warp / pseudo-3D / text input / file browser 
 | **Widgets** | button · label · slider · progress · checkbox · grid keypad · canvas · tab · image · textbox · list · dropdown · scroll container · card |
 | **Layout** | `pixel` baseline + responsive scaling · `percent` · `grid` · flex (`FX_POS_FLEX`) |
 | **Canvas (immediate mode)** | line/circle/ellipse/triangle/polygon/arc/round-rect/text/gradient · offscreen buffer · anti-aliasing · transform stack |
-| **Input** | text editing (multi-line, drag-select, Ctrl+A/C/V/X, system clipboard, max length) · wheel routing · animated scroll · scrollbar drag · focus · single-finger gestures |
+| **Input** | text editing (multi-line, drag-select, Ctrl+A/C/V/X, system clipboard, max length) · unified scrolling (containers/lists/dropdowns/text edits/canvases: wheel + easing + scrollbar drag) · touch drag scrolling with momentum (enabled only when a touchscreen is detected) · focus · single-finger gestures |
 | **Rendering** | GPU vertex batching · true perspective quad warp · image post-processing · GPU/CPU raymarching · particles |
 | **Desktop** | single-window always-on-top/borderless/drag/center · real multi-window (`-DFXTK_MW`, X11/Win32) · in-canvas window manager (`fxtk_wm`) |
 

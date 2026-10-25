@@ -167,4 +167,14 @@ void fxtk_draw_image(fx_widget_t *w);
 int fx_widget_anim_ok(fx_widget_t *w);
 void fxtk_anim_reset(void);   /* v2.4.4: 复位四张动画槽表(fx_init 时调用) */
 void fxtk_anim_forget(fx_widget_t *w);  /* v2.5.1: 控件销毁时清它占的动画槽 */
+
+/* v2.5.5: 统一滚动引擎(widgets/extra 也调用; 实现见 fxtk.c)
+ * fxtk_scroll_step: 推进一帧并返回像素偏移(content_h<0 表示自动/沿用旧值)
+ * fxtk_scrollbar_draw_local: 在画布回调的局部坐标(0,0)-(cw-1,ch-1)里画同一套滚动条 */
+int  fxtk_scroll_step(fx_widget_t *w, int content_h, int view_h);
+void fxtk_scrollbar_draw_local(int cw, int ch, int off, int content_h);
+int  fxtk_canvas_active(void);                      /* 正在画布回调里(局部坐标) */
+fx_widget_t *fxtk_scroll_widget_at(int x, int y);   /* 光标下可滚动控件(触摸用, 内容超出才算) */
+int  fxtk_scroll_content_of(fx_widget_t *w);        /* 统一内容高(含滚动容器自动推导) */
+int  fxtk_scroll_view_of(fx_widget_t *w);           /* 统一视口高 */
 void fxtk_put_px_alpha(int x, int y, uint32_t c, int a);  /* v2.5.1(H3): 离屏 alpha 混合写像素 */

@@ -5,7 +5,7 @@
 #define FXTK_H
 
 /* 框架版本 (发布标记) */
-#define FXTK_VERSION "2.5.4"   /* 窗口标题/文档/发布包统一取此值, 避免各处手写版本号漂移 */
+#define FXTK_VERSION "2.5.5"   /* 窗口标题/文档/发布包统一取此值, 避免各处手写版本号漂移 */
 
 #include <stdint.h>
 #include <stddef.h>
@@ -209,6 +209,10 @@ void fxtk_apply_fit(fx_widget_t *w);
 void fx_touch_press(int x, int y);
 void fx_touch_release(int x, int y);
 void fx_touch_move(int x, int y);
+/* v2.5.5: 触摸屏能力 —— 拖动滚动默认只在检测到触摸屏时启用(桌面鼠标拖动不进滚动路径)。
+ * fx_touch_capable(): 当前是否按触摸屏对待; fx_set_touch_mode(-1 自动 / 0 强制关 / 1 强制开)。 */
+int  fx_touch_capable(void);
+void fx_set_touch_mode(int on);
 
 void fx_frame_begin(void);
 void fx_frame_end(void);
@@ -352,10 +356,24 @@ int fx_screenshot(const char *path);
 void fx_widget_fix(fx_widget_t *w, int x1, int y1);  /* 固定坐标模式: 防布局重算, 记录基准 */
 fx_color_t fx_get_bg(void);
 
-/* 核心丝滑滚动 */
-int  fx_scroll_update(fx_widget_t *w,int content_h);
-void fx_scrollbar_draw(fx_widget_t *w,int off,int content_h);
-void fx_set_scroll(fx_widget_t *w,int off);   /* v2.3 统一滚动: 设目标(拖滚动条用), 走同套缓动 */
+/* ==================== v2.5.5: 统一滚动 API ====================
+ * 滚动容器(fx_scroll_new)、列表/下拉、输入框、自绘画布 共用同一套滚动模型:
+ *   - 偏移是【像素】, 滚轮/触摸拖动/惯性/夹取/滚动条几何全部一致;
+ *   - 触摸屏: 在内容上按住拖动 >8px 即接管为滚动(1:1 跟手), 松手带惯性, 不会误触发点击;
+ *   - 自绘画布: 内容由回调里的 fx_scroll_update(w, total) 声明; 列表/输入框/容器内部已接好。
+ * 旧 API(fx_scroll_update / fx_scrollbar_draw / fx_set_scroll)保留兼容。 */
+int  fx_scroll_offset(fx_widget_t *w);        /* 当前像素偏移 */
+int  fx_scroll_max(fx_widget_t *w);           /* 最大偏移(内容高-视口高, 已含夹取) */
+int  fx_scroll_view_h(fx_widget_t *w);        /* 视口高(输入框已扣上下内边距) */
+void fx_scroll_to(fx_widget_t *w, int off);   /* 设目标偏移(缓动) */
+void fx_scroll_set(fx_widget_t *w, int off);  /* 立即定位(拖滚动条/回到顶部用) */
+void fx_scroll_by(fx_widget_t *w, int dy);    /* 相对滚动(缓动) */
+void fx_scroll_to_top(fx_widget_t *w);
+void fx_scroll_to_bottom(fx_widget_t *w);
+/* 兼容旧 API */
+int  fx_scroll_update(fx_widget_t *w,int content_h);   /* 每帧调用: 消费滚轮/推进缓动, 返回像素偏移 */
+void fx_scrollbar_draw(fx_widget_t *w,int off,int content_h);   /* 画统一滚动条 */
+void fx_set_scroll(fx_widget_t *w,int off);   /* v2.3 旧名: 等价 fx_scroll_set(立即) */
 void fx_canvas_set_buf(fx_widget_t *w,int on);
 
 /* ---- extra: 多尺寸文字 / 列表 / 下拉 ---- */
