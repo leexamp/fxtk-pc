@@ -36,8 +36,9 @@ static void build_ui(void)
 }
 ```
 
-`pixel("x1,y1","x2,y2")` is expressed on a **480×272 design baseline** and scales proportionally to any
-window size — no manual scaling factors.
+`pixel("x1,y1","x2,y2")` uses **design-space coordinates, not device pixels**: the default design
+baseline is 480×272 and scales proportionally to any window size — no manual scaling factors. Working from a
+1280×720 mockup? Call `fx_set_design_pixel(1280, 720)` at startup and write the mockup coordinates directly.
 
 ### Four rules
 
@@ -100,7 +101,7 @@ Full 12-page demo (widgets / image warp / pseudo-3D / text input / file browser 
 | Area | Contents |
 |---|---|
 | **Widgets** | button · label · slider · progress · checkbox · grid keypad · canvas · tab · image · textbox · list · dropdown · scroll container · card |
-| **Layout** | `pixel` baseline + responsive scaling · `percent` · `grid` · flex (`FX_POS_FLEX`) |
+| **Layout** | `pixel` design-space coords (configurable via `fx_set_design_pixel`) + responsive scaling · `percent` · `grid` · flex (`FX_POS_FLEX`) |
 | **Canvas (immediate mode)** | line/circle/ellipse/triangle/polygon/arc/round-rect/text/gradient · offscreen buffer · anti-aliasing · transform stack |
 | **Input** | text editing (multi-line, drag-select, Ctrl+A/C/V/X, system clipboard, max length) · wheel routing · animated scroll · scrollbar drag · focus · single-finger gestures |
 | **Rendering** | GPU vertex batching · true perspective quad warp · image post-processing · GPU/CPU raymarching · particles |

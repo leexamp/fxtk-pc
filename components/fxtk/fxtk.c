@@ -46,9 +46,7 @@ static fx_widget_t *s_scroll_drag = NULL;
 static fx_widget_t *s_wheel_tgt = NULL;
 static int s_wheel_acc = 0;
 
-/* 响应式缩放 */
-#define FX_DESIGN_W 480
-#define FX_DESIGN_H 272
+/* 响应式缩放: 设计稿尺寸在 backends(fx_design_w/h), 默认 480x272, 由 fx_set_design_pixel() 改 */
 static int s_sx1000 = 1000, s_sy1000 = 1000;
 
 static void redraw_widget_now(fx_widget_t *w);
@@ -421,6 +419,27 @@ if (on)w->flags|=FX_F_FIT; else w->flags&=~FX_F_FIT; fx_layout(); }
 int fxtk_max_scale1000(void){return s_maxscale1000;}
 void fx_set_max_scale(float f){ if(f<0.5f)f=0.5f;
 if (f>8)f=8; s_maxscale1000=(int)(f*1000); fx_layout(); }
+
+/* ================= 设计稿坐标空间 (v2.5.3) =================
+ * pixel("x1,y1","x2,y2") 里的数是设计稿坐标, 不是设备像素: 框架按设计稿尺寸把它等比缩放到窗口。
+ * 默认 480x272; 换设计稿(例如 1280x720)时启动阶段调一次, 之后所有 pixel() 坐标直接按该稿写。
+ * 修改后立即重排/重绘; 文字缩放(fxtk_ui_scale)也同步以设计稿宽为 100%。 */
+void fx_set_design_pixel(int w, int h)
+{
+    if (w < 16 || h < 16 || w > 8192 || h > 8192) {
+        fx_log(FX_LOG_WARN, "fx_set_design_pixel(%d,%d): 设计稿尺寸需在 16..8192, 已忽略", w, h);
+        return;
+    }
+    if (w == fx_design_w && h == fx_design_h) return;
+    fx_design_w = w; fx_design_h = h;
+    fx_layout();      /* 未初始化(fx_init 之前)时 fx_layout 内部直接返回, 首帧自然生效 */
+    fx_repaint();
+}
+void fx_get_design_pixel(int *w, int *h)
+{
+    if (w) *w = fx_design_w;
+    if (h) *h = fx_design_h;
+}
 /* 交互件尺寸封顶+居中: 设计分辨率下不生效, 大屏防巨型/grid拉满 */
 static void clamp_ctrl(fx_widget_t *c){
     if (c->type!=FX_W_BUTTON && c->type!=FX_W_CHECKBOX && !(c->flags&FX_F_FIT)) return;
@@ -457,8 +476,8 @@ void fx_layout(void)
     if (!s_drv) return;
     if (!s_act_root) s_act_root = &s_root;
     s_act_root->x1=0; s_act_root->y1=0; s_act_root->x2=(int16_t)(s_drv->width-1); s_act_root->y2=(int16_t)(s_drv->height-1);
-    s_sx1000 = (int)((int32_t)s_drv->width*1000/FX_DESIGN_W);
-    s_sy1000 = (int)((int32_t)s_drv->height*1000/FX_DESIGN_H);
+    s_sx1000 = (int)((int32_t)s_drv->width*1000/(fx_design_w > 0 ? fx_design_w : 480));
+    s_sy1000 = (int)((int32_t)s_drv->height*1000/(fx_design_h > 0 ? fx_design_h : 272));
     layout_children(s_act_root);
 }
 static void layout_children(fx_widget_t *p)

@@ -58,7 +58,7 @@ fx_canvas_new(pixel("6,32","444,236"), anim(1), call(on_draw));
 
 ## Choosing a Layout
 
-- A small fixed widget → `pixel()` (480×272 design coordinates, scaled proportionally).
+- A small fixed widget → `pixel()` (design-space coordinates, default 480×272, changeable via `fx_set_design_pixel()`; scaled proportionally).
 - Fill/align the parent container → `percent()` (0.0~1.0).
 - Tables → `grid()`.
 

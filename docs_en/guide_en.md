@@ -125,15 +125,16 @@ Cuttable widgets (default 1=on, set 0=off): `FXTK_WIDGET_BUTTON/LABEL/GRID/CANVA
 
 ### 3.1 Design Baseline
 
-- The design baseline is **480×272** (`FX_DESIGN_W/H`).
-- The core computes `s_sx1000 = width*1000/480` and `s_sy1000 = height*1000/272` from the actual window size, and all `pixel()` coordinates are **proportionally scaled** by these.
-- Therefore the UI **fills the screen and keeps the same proportions at any resolution**: a 480×272 window displays at original size, and 1920×1080 fullscreen auto-magnifies by 4×.
+- The design baseline defaults to **480×272**; `pixel()` takes **design-space coordinates, not device pixels**.
+  To work from another mockup, call `fx_set_design_pixel(w,h)` (e.g. 1280×720) at startup and write its coordinates directly.
+- The core computes `s_sx1000 = width*1000/fx_design_w` and `s_sy1000 = height*1000/fx_design_h` from the actual window size, and all `pixel()` coordinates are **proportionally scaled** by these; text scaling also uses the design width as 100%.
+- Therefore the UI **fills the screen and keeps the same proportions at any resolution**: a window equal to the design size displays at original size, and 1920×1080 fullscreen auto-magnifies.
 
 ### 3.2 Three Layout Modes
 
 | Mode | Attribute macro | Description |
 |---|---|---|
-| Pixel | `pixel("x1,y1","x2,y2")` | 480×272 design coordinates, proportionally scaled. **Most commonly used** |
+| Pixel | `pixel("x1,y1","x2,y2")` | Design-space coordinates (default 480×272, changeable via `fx_set_design_pixel()`), proportionally scaled. **Most commonly used** |
 | Percent | `percent("a,b","c,d")` | 0.0~1.0 floating-point strings, relative to the parent widget rectangle |
 | Grid | `grid("name",r1,c1,r2,c2)` | Hangs in the cell range of a named grid; `grid("name")` fills it |
 

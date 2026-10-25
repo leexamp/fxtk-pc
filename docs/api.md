@@ -16,7 +16,8 @@
 - **控件**：用属性宏（C99 compound literal）创建，末尾自动补 `FX_ATTR_END`；例如
   `fx_widget_t *b = fx_button_new(pixel("20,20","140,64"), name("ok"), text("确定"), call(on_ok));`
   （坐标用 `pixel("x1,y1","x2,y2")` / `percent(...)` / `grid(...)`，没有 `x()/y()/w()/h()` 这类属性。）
-- **缩放**：框架按 `fx_ui_scale()` 自动缩放控件；`fx_set_max_scale()` 限制上限；避免在业务里手算倍数。
+- **缩放**：`pixel()` 用**设计稿坐标**（默认 480×272，`fx_set_design_pixel()` 可换成自己的稿尺寸）；
+  框架按 `fx_ui_scale()` 自动缩放控件；`fx_set_max_scale()` 限制上限；避免在业务里手算倍数。
 - **能力查询**：后端可选能力（GPU 圆角、raymarch、图片 GPU 形变等）先查 `fx_*_available()`；缺失时是安全空操作。
 - **版本**：本文对应 v2.5；多窗口（`fxtk_win_*`）需要独立后端 `-DFXTK_MW`。
 
@@ -103,6 +104,7 @@
 | `fxtk_fit_rect(w,&x1,&y1,&x2,&y2)` | 读取自适应后的矩形。 |
 | `fx_set_max_scale(f)` / `fxtk_max_scale1000()` | 控件缩放上限（倍数 / 千分比）。 |
 | `fxtk_set_ui_scale_cap(p)` / `fxtk_ui_scale()` | 全局 UI 缩放上限 / 当前缩放。 |
+| `fx_set_design_pixel(w,h)` / `fx_get_design_pixel(&w,&h)` | `pixel()` 的设计稿坐标空间（默认 480×272）；换成自己的设计稿尺寸后，坐标直接按该尺寸写。 |
 | `fx_widget_fix(w,x,y)` | 固定控件在坐标（跳过自动布局）。 |
 
 ---

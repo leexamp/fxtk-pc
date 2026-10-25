@@ -38,7 +38,8 @@ For people who want to modify the source / port it. For application development,
 
 ## Layout & Scaling
 
-- Baseline 480×272; `s_sx1000 = width*1000/480`, `s_sy1000` likewise.
+- Baseline defaults to 480×272 (variables `fx_design_w/h`, changed by `fx_set_design_pixel()`);
+  `s_sx1000 = width*1000/fx_design_w`, `s_sy1000` likewise.
 - `FX_POS_PIXEL`: design coordinates × scale; `FX_POS_PERCENT`: parent rectangle × float; `FX_POS_GRID`: named grid.
 - **`FX_POS_FIXED`**: layout skipped (`case FX_POS_FIXED: break;`), coordinates written directly. Used by popups and dynamic widgets.
   - `fx_widget_fix(w,x,y)` switches a widget to FIXED and records the base `ox1/oy1`, for later self-draw movement.

@@ -610,6 +610,40 @@ int main(void) {
         else { printf("  [FAIL] 色块标签文字底色 = 0x%08X, 期望 0xFF5A00\n", (unsigned)s_last_text_bg); fails++; }
     }
 
+    /* [19] v2.5.3: 设计稿坐标空间 —— pixel() 坐标按 fx_set_design_pixel() 的尺寸缩放
+     * 同一个 pixel("0,0","240,136") 控件: 设计稿 480x272 时占约 240 物理像素, 设计稿放大一倍
+     * (960x544) 后应只剩约 120 —— 证明 pixel() 不是设备像素, 而是设计稿坐标。 */
+    printf("[19] 设计稿坐标空间 (v2.5.3)\n");
+    {
+        int dw = 0, dh = 0;
+        fx_get_design_pixel(&dw, &dh);
+        if (dw == 480 && dh == 272) printf("  [ok]   默认设计稿 480x272\n");
+        else { printf("  [FAIL] 默认设计稿 = %dx%d, 期望 480x272\n", dw, dh); fails++; }
+
+        fx_widget_t *dsg = fx_label_new(pixel("0,0","240,136"), name("dsg"));
+        fx_layout();
+        int x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+        fx_widget_rect(dsg, &x1, &y1, &x2, &y2);
+        int wide1 = x2 - x1 + 1;
+        fx_set_design_pixel(960, 544);   /* 内部立即重排 */
+        fx_get_design_pixel(&dw, &dh);
+        fx_widget_rect(dsg, &x1, &y1, &x2, &y2);
+        int wide2 = x2 - x1 + 1;
+        if (dw == 960 && dh == 544 && wide1 >= 240 && wide1 <= 241 && wide2 >= 120 && wide2 <= 121)
+            printf("  [ok]   设计稿 480x272→960x544 后同一 pixel 控件物理宽 %d→%d (约减半)\n", wide1, wide2);
+        else { printf("  [FAIL] 设计稿缩放: 尺寸=%dx%d 宽 %d→%d, 期望 480x272→960x544 / 240→120\n",
+                      dw, dh, wide1, wide2); fails++; }
+
+        fx_set_design_pixel(1, 1);   /* 非法尺寸必须忽略, 不能把缩放算成除零/巨值 */
+        fx_get_design_pixel(&dw, &dh);
+        if (dw == 960 && dh == 544) printf("  [ok]   非法设计稿尺寸(1x1)被忽略\n");
+        else { printf("  [FAIL] 非法尺寸被接受: %dx%d\n", dw, dh); fails++; }
+
+        fx_set_design_pixel(480, 272);   /* 恢复默认, 不影响后续用例 */
+        fx_get_design_pixel(NULL, NULL); /* 允许不取值 */
+        printf("  [ok]   fx_get_design_pixel(NULL,NULL) 不崩溃\n");
+    }
+
     /* M3: 控件池耗尽时 list/drop 工厂必须返回 NULL 而不是崩溃 */
     {
         int made = 0;

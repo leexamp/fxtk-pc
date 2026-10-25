@@ -69,6 +69,13 @@
 static int   s_scr_w = 480, s_scr_h = 272;
 static float s_dpi = 1.0f;
 
+/* v2.5.3: pixel() 的"设计稿坐标空间"。
+ * 写入口是核心模块的 fx_set_design_pixel()(负责校验 + 触发重排); 这里只存值 ——
+ * 因为 fx_ui_scale_for() 也要用它, 而 uiscale_test 只链接 backends 不链接核心,
+ * 本文件不能反向依赖 fxtk.c 的符号。 */
+int fx_design_w = 480;
+int fx_design_h = 272;
+
 const char *fx_backend_name(void)
 {
 #if defined(FXTK_BACKEND_STUB)
@@ -133,7 +140,9 @@ int fx_ui_scale_for(int phys_w, float dpi_scale, int cap, int compact)
     if (!(dpi_scale > 0.1f)) dpi_scale = 1.0f;
 
     int logical_w = (int)((float)phys_w / dpi_scale + 0.5f);
-    int sc = (logical_w > 0) ? (logical_w * 100) / 480 : 100;
+    /* v2.5.3: 基准从写死的 480 改为 fx_design_w(默认 480 → 行为与旧版逐字节相同)。
+     * 用户把设计稿改成 1280x720 后, 文字缩放也跟着以 1280 为 100%, 不会比控件大一倍。 */
+    int sc = (logical_w > 0 && fx_design_w > 0) ? (logical_w * 100) / fx_design_w : 100;
     if (sc < 100) sc = 100;
     if (!compact && sc > cap) sc = cap;
 

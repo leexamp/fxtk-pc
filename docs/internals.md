@@ -37,7 +37,8 @@
 
 ## 布局与缩放
 
-- 基线 480×272；`s_sx1000 = width*1000/480`、`s_sy1000` 同理。
+- 基线默认 480×272（变量 `fx_design_w/h`，由 `fx_set_design_pixel()` 改）；
+  `s_sx1000 = width*1000/fx_design_w`、`s_sy1000` 同理。
 - `FX_POS_PIXEL`：设计坐标 × 比例；`FX_POS_PERCENT`：父矩形 × 浮点；`FX_POS_GRID`：命名网格。
 - **`FX_POS_FIXED`**：布局跳过（`case FX_POS_FIXED: break;`），坐标直写。弹层与动态控件用。
   - `fx_widget_fix(w,x,y)` 把控件切到 FIXED 并记录基准 `ox1/oy1`，供后续自绘移动。

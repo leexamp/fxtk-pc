@@ -1,10 +1,19 @@
 # Changelog
 
-## v2.5.3（语法优先的 README + ESP32 下线 + 多窗口缩放修复）
+## v2.5.3（语法优先的 README + ESP32 下线 + 多窗口缩放修复 + 设计稿坐标 API）
 
 > 复核：`make test`（新增第 18 节：文字底色契约）、`make`（sokol demo 编译通过）、
 > `make golden`（GOLDEN_SKIP_DEMO=1，10/10 容差 0）、Xvfb + `import` 截图对比（控件页标签白底消失；
 > 多窗口窗口从 640x360 连续改 40 个尺寸再回原尺寸，内容始终铺满、无黑带、无崩溃）。
+
+### 新增
+
+- **设计稿坐标空间 API（v2.5.3）**：`pixel()` 的名字容易让人以为是设备像素，现在把它明确成"设计稿坐标"并且可以换稿：
+  `fx_set_design_pixel(w,h)` / `fx_get_design_pixel(&w,&h)`。默认仍 480×272（行为零变化）；
+  换稿时启动阶段调一次 `fx_set_design_pixel(1280,720)`，之后所有 `pixel()` 坐标直接按 1280×720 量，
+  不用手算系数；文字/控件缩放（`fxtk_ui_scale`）同步以设计稿宽为 100%，不会出现"控件缩了、字没缩"。
+  设计稿状态放在 backends 层（`fx_design_w/h`）：`fx_ui_scale_for()` 在只链接 backends 的
+  `uiscale_test` 里也要读它，不能让 backends 反向依赖核心符号。
 
 ### 文档
 
@@ -44,6 +53,9 @@
 
 - `headless_test` 新增第 18 节"文字底色契约"：透明标签必须向字体层传 `FX_TEXT_NOBG`，
   显式 `color()` 的标签必须仍用自身底色 —— 把这次修复钉成回归，不再靠截图肉眼比对。
+- `headless_test` 新增第 19 节"设计稿坐标空间"：默认 480×272；同一个 `pixel("0,0","240,136")` 控件在
+  设计稿改成 960×544 后物理宽度约减半（241→121，证明 pixel 是设计坐标而非设备像素）；非法尺寸（1×1）
+  被忽略且不会除零。
 - 多窗口缩放走 **Xvfb + xdotool** 人工回归（未进 CI，因为需要 X）：`xdotool windowsize` 连续改 40 个
   尺寸 → 截图检查内容铺满；再缩回 640x360 验证缓存复用；同时复测 demo 自带 `Resize controls +40`。
 

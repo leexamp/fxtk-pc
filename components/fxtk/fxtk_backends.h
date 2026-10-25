@@ -47,6 +47,12 @@ void fx_backend_set_screen(int w, int h, float dpi_scale);
 int  fx_screen_w(void);
 int  fx_screen_h(void);
 float fx_dpi_scale(void);
+
+/* v2.5.3: pixel() 设计稿坐标空间 (默认 480x272)。
+ * 内部状态, 请用 fxtk.h 的 fx_set_design_pixel() 修改 —— 它会做范围校验并触发重排;
+ * 这里暴露变量是因为 fx_ui_scale_for() 与布局层都要读, 且单测只需要 backends。 */
+extern int fx_design_w;
+extern int fx_design_h;
 /* v2.5: UI 缩放 = 逻辑缩放 × dpi。做成共享纯函数, 因为 sokol 与 SDL 两个驱动
  * 原先各自复制了一份同样的算式, 而 HiDPI 修正必须在两处同时正确 —— 复制粘贴的
  * 两份算式迟早会分叉。纯函数也便于单测(见 demo-main/test/uiscale_test.c)。

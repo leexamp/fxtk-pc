@@ -192,6 +192,19 @@ void fx_widget_rect(const fx_widget_t *w, int *x1, int *y1, int *x2, int *y2);
 
 void fx_layout(void);
 void fx_set_max_scale(float f);   /* 控件缩放上限(倍), 默认1.6 */
+
+/* ==================== 设计稿坐标空间（v2.5.3） ====================
+ * pixel("x1,y1","x2,y2") 里的数是【设计稿坐标】, 不是设备像素 —— 框架按设计稿尺寸把
+ * 它等比缩放到当前窗口。默认设计稿 480×272:
+ *
+ *     fx_set_design_pixel(1280, 720);              // 换成自己的 1280×720 设计稿
+ *     fx_button_new(pixel("980,600","1200,680"), name("ok"), title("确定"), call(on_ok));
+ *
+ * 之后所有 pixel() 坐标直接按设计稿量, 不用再手算 480/1280 之类的系数;
+ * 文字/控件缩放比例(fxtk_ui_scale)也同步以设计稿宽为 100%。
+ * 改完立即重排/重绘; 未 fx_init 前调用则首帧生效。 */
+void fx_set_design_pixel(int w, int h);   /* 设计稿尺寸, 合法范围 16..8192; 默认 480×272 */
+void fx_get_design_pixel(int *w, int *h); /* 取当前设计稿尺寸(可传 NULL) */
 void fxtk_apply_fit(fx_widget_t *w);
 void fx_touch_press(int x, int y);
 void fx_touch_release(int x, int y);
@@ -363,7 +376,7 @@ void fx_set_align(fx_widget_t *w, int a);
 fx_widget_t *fx_list_new_p(const char *r1, const char *r2, int pg);
 fx_widget_t *fx_drop_new_p(const char *r1, const char *r2, int pg);
 int  fxtk_ui_scale(void);
-void fxtk_set_ui_scale_cap(int p);   /* 行高/字号缩放上限% */          /* UI 缩放百分比, 480 设计宽=100 */
+void fxtk_set_ui_scale_cap(int p);   /* 行高/字号缩放上限% */          /* UI 缩放百分比, 设计稿宽=100% */
 int  fxtk_font_height(int size);  /* 缩放后字高 */
 int  fxtk_drv_width(void);
 int  fxtk_drv_height(void);

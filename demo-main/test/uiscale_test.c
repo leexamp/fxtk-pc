@@ -93,6 +93,17 @@ int main(void)
         chk("phys_w 为负也安全",  fx_ui_scale_for(-100, 1.0f, 160, 0) == 100);
     }
 
+    printf("\n-- ④ 设计稿宽 = 100%% 基准 (v2.5.3) --\n");
+    {
+        /* 默认设计稿 480 → 1280 逻辑宽算 266%, 被 cap 到 160 */
+        chk("设计稿 480: 1280 宽 → 160 (cap)", fx_ui_scale_for(1280, 1.0f, 160, 0) == 160);
+        fx_design_w = 1280; fx_design_h = 720;   /* 换成 1280x720 稿: 1280 宽就是 100% */
+        chk("设计稿 1280: 1280 宽 → 100", fx_ui_scale_for(1280, 1.0f, 160, 0) == 100);
+        chk("设计稿 1280: 1920 宽 → 150", fx_ui_scale_for(1920, 1.0f, 160, 0) == 150);
+        chk("设计稿 1280: 640 宽仍保底 100", fx_ui_scale_for(640, 1.0f, 160, 0) == 100);
+        fx_design_w = 480; fx_design_h = 272;    /* 恢复默认, 保证可重入 */
+    }
+
     printf("\n== 结果: %s (失败 %d 项) ==\n", s_fail ? "FAIL" : "PASS", s_fail);
     printf("注: dpi>1 的【数学】已穷举验证; 【实机 HiDPI 显示效果】本机无法验证(非 HiDPI 屏)。\n");
     return s_fail ? 1 : 0;
