@@ -21,7 +21,11 @@
   页布局与 C 版 `app.c` + `app_desktop.c` 对齐；另附 `hello.lua` 最小冒烟。
 - **宿主**：`drivers/main_lua.c`（sokol 窗口）、`demo-main/test/lua_host_sdl.c`（SDL dummy 无头，
   支持脚本/帧数/页/截图参数）；`demo-main/Makefile` 新增 `lua`、`lua-sdl`、`lua-test`。
-- **Windows**：`demo-main/build_win_sokol.sh lua` 产出 `dist/win_sokol/fxtk_lua.exe`（内嵌 Lua，单 exe）。
+- **通用 runner（`fxtk_lua_runner`）**：`make lua` 的主产物（`fxtk_lua` 是同一程序的兼容符号链接）。
+  脚本在**运行时加载**：`./fxtk_lua_runner` 跑当前目录 `app.lua`，也可传脚本 `my.lua` 或目录
+  `my_app/`（自动取 `my_app/app.lua`）；**改脚本不需要重新编译**，只有改 C 绑定/核心才要重编。
+- **Windows**：`demo-main/build_win_sokol.sh lua` 产出 `dist/win_sokol/fxtk_lua.exe` +
+  `fxtk_lua_runner.exe`（同一份 exe，内嵌 Lua，单 exe）。
 - **文档**：`docs/lua.md`、`docs_en/lua_en.md`；中英文 README 增加 Lua 章节、构建命令、目录与验证边界。
   版本统一标为 **2.5.4**（仍属 2.5 线；Lua 绑定是可选层，核心语义不变，不另起 2.6 版本号）。
 
@@ -42,7 +46,11 @@
 - **合并到主线后的复核**：`make lua` / `make lua-test` / `make test`（真 + stub）/ `make uiscale-test` /
   `make golden`（10/10 容差 0）/ `check_api_docs.py` 全过；Xvfb + sokol 窗口跑 `fxtk_lua` 第 3、4 页截图正常；
   `ldd demo-main/fxtk_lua` 只有 libX11/libXi/libXcursor/libGL 等系统库（**无 liblua**）；
-  `build_win_sokol.sh lua` 本次实测产物 611.5 KB，依赖仅 Windows 系统 DLL。
+  `build_win_sokol.sh lua` 本次实测产物 612.5 KB，依赖仅 Windows 系统 DLL。
+- **通用 runner 复核**：Xvfb 下验证三种入口都渲染正常（截图 1280×720）——
+  `fxtk_lua_runner`（当前目录 `app.lua`）、`fxtk_lua_runner /tmp/lua_runner_app/`（目录参数 → `app.lua`）、
+  `./fxtk_lua`（兼容名，默认 `demo-lua/app.lua`）；Windows 交叉编译同时产出
+  `fxtk_lua.exe` 与 `fxtk_lua_runner.exe`（各 612.5 KB）；发布包 linux tar / win zip 均已含 runner。
 
 ### 边界（如实写）
 

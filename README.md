@@ -99,12 +99,15 @@ end
 ```
 
 ```bash
-make -C demo-main lua        # 构建 demo-main/fxtk_lua（核心 + 内嵌 Lua 5.4）
-# 或 demo-main/build.sh --lua （构建并运行，默认加载 demo-lua/app.lua）
-./demo-main/fxtk_lua         # 默认加载 demo-lua/app.lua
-FXTK_SCRIPT=my.lua ./demo-main/fxtk_lua
+make -C demo-main lua        # 构建通用 runner（核心 + 内嵌 Lua 5.4；脚本不参与编译）
+./demo-main/fxtk_lua_runner            # 运行当前目录的 app.lua
+./demo-main/fxtk_lua_runner my.lua     # 指定脚本；也可传目录 my_app/ → my_app/app.lua
+./demo-main/fxtk_lua                   # 同一程序的兼容名；默认加载 demo-lua/app.lua
+FXTK_SCRIPT=my.lua ./demo-main/fxtk_lua_runner
 make -C demo-main lua-test   # 无头绑定自检（SDL dummy，无需窗口/字体）
 ```
+
+脚本是**运行时加载**的：改 `app.lua` 直接重跑 runner 即可，**不用重新编译**；只有改 C 绑定/核心才需要 `make lua`。
 
 - 回调：普通控件 `call(function(w) ... end)`；列表 `fx_list_set_cb(list, function(w, idx) ... end)`
   （下拉在 C 核心内部用 `fx_set_cb`，没有单独的选择回调）。
@@ -153,7 +156,7 @@ make -C demo-main lua-test   # 无头绑定自检（SDL dummy，无需窗口/字
 sudo apt install libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev
 
 make -C demo-main                 # 12 页演示 fxtk_sim (C)
-make -C demo-main lua             # 12 页演示 fxtk_lua (C 核心 + 内嵌 Lua)
+make -C demo-main lua             # 通用 Lua runner fxtk_lua_runner (脚本运行时加载)
 make -C demo-main mw_interactive  # 多真实窗口 + 控件输入闭环 demo
 make -C demo-main test            # 无头单元测试（无需窗口/字体）
 make -C demo-main lua-test        # Lua 绑定无头自检
@@ -164,7 +167,7 @@ make -C demo-main ex01_hello      # 任意独立示例
 ```
 
 Windows 用 `demo-main/build_win_sokol.sh` 交叉编译出单 exe（CI 会跑）；Lua 版是
-`demo-main/build_win_sokol.sh lua` → `dist/win_sokol/fxtk_lua.exe`（内嵌 Lua，单 exe）。
+`demo-main/build_win_sokol.sh lua` → `dist/win_sokol/fxtk_lua.exe` + `fxtk_lua_runner.exe`（内嵌 Lua，单 exe）。
 自己的应用从 [your_app/](your_app/) 开始（`main.c` + `build.sh`，不参与主构建）。
 
 ## 验证体系（含边界，如实写）
@@ -175,7 +178,7 @@ Windows 用 `demo-main/build_win_sokol.sh` 交叉编译出单 exe（CI 会跑）
 | `make lua-test` | C 核心 + Lua 绑定 + 语法层：属性/控件/回调（含列表 index）/画布/图片/列表/flex/SVG/文件/手势 | 无 GPU raymarch、无真实窗口/输入法；**没有逐像素断言** |
 | `make golden` | 10 张 canvas 示例金图，本地容差 0 | 只覆盖 canvas，控件/文字/输入框/滚动**没有金图** |
 | `make bench` | 1080P 压测页 2820 控件约 102–130 fps（整帧重绘口径） | 合成场景，不代表真实业务 |
-| CI | Linux：构建 + 单测 + Lua 绑定自检 + 示例 + canvas 金图（`GOLDEN_TOL=1`）；Windows：交叉编译（含 `fxtk_lua.exe`） | Windows **只编译不运行**；多窗口未进 CI |
+| CI | Linux：构建 + 单测 + Lua 绑定自检 + 示例 + canvas 金图（`GOLDEN_TOL=1`）；Windows：交叉编译（含 `fxtk_lua_runner.exe`） | Windows **只编译不运行**；多窗口未进 CI |
 
 **未系统验证**：真实 HiDPI、多显示器、非 ASCII 输入法全链路、跨 WM（GNOME/KWin/xfwm）差异、
 极端尺寸窗口、长时间运行内存增长。用前请按自己的环境做回归。

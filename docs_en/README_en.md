@@ -100,11 +100,17 @@ end
 ```
 
 ```bash
-make -C demo-main lua        # -> demo-main/fxtk_lua
-./demo-main/fxtk_lua         # loads demo-lua/app.lua
+make -C demo-main lua        # -> demo-main/fxtk_lua_runner (scripts load at runtime)
+./demo-main/fxtk_lua_runner            # runs ./app.lua (falls back to demo-lua/app.lua)
+./demo-main/fxtk_lua_runner my.lua     # script, or a directory: my_app/ -> my_app/app.lua
+./demo-main/fxtk_lua                   # compatibility name; loads demo-lua/app.lua
+FXTK_SCRIPT=my.lua ./demo-main/fxtk_lua_runner
 make -C demo-main lua-test   # headless binding self-test
-cd demo-main && ./build_win_sokol.sh lua   # dist/win_sokol/fxtk_lua.exe
+cd demo-main && ./build_win_sokol.sh lua   # fxtk_lua.exe + fxtk_lua_runner.exe
 ```
+
+Scripts are **loaded at runtime**: edit `app.lua` and rerun, **no rebuild needed**; only C binding/core
+changes require `make lua`.
 
 Callbacks: `call(function(w) ... end)`; lists: `fx_list_set_cb(list, function(w, idx) ... end)`.
 C out-params become multiple Lua returns. Images/SVG are userdata with `__gc`; images attached to
@@ -153,7 +159,7 @@ Full 12-page demo (widgets / image warp / pseudo-3D / text input / file browser 
 sudo apt install libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev
 
 make -C demo-main                 # 12-page demo (fxtk_sim, C)
-make -C demo-main lua             # 12-page demo (fxtk_lua, C core + embedded Lua)
+make -C demo-main lua             # generic Lua runner fxtk_lua_runner (scripts load at runtime)
 make -C demo-main mw_interactive  # multi-window + widget input demo
 make -C demo-main test            # headless unit tests (no window, no font)
 make -C demo-main lua-test        # Lua binding self-test (headless)

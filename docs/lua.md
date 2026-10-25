@@ -17,20 +17,25 @@
 ### Linux（sokol 窗口版）
 
 ```bash
-make -C demo-main lua        # 产物 demo-main/fxtk_lua
+make -C demo-main lua        # 产物 demo-main/fxtk_lua_runner（另建 fxtk_lua 兼容符号链接）
 cd demo-main
 ./build.sh --lua             # 或一键构建并运行
-./fxtk_lua                   # 默认加载 ../demo-lua/app.lua（同时尝试 ./demo-lua/app.lua、./app.lua）
-FXTK_SCRIPT=../demo-lua/hello.lua ./fxtk_lua
-FXTK_PAGE=3 ./fxtk_lua       # 启动后切到第 3 页（从 0 开始）
+./fxtk_lua_runner            # 运行当前目录的 app.lua（没有则找 demo-lua/app.lua）
+./fxtk_lua_runner my_app.lua # 指定脚本
+./fxtk_lua_runner my_app/    # 目录 → my_app/app.lua
+FXTK_SCRIPT=../demo-lua/hello.lua ./fxtk_lua_runner
+FXTK_PAGE=3 ./fxtk_lua_runner # 启动后切到第 3 页（从 0 开始）
 # 自动化：点击/拖拽注入
-FXTK_CLICKS='281,84,10;100,330,20' ./fxtk_lua
-FXTK_DRAG='250,300,650,450,12,20' ./fxtk_lua   # x0,y0,x1,y1,步数,帧号
+FXTK_CLICKS='281,84,10;100,330,20' ./fxtk_lua_runner
+FXTK_DRAG='250,300,650,450,12,20' ./fxtk_lua_runner   # x0,y0,x1,y1,步数,帧号
 ```
 
-脚本查找顺序：`FXTK_SCRIPT` 环境变量 → exe 同目录的 `demo-lua/app.lua` → 当前目录 `demo-lua/app.lua`
-→ 当前目录 `app.lua`。找到后设置 `package.path`（脚本目录与 exe 目录），所以脚本可以
-`require` 同目录/上级的模块。
+> **脚本不参与编译**：runner 只在启动时读 `app.lua`。改脚本直接重跑即可；只有改 C 绑定/核心才需要
+> `make lua`。`fxtk_lua` 是 `fxtk_lua_runner` 的兼容名（同一份程序）。
+
+脚本查找顺序：命令行参数 → `FXTK_SCRIPT` 环境变量 → 当前目录 `app.lua` → 当前目录 `demo-lua/app.lua`
+→ `../demo-lua/app.lua` → exe 目录 `app.lua` → exe 目录 `demo-lua/app.lua`（命令行给目录时取该目录的 `app.lua`）。
+找到后设置 `package.path`（脚本目录与 exe 目录），所以脚本可以 `require` 同目录/上级的模块。
 
 ### 无头版（测试、截图、CI）
 
@@ -49,7 +54,7 @@ Lua 运行错误会让进程返回非 0（供 CI 使用）。
 
 ```bash
 cd demo-main
-./build_win_sokol.sh lua     # dist/win_sokol/fxtk_lua.exe（内嵌 Lua，只有系统 DLL）
+./build_win_sokol.sh lua     # dist/win_sokol/fxtk_lua.exe + fxtk_lua_runner.exe（内嵌 Lua，只有系统 DLL）
 ```
 
 ### 无头绑定自检

@@ -52,6 +52,8 @@ x86_64-w64-mingw32-gcc $SZ -I. -I../components/fxtk -I../drivers -I../third_part
 if [ "$TARGET" = "lua" ]; then
     # 把脚本和语法层放到 exe 旁边：exe 会优先找 <exe目录>/demo-lua/app.lua
     cp -r ../demo-lua ../lua dist/win_sokol/
+    # 通用 runner 兼容名：同一份 exe，脚本在运行时加载，改 app.lua 不用重新编译
+    cp -f dist/win_sokol/fxtk_lua.exe dist/win_sokol/fxtk_lua_runner.exe
 fi
 ls -la dist/win_sokol/$OUT | awk '{printf "✅ 产物: %s  (%.1f KB)\n", $9, $5/1024}'
 echo "依赖(应只有 Windows 系统 DLL):"

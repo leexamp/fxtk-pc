@@ -14,14 +14,16 @@
 ## Build & run
 
 ```bash
-make -C demo-main lua        # -> demo-main/fxtk_lua
+make -C demo-main lua        # -> demo-main/fxtk_lua_runner (+ fxtk_lua compatibility symlink)
 cd demo-main
 ./build.sh --lua             # or build+run in one step
-./fxtk_lua                   # loads ../demo-lua/app.lua
-FXTK_SCRIPT=../demo-lua/hello.lua ./fxtk_lua
-FXTK_PAGE=3 ./fxtk_lua       # start on page 3 (0-based)
-FXTK_CLICKS='281,84,10;100,330,20' ./fxtk_lua     # inject clicks
-FXTK_DRAG='250,300,650,450,12,20' ./fxtk_lua       # x0,y0,x1,y1,steps,frame
+./fxtk_lua_runner            # runs ./app.lua (falls back to demo-lua/app.lua)
+./fxtk_lua_runner my_app.lua # explicit script
+./fxtk_lua_runner my_app/    # directory -> my_app/app.lua
+FXTK_SCRIPT=../demo-lua/hello.lua ./fxtk_lua_runner
+FXTK_PAGE=3 ./fxtk_lua_runner # start on page 3 (0-based)
+FXTK_CLICKS='281,84,10;100,330,20' ./fxtk_lua_runner     # inject clicks
+FXTK_DRAG='250,300,650,450,12,20' ./fxtk_lua_runner       # x0,y0,x1,y1,steps,frame
 
 make -C demo-main lua-sdl    # -> demo-main/test/lua_host_sdl
 SDL_VIDEODRIVER=dummy ./test/lua_host_sdl ../demo-lua/app.lua 30 3 /tmp/lua_p3.png
@@ -31,8 +33,15 @@ SDL_VIDEODRIVER=dummy ./test/lua_host_sdl ../demo-lua/app.lua 30 3 /tmp/lua_p3.p
 make -C demo-main lua-test   # headless binding self-test
 # expected: [lua-test] OK: attrs/widgets/callbacks/canvas/image/list/flex/svg/file/gesture
 
-cd demo-main && ./build_win_sokol.sh lua   # dist/win_sokol/fxtk_lua.exe (Lua embedded)
+cd demo-main && ./build_win_sokol.sh lua   # fxtk_lua.exe + fxtk_lua_runner.exe (Lua embedded)
 ```
+
+> **Scripts are not compiled.** The runner reads `app.lua` at startup; edit the script and rerun, no rebuild.
+> Only C binding/core changes need `make lua`. `fxtk_lua` is a compatibility name for `fxtk_lua_runner`.
+
+Script lookup order: CLI argument -> `FXTK_SCRIPT` -> `./app.lua` -> `./demo-lua/app.lua` ->
+`../demo-lua/app.lua` -> `<exe>/app.lua` -> `<exe>/demo-lua/app.lua`. A directory argument means
+`<dir>/app.lua`.
 
 ## Host contract
 

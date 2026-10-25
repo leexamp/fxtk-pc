@@ -5,9 +5,15 @@
  *   驱动/字体/窗口 = C 宿主；界面与交互 = Lua 脚本。
  *   app.lua 定义 function app_init()，可选 function app_frame(dt, t)。
  *
- * 用法:
- *   ./fxtk_lua                       # 默认找 demo-lua/app.lua
- *   FXTK_SCRIPT=path.lua ./fxtk_lua
+ * 用法（脚本在运行时加载, 改脚本不需要重新编译）:
+ *   ./fxtk_lua_runner                # 运行当前目录的 app.lua
+ *   ./fxtk_lua_runner my_app.lua     # 指定脚本
+ *   ./fxtk_lua_runner my_app/        # 目录 → 该目录下的 app.lua
+ *   FXTK_SCRIPT=path.lua ./fxtk_lua_runner
+ *   ./fxtk_lua                        # 兼容旧名(fxtk_lua 是 runner 的符号链接/副本)
+ *
+ * 脚本查找顺序: 命令行参数 > FXTK_SCRIPT > ./app.lua > demo-lua/app.lua >
+ *               ../demo-lua/app.lua > <exe目录>/app.lua > <exe目录>/demo-lua/app.lua
  *
  * 测试钩子（与 main_sokol.c 对齐）:
  *   FXTK_SHOT / FXTK_SHOT_AT / FXTK_QUIT_AFTER / FXTK_CLICK / FXTK_CLICKS / FXTK_RESIZE / FXTK_WIN
@@ -28,6 +34,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>   /* v2.5.4: runner 参数若给的是目录, 自动补 /app.lua */
 
 extern void fxtk_font_init(const char *font_path, int size);
 extern void fxtk_sokol_request_shot(void);
@@ -37,6 +44,8 @@ extern void fxtk_sokol_inject_drag(int x0, int y0, int x1, int y1, int steps);
 static lua_State *s_L = NULL;
 static char s_script[1024];
 static char s_argv0[1024];
+static char s_cli_script[1024];   /* v2.5.4: 命令行第一个参数(脚本或目录) */
+static int  s_cli_given = 0;
 static char s_pkgpath[4096];
 
 static int s_shot_at = 30;
@@ -70,31 +79,47 @@ static int file_exists(const char *p)
     return 0;
 }
 
+static int path_is_dir(const char *p)
+{
+    struct stat st;
+    return (p && p[0] && stat(p, &st) == 0 && S_ISDIR(st.st_mode));
+}
+
 static void resolve_script(void)
 {
+    /* ① 命令行参数优先: 文件原样用, 目录则取 <dir>/app.lua */
+    if (s_cli_given) {
+        if (path_is_dir(s_cli_script)) {
+            size_t n = strlen(s_cli_script);
+            int slash = (n > 0 && (s_cli_script[n - 1] == '/' || s_cli_script[n - 1] == '\\'));
+            snprintf(s_script, sizeof(s_script), slash ? "%sapp.lua" : "%s/app.lua", s_cli_script);
+        } else {
+            snprintf(s_script, sizeof(s_script), "%s", s_cli_script);
+        }
+        return;
+    }
+    /* ② 环境变量(测试/自动化用) */
     const char *env = getenv("FXTK_SCRIPT");
     if (env && env[0]) { snprintf(s_script, sizeof(s_script), "%s", env); return; }
 
+    /* ③ 默认查找: 先当前目录的 app.lua(runner 语义), 再 demo-lua 布局 */
     char dir[1024];
     path_dir(s_argv0, dir, sizeof(dir));
+    static char buf[1024], buf2[1024], buf3[1024];
+    snprintf(buf,  sizeof(buf),  "%s/app.lua", dir);
+    snprintf(buf2, sizeof(buf2), "%s/demo-lua/app.lua", dir);
+    snprintf(buf3, sizeof(buf3), "%s/../demo-lua/app.lua", dir);
     const char *cand[] = {
-        "demo-lua/app.lua",
         "app.lua",
+        "demo-lua/app.lua",
         "../demo-lua/app.lua",
-        NULL, NULL, NULL,
+        buf, buf2, buf3,
         NULL
     };
-    static char buf[1024];
-    snprintf(buf, sizeof(buf), "%s/demo-lua/app.lua", dir); cand[3] = buf;
-    static char buf2[1024];
-    snprintf(buf2, sizeof(buf2), "%s/app.lua", dir); cand[4] = buf2;
-    static char buf3[1024];
-    snprintf(buf3, sizeof(buf3), "%s/../demo-lua/app.lua", dir); cand[5] = buf3;
-
     for (int i = 0; cand[i]; i++) {
         if (file_exists(cand[i])) { snprintf(s_script, sizeof(s_script), "%s", cand[i]); return; }
     }
-    snprintf(s_script, sizeof(s_script), "demo-lua/app.lua");   /* 让报错信息更直观 */
+    snprintf(s_script, sizeof(s_script), "app.lua");   /* 让报错信息更直观 */
 }
 
 static int lua_traceback(lua_State *L)
@@ -288,10 +313,15 @@ static void event_cb(const sapp_event *e)
 
 sapp_desc sokol_main(int argc, char *argv[])
 {
-    (void)argc;
     if (argv && argv[0]) snprintf(s_argv0, sizeof(s_argv0), "%s", argv[0]);
-    else snprintf(s_argv0, sizeof(s_argv0), "./fxtk_lua");
+    else snprintf(s_argv0, sizeof(s_argv0), "./fxtk_lua_runner");
+    if (argc > 1 && argv[1] && argv[1][0]) {
+        /* v2.5.4: runner 用法: fxtk_lua_runner [脚本|目录] */
+        snprintf(s_cli_script, sizeof(s_cli_script), "%s", argv[1]);
+        s_cli_given = 1;
+    }
     resolve_script();
+    fx_log(FX_LOG_INFO, "[lua] 脚本: %s  (改脚本后重跑即可, 无需重新编译)", s_script);
 
     static char title[128];
     snprintf(title, sizeof(title), "fxtk v%s · Lua demo (%s)", FXTK_VERSION, s_script);

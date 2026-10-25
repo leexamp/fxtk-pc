@@ -10,9 +10,9 @@ Lua 版 12 页演示。核心仍是 **fxtk-pc-v2.5（C99）**；这里只有脚�
 ```bash
 cd demo-main
 make lua
-./fxtk_lua                         # 默认加载 ../demo-lua/app.lua
-FXTK_SCRIPT=../demo-lua/hello.lua ./fxtk_lua
-FXTK_PAGE=3 ./fxtk_lua             # 直接打开第 3 页（0 基）
+./fxtk_lua_runner                  # 运行当前目录 app.lua（无则 ../demo-lua/app.lua）
+FXTK_SCRIPT=../demo-lua/hello.lua ./fxtk_lua_runner
+FXTK_PAGE=3 ./fxtk_lua_runner      # 直接打开第 3 页（0 基）
 ```
 
 无头截图/CI：
@@ -32,7 +32,7 @@ Windows 单 exe：
 
 ```bash
 cd demo-main && ./build_win_sokol.sh lua
-# dist/win_sokol/fxtk_lua.exe
+# dist/win_sokol/fxtk_lua.exe / fxtk_lua_runner.exe（同一程序）
 ```
 
 ## 写自己的页面

@@ -8,7 +8,7 @@ C 核心不变，界面全部用 Lua 写；写法与 C 的 fxtk.h 属性宏保�
 
 页签：波形 / 图形 / 控件 / 图片 / 3D / 输入 / 画板 / 键鼠 / 压测 / 滚动 / 组件 / 粒子
 运行：
-    ./fxtk_lua                     # sokol 窗口
+    ./fxtk_lua_runner              # sokol 窗口（脚本运行时加载；./fxtk_lua 是兼容名）
     make lua-test                  # 无头自检
     ./test/lua_host_sdl demo-lua/app.lua 60 3 /tmp/p3.png   # 无头截图
 ]]

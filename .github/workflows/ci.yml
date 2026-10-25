@@ -24,8 +24,11 @@ jobs:
       - name: Run headless unit tests
         run: make -C demo-main test
 
-      - name: Build Lua demo (C core + embedded Lua 5.4)
-        run: make -C demo-main lua
+      - name: Build Lua runner (C core + embedded Lua 5.4; scripts load at runtime)
+        run: |
+          make -C demo-main lua
+          test -x demo-main/fxtk_lua_runner
+          test -e demo-main/fxtk_lua          # 兼容名
 
       - name: Run Lua binding self-test (headless)
         run: make -C demo-main lua-test
