@@ -25,8 +25,12 @@ git archive --format=tar.gz --prefix="fxtk-$VER/" -o "$OUT/fxtk-$VER-src.tar.gz"
 echo "📦 Linux 单文件"
 cp demo-main/fxtk_sim "$OUT/linux/"
 [ -x demo-main/fxtk_sim_en ] && cp demo-main/fxtk_sim_en "$OUT/linux/"   # 英文版(与中文版同一后端, 仅文案不同)
+if [ -x demo-main/fxtk_lua ]; then
+    cp demo-main/fxtk_lua "$OUT/linux/"
+    cp -r lua demo-lua "$OUT/linux/"
+fi
 cp README.md LICENSE graph.png image.png rending.png texting.png "$OUT/linux/" 2>/dev/null || true
-printf 'fxtk %s · Linux x86_64 (sokol 单文件版)\n\n运行: ./fxtk_sim       中文演示(12 页)\n      ./fxtk_sim_en    英文演示\n依赖: 系统 OpenGL(X11) + 中文字体(缺失时自动回退)\n说明: 无第三方 .so 依赖; 完整文档见包内 README.md\n' "$VER" > "$OUT/linux/运行说明.txt"
+printf 'fxtk %s · Linux x86_64 (sokol 单文件版)\n\n运行: ./fxtk_sim       中文演示(12 页, C)\n      ./fxtk_sim_en    英文演示\n      ./fxtk_lua       Lua 版演示(Lua 脚本在 demo-lua/)\n依赖: 系统 OpenGL(X11) + 中文字体(缺失时自动回退)\n说明: 无第三方 .so 依赖; 完整文档见包内 README.md\n' "$VER" > "$OUT/linux/运行说明.txt"
 tar czf "$OUT/fxtk-$VER-linux-x86_64.tar.gz" -C "$OUT/linux" .
 
 echo "📦 Linux 动态库包"
@@ -41,12 +45,18 @@ echo "📦 Windows 单 exe"
 if [ -f demo-main/dist/win_sokol/fxtk_sokol.exe ]; then
     cp demo-main/dist/win_sokol/fxtk_sokol.exe "$OUT/win/"; cp README.md "$OUT/win/" 2>/dev/null || true
     [ -f demo-main/dist/win_sokol/fxtk_sokol_en.exe ] && cp demo-main/dist/win_sokol/fxtk_sokol_en.exe "$OUT/win/"
-    printf 'fxtk %s · Windows x86_64 (sokol 单 exe)\n\n双击 fxtk_sokol.exe(中文) 或 fxtk_sokol_en.exe(英文) 即可, 无需任何 DLL。\n' "$VER" > "$OUT/win/运行说明.txt"
+    if [ -f demo-main/dist/win_sokol/fxtk_lua.exe ]; then
+        cp demo-main/dist/win_sokol/fxtk_lua.exe "$OUT/win/"
+        cp -r demo-main/dist/win_sokol/lua demo-main/dist/win_sokol/demo-lua "$OUT/win/"
+    fi
+    printf 'fxtk %s · Windows x86_64 (sokol 单 exe)\n\n双击 fxtk_sokol.exe(中文) / fxtk_sokol_en.exe(英文) / fxtk_lua.exe(Lua 版)\n即可, 无需任何 DLL；Lua 脚本在同目录 demo-lua/。\n' "$VER" > "$OUT/win/运行说明.txt"
     python3 -c "
-import zipfile,os,sys
+import zipfile,os
 ver='$VER'; out='$OUT'; d=out+'/win'
 z=zipfile.ZipFile(out+'/fxtk-'+ver+'-win-x86_64.zip','w',zipfile.ZIP_DEFLATED)
-for f in os.listdir(d): z.write(os.path.join(d,f), f)
+for root,dirs,files in os.walk(d):
+    for f in files:
+        p=os.path.join(root,f); z.write(p, os.path.relpath(p,d))
 z.close()"
 else
     echo "   ⚠ 跳过(先跑 demo-main/build_win_sokol.sh)"

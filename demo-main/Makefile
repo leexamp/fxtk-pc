@@ -1,6 +1,8 @@
 # fxtk 统一构建入口 (v2.3.1 恢复)
 #
 #   make              # 构建完整演示 fxtk_sim (12 页)
+#   make lua          # 构建 Lua 版演示 fxtk_lua (C 核心 + 内嵌 Lua 5.4)
+#   make lua-test     # 无头运行 Lua 绑定自检 (SDL dummy)
 #   make fxtk_sim_en  # 英文演示 (侧边栏标签)
 #   make test         # 构建并运行无头单元测试 (无需 SDL/窗口/字体)
 #   make ex01_hello   # 构建指定示例: examples/ 下任一 ex*.c
@@ -9,7 +11,7 @@
 #
 # 注意: `test` 目标显式声明了 .PHONY 且有真实规则 ——
 #       避免再次踩 "同名 test/ 目录被 make 当作已是最新" 的假成功坑。
-.PHONY: all test clean fxtk_sim fxtk_sim_en fxtk_sim_sokol fxtk_sim_sdl fxtk_sim_sdl_en bench sokol
+.PHONY: all test clean fxtk_sim fxtk_sim_en fxtk_sim_sokol fxtk_sim_sdl fxtk_sim_sdl_en bench sokol lua lua-test lua-sdl
 .DEFAULT_GOAL := fxtk_sim
 
 # v2.3: 体积优化默认档 (-O2 基线 154KB → 101KB, -35%)
@@ -177,6 +179,38 @@ test/window_test: test/window_test.c test/sokol_app_impl.c $(WIN_SRC) $(HDRS)
 	gcc $(CFLAGS) $(INC) $(SOKOL_INC) test/window_test.c test/sokol_app_impl.c \
 	    $(WIN_SRC) -o $@ $(LDFLAGS) $(SOKOL_LIBS)
 
+# ---- v2.5.4: Lua 绑定 (C 核心不变；Lua 只做脚本层) ----
+# 三方 Lua 5.4.6 以源码形式 vendored (third_party/lua)，不依赖 liblua.so。
+# fxtk_lua = sokol 后端 + 内嵌 Lua + lua/fxtk.lua 语法层；脚本默认 demo-lua/app.lua。
+LUA_INC   := -I../third_party/lua/src
+LUA_CORE  := $(filter-out ../third_party/lua/src/lua.c ../third_party/lua/src/luac.c,$(wildcard ../third_party/lua/src/*.c))
+LUA_BIND  := ../bindings/lua/fxtk_lua.c
+LUA_HOST  := ../drivers/main_lua.c
+LUA_FLAGS := -Wno-format-truncation
+
+.PHONY: lua lua-test lua-sdl lua-clean
+lua: fxtk_lua
+
+lua-clean:
+	rm -f fxtk_lua test/lua_host_sdl
+
+fxtk_lua: $(SOKOL_CORE) $(WIN_SRC) ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c \
+          $(LUA_HOST) $(LUA_BIND) $(LUA_CORE)
+	gcc $(CFLAGS) $(LUA_FLAGS) $(INC) -I../bindings/lua $(LUA_INC) $(SOKOL_INC) $(SOKOL_CORE) $(WIN_SRC) \
+	    ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c $(LUA_HOST) $(LUA_BIND) $(LUA_CORE) \
+	    -o $@ $(LDFLAGS) $(SOKOL_LIBS)
+
+# 无头 Lua 宿主 (SDL dummy)：跑脚本、截图、可进 CI。
+lua-sdl: test/lua_host_sdl
+test/lua_host_sdl: $(CORE) $(HDRS) ../drivers/fxtk_sdl_driver.c ../bindings/lua/fxtk_lua.c \
+                   test/lua_host_sdl.c $(LUA_CORE)
+	gcc $(CFLAGS) $(LUA_FLAGS) -DFXTK_LUA_NO_WINAPI $(INC) -I../bindings/lua $(LUA_INC) $(CORE) ../drivers/fxtk_sdl_driver.c \
+	    ../bindings/lua/fxtk_lua.c test/lua_host_sdl.c $(LUA_CORE) -o $@ $(LDFLAGS) $(LIBS)
+
+# 绑定自检：无头跑 demo-main/test/lua_test.lua，断言绑定/回调/绘制链路。
+lua-test: test/lua_host_sdl
+	SDL_VIDEODRIVER=dummy FXTK_SCRIPT=test/lua_test.lua ./test/lua_host_sdl
+
 sokol: fxtk_sim
 
 # ---- 渲染吞吐基准 (dummy 驱动, 无 vsync) ----
@@ -202,8 +236,8 @@ canvas%: ../examples/canvas/canvas%.c $(CORE) $(HDRS) $(DRIVER)
 	gcc $(CFLAGS) $(INC) $(CORE) $(DRIVER) $< -o $@ $(LDFLAGS) $(LIBS_EX)
 
 clean:
-	rm -f fxtk_sim fxtk_sim_en fxtk_sim_sokol test/headless_test test/headless_test_stub test/bench \
-	      ex[0-9][0-9]_* canvas_[0-9][0-9]_* dist/win/*.exe fxtk_win.exe
+	rm -f fxtk_sim fxtk_sim_en fxtk_sim_sokol fxtk_lua test/headless_test test/headless_test_stub test/bench \
+	      test/lua_host_sdl ex[0-9][0-9]_* canvas_[0-9][0-9]_* dist/win/*.exe fxtk_win.exe
 
 # ---- v2.4 金图回归 (无头, 可进 CI) ----
 golden:

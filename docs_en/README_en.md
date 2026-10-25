@@ -1,15 +1,17 @@
 # fxtk — a tiny C GUI framework where one widget is one line
 
 > **Attribute macros as the UI language.** Each widget factory expands into a plain C99 compound literal —
-> no XML, no scripting, no code generation. The result is a **single binary with zero third-party DLLs**
-> (377 KB on Linux / 439 KB on Windows).
+> no XML, no codegen. The result is a **single binary with zero third-party DLLs**
+> (377 KB on Linux / 439 KB on Windows). An **optional Lua 5.4 binding** drives the same widget/canvas/image
+> API from scripts (`bindings/lua` + `demo-lua/`, Lua vendored, no system liblua); the C core is unchanged.
 
 <p>
-  <img alt="version" src="https://img.shields.io/badge/version-v2.5.3-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-v2.5.4-blue">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green">
   <img alt="c" src="https://img.shields.io/badge/language-C99-9cf">
   <img alt="platform" src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey">
   <img alt="backend" src="https://img.shields.io/badge/backend-sokol(OpenGL)-brightgreen">
+  <img alt="lua" src="https://img.shields.io/badge/Lua-5.4-2C2D72">
 </p>
 
 > Verify it yourself: `cd demo-main && make && ldd ./fxtk_sim` — system libraries only,
@@ -74,6 +76,43 @@ baseline is 480×272 and scales proportionally to any window size — no manual 
 - **The trade-off** — coordinates are strings, so a typo is not a compile error. That is why the syntax
   boundaries are documented instead of guessed.
 
+## Lua support: same API, no rewrite
+
+The C core is unchanged. `bindings/lua/fxtk_lua.c` registers the `fxtk.h` API as `fxtk.core`;
+`lua/fxtk.lua` provides constructors with the same names as the C attribute macros. Lua 5.4.6 is
+vendored in `third_party/lua/` and linked into the executable — no system liblua and no extra DLL.
+
+```lua
+require("fxtk").install_globals()
+
+local clicks = 0
+local function on_ok(w)
+    clicks = clicks + 1
+    fx_set_title(fx_find("info"), "clicked " .. clicks)
+end
+
+function app_init()
+    fx_set_bg(FX_WINDOW_BG)
+    fx_label_new(percent("0.02,0.01", "0.98,0.09"), title("Settings"))
+    fx_button_new(pixel("16,56", "200,96"), name("ok"), title("OK"), call(on_ok))
+    fx_label_new(pixel("16,104", "300,128"), name("info"), title("try me"))
+end
+```
+
+```bash
+make -C demo-main lua        # -> demo-main/fxtk_lua
+./demo-main/fxtk_lua         # loads demo-lua/app.lua
+make -C demo-main lua-test   # headless binding self-test
+cd demo-main && ./build_win_sokol.sh lua   # dist/win_sokol/fxtk_lua.exe
+```
+
+Callbacks: `call(function(w) ... end)`; lists: `fx_list_set_cb(list, function(w, idx) ... end)`.
+C out-params become multiple Lua returns. Images/SVG are userdata with `__gc`; images attached to
+widgets are pinned so GC cannot free them early.
+
+Full 12-page Lua demo: `demo-lua/app.lua`. API mapping, lifecycle, migration and known limits:
+**[docs_en/lua_en.md](lua_en.md)**.
+
 ## How it looks
 
 Canvas / anti-aliasing / gradients / custom widget (headless v2.2 renders, no font loading — shapes only):
@@ -101,7 +140,7 @@ Full 12-page demo (widgets / image warp / pseudo-3D / text input / file browser 
 | Area | Contents |
 |---|---|
 | **Widgets** | button · label · slider · progress · checkbox · grid keypad · canvas · tab · image · textbox · list · dropdown · scroll container · card |
-| **Layout** | `pixel` design-space coords (configurable via `fx_set_design_pixel`) + responsive scaling · `percent` · `grid` · flex (`FX_POS_FLEX`) |
+| **Layout** | `pixel` baseline + responsive scaling · `percent` · `grid` · flex (`FX_POS_FLEX`) |
 | **Canvas (immediate mode)** | line/circle/ellipse/triangle/polygon/arc/round-rect/text/gradient · offscreen buffer · anti-aliasing · transform stack |
 | **Input** | text editing (multi-line, drag-select, Ctrl+A/C/V/X, system clipboard, max length) · wheel routing · animated scroll · scrollbar drag · focus · single-finger gestures |
 | **Rendering** | GPU vertex batching · true perspective quad warp · image post-processing · GPU/CPU raymarching · particles |
@@ -113,9 +152,11 @@ Full 12-page demo (widgets / image warp / pseudo-3D / text input / file browser 
 # Linux deps (sokol backend — no SDL2 required)
 sudo apt install libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev
 
-make -C demo-main                 # 12-page demo (fxtk_sim)
+make -C demo-main                 # 12-page demo (fxtk_sim, C)
+make -C demo-main lua             # 12-page demo (fxtk_lua, C core + embedded Lua)
 make -C demo-main mw_interactive  # multi-window + widget input demo
 make -C demo-main test            # headless unit tests (no window, no font)
+make -C demo-main lua-test        # Lua binding self-test (headless)
 make -C demo-main golden          # canvas golden-image regression (local tolerance 0)
 make -C demo-main bench           # headless render benchmark (no vsync)
 
@@ -156,6 +197,9 @@ Start your own app from [your_app/](../your_app/) (`main.c` + `build.sh`).
 - **No i18n layer**: the English demo is a copy (`app_en.c`), not runtime language switching.
 - **No** accessibility / RTL / GUI designer; coordinates are `int16`, widget pool is capped at 8192
   (`-DFX_MAX_WIDGETS`).
+- **Lua binding is optional and does not change the C core**: callbacks pay a cross-language call;
+  the Lua demo caps particles at 4000 and dynamic stress widgets at 1200. The 3D page uses GPU
+  raymarching when the host supports it, otherwise a Lua fallback (no CPU raymarch port).
 - **ESP32 support was dropped in v2.5.3.** The pure-CPU code paths and `fxtk_backends` stubs remain,
   but CI and `make` targets are gone; `tools/esp32_smoke.sh` and `components/fxtk/CMakeLists.txt` are
   archived only (their source lists are stale — do not use them for ESP-IDF builds).
@@ -166,9 +210,12 @@ Start your own app from [your_app/](../your_app/) (`main.c` + `build.sh`).
 components/fxtk/   the framework itself (fxtk.c/draw/widgets/effects/extra/backends + headers)
 drivers/           backends (sokol driver + stb text layer + app shell; SDL2 only for headless tests/goldens)
 your_app/          start your app here (main.c + build.sh)
-demo-main/         12-page demo + toolchain (single Makefile)
+demo-main/         12-page demo + toolchain (single Makefile) + headless Lua host
+bindings/lua/      Lua binding (registers fxtk.h API as fxtk.core)
+lua/               Lua syntax layer (C-macro-shaped constructors + install_globals)
+demo-lua/          12-page Lua demo (app.lua) + smoke test (hello.lua)
 examples/          standalone examples ex01~ex18 + canvas tutorials
-third_party/       vendored sokol (stb lives in components/fxtk/vendor)
+third_party/       vendored sokol + Lua 5.4.6 source (stb lives in components/fxtk/vendor)
 docs/ docs_en/     documentation (Chinese / English)
 test/golden/       golden reference images
 tools/             autotrim / golden / package_release / check_api_docs
@@ -181,6 +228,7 @@ tools/             autotrim / golden / package_release / check_api_docs
 - [desktop_en.md](desktop_en.md) · [effects_en.md](effects_en.md) · [examples_en.md](examples_en.md)
 - [internals_en.md](internals_en.md) · [windows_en.md](windows_en.md)
 - [multi_window_en.md](multi_window_en.md) · [window_manager_en.md](window_manager_en.md)
+- **[lua_en.md](lua_en.md)** — Lua binding: build, API mapping, lifecycle, limits
 - Full per-function reference (Chinese): [docs/api.md](../docs/api.md)
 
 ## Backends

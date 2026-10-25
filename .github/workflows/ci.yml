@@ -24,6 +24,12 @@ jobs:
       - name: Run headless unit tests
         run: make -C demo-main test
 
+      - name: Build Lua demo (C core + embedded Lua 5.4)
+        run: make -C demo-main lua
+
+      - name: Run Lua binding self-test (headless)
+        run: make -C demo-main lua-test
+
       - name: Build a representative set of examples
         run: make -C demo-main ex01_hello ex02_widgets ex03_anim ex07_snake ex14_resize
 
@@ -104,6 +110,7 @@ jobs:
           cd demo-main
           bash ./build_win_sokol.sh
           bash ./build_win_sokol.sh app_en
+          bash ./build_win_sokol.sh lua
 
       # v2.4.5: 这一步的名字原先叫 "Cross-build an example", 但它其实编的还是 demo,
       # 一个 example 都没编 —— 名字与行为不符, 属于"看着验了其实没验"。

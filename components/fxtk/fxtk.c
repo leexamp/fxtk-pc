@@ -554,6 +554,10 @@ static fx_widget_t *hit_test(fx_widget_t *w, int x, int y)
 /* ================= 触摸事件 ================= */
 void fx_touch_press(int x, int y)
 {
+    /* 直接注入的触摸也要让 fx_touch_state 读到同一坐标（脚本与无头测试会直接调它）。
+     * 不在这里改 s_touch_prev：驱动每帧还会用 touch_read 的按下态覆盖它，
+     * 提前置 1 会让 fx_poll 把“驱动没按”误判成一次抬起。 */
+    s_last_tx = x; s_last_ty = y;
     if (s_ctx_open && s_ctx_root != s_act_root) { if (s_ctxpop) fx_set_visible(s_ctxpop, 0); s_ctx_open = 0; s_ctx_te = NULL; }
     if(s_ctx_open&&s_ctxpop){ int x1,y1,x2,y2; fx_widget_rect(s_ctxpop,&x1,&y1,&x2,&y2);
     if (x>=x1&&x<=x2&&y>=y1&&y<=y2){ int rh=(y2-y1)/5; int idx=(y-y1)/rh;
@@ -579,6 +583,7 @@ void fx_touch_press(int x, int y)
 }
 void fx_touch_release(int x, int y)
 {
+    s_last_tx = x; s_last_ty = y;
     fx_widget_t *w = hit_test(s_act_root, x, y);
     fx_widget_t *p = s_pressed;
     s_pressed = NULL; s_scroll_drag = NULL;
@@ -609,6 +614,7 @@ void fx_touch_release(int x, int y)
 }
 void fx_touch_move(int x, int y)
 {
+    s_last_tx = x; s_last_ty = y;
     if(s_ctx_open&&s_ctxpop){ int x1,y1,x2,y2; fx_widget_rect(s_ctxpop,&x1,&y1,&x2,&y2);
       int hl=-1;
       if (x>=x1&&x<=x2&&y>=y1&&y<=y2){ hl=(y-y1)/((y2-y1)/5);

@@ -1,5 +1,58 @@
 # Changelog
 
+## v2.5.4（Lua 绑定：C 核心 + 同构 Lua 语法 + 12 页 Lua 演示）
+
+> **核心仍是 fxtk-pc-v2.5（C99，`FXTK_VERSION` = 2.5.4，控件/绘制/输入/后端语义未改）。**
+> 本版只新增可选 Lua 绑定层、Lua 语法层、Lua 演示与构建/测试入口。
+
+### 新增
+
+- **Lua 5.4 绑定（`bindings/lua/fxtk_lua.c`）**：把 `fxtk.h` 的主要公开 API 注册为 `fxtk.core`。
+  - 控件句柄用 lightuserdata；图片/SVG 用带 `__gc` 的 full userdata。
+  - C 回调经 `fxtk.cbs` 注册表 + trampoline 转成 Lua 函数；列表选择回调额外传 index。
+  - C 的多输出参数改为 Lua 多返回值（`fx_widget_rect` / `fx_canvas_size` / `fx_touch_state` /
+    `fx_last_key` / `fx_gesture_poll` / `fx_image_size` 等）。
+  - 绑定层补充 `fx_image_fill` / `fx_image_line` / `fx_image_get_px` / `fx_image_size` 便捷函数。
+- **Lua 5.4.6 vendored**：`third_party/lua/`（只保留 `src/`，排除 `lua.c`/`luac.c`），
+  编进 exe，无系统 liblua 依赖；附 `third_party/lua/LICENSE`。
+- **Lua 语法层（`lua/fxtk.lua`）**：与 C 属性宏同名的 `pixel/percent/grid/title/call/page/...` 构造函数；
+  `install_globals()` 安装 `fx_*`、`fxtk_*`、`FX_*`，C 示例可逐行平移。
+- **Lua 演示 `demo-lua/app.lua`**：12 页（波形/图形/控件/图片/3D/输入/画板/键鼠/压测/滚动/组件/粒子），
+  页布局与 C 版 `app.c` + `app_desktop.c` 对齐；另附 `hello.lua` 最小冒烟。
+- **宿主**：`drivers/main_lua.c`（sokol 窗口）、`demo-main/test/lua_host_sdl.c`（SDL dummy 无头，
+  支持脚本/帧数/页/截图参数）；`demo-main/Makefile` 新增 `lua`、`lua-sdl`、`lua-test`。
+- **Windows**：`demo-main/build_win_sokol.sh lua` 产出 `dist/win_sokol/fxtk_lua.exe`（内嵌 Lua，单 exe）。
+- **文档**：`docs/lua.md`、`docs_en/lua_en.md`；中英文 README 增加 Lua 章节、构建命令、目录与验证边界。
+  版本统一标为 **2.5.4**（仍属 2.5 线；Lua 绑定是可选层，核心语义不变，不另起 2.6 版本号）。
+
+### 修复
+
+- **直接调用 `fx_touch_press/release/move` 时 `fx_touch_state` 坐标不更新**：无头测试/脚本直接注入触摸后，
+  列表等依赖 `fx_touch_state` 的回调拿到的是旧坐标（-1,-1），点击列表不触发选择。现在三个注入函数
+  同步 `s_last_tx/s_last_ty`（不改 `s_touch_prev`，避免 `fx_poll` 把驱动未按误判为抬起）。
+  这是绑定测试暴露出的真实边界，C 版行为只在直接注入时受影响。
+
+### 验证
+
+- `make -C demo-main lua`、`make -C demo-main lua-sdl`、`make -C demo-main lua-test` 通过。
+- `lua_test.lua` 覆盖属性/控件/回调（含列表 index）/画布/图片/列表/flex/SVG/文件/手势/删除搜索。
+- 无头截图与 C 版同页逐像素对比（1280×720、30 帧、SDL dummy）：控件/图片/输入/画板/滚动/组件页
+  **各仅 1 像素差异**；波形/图形页约 1000 像素（帧相位/浮点 sinf）；键鼠/压测/粒子/3D 为动态页不做像素断言。
+- `./build_win_sokol.sh lua` 交叉编译通过，产物 610.5 KB，依赖仅 Windows 系统 DLL。
+- **合并到主线后的复核**：`make lua` / `make lua-test` / `make test`（真 + stub）/ `make uiscale-test` /
+  `make golden`（10/10 容差 0）/ `check_api_docs.py` 全过；Xvfb + sokol 窗口跑 `fxtk_lua` 第 3、4 页截图正常；
+  `ldd demo-main/fxtk_lua` 只有 libX11/libXi/libXcursor/libGL 等系统库（**无 liblua**）；
+  `build_win_sokol.sh lua` 本次实测产物 611.5 KB，依赖仅 Windows 系统 DLL。
+
+### 边界（如实写）
+
+- Lua 是绑定层，不是把 C 核心改写成 Lua；热路径有一次跨语言调用开销，演示对粒子（4000）与
+  压测动态控件（1200）做了封顶。
+- 没有把 `demo-main/raymarch.c` 的 CPU 光追移植到 Lua：3D 页在宿主有 GPU raymarch 钩子时用 GPU，
+  否则画 Lua 回退动画。
+- 无头 SDL 宿主编译期定义 `FXTK_LUA_NO_WINAPI`，`fx_win_*` 为桩；sokol/Windows 版链接真实窗口实现。
+- 未覆盖：Lua 协程与绘制回调混用、脚本热重载、输入法全链路、多 Lua state。
+
 ## v2.5.3（语法优先的 README + ESP32 下线 + 多窗口缩放修复 + 设计稿坐标 API）
 
 > 复核：`make test`（新增第 18 节：文字底色契约）、`make`（sokol demo 编译通过）、

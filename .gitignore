@@ -56,3 +56,6 @@ demo-main/test/v25_showcase
 demo-main/test/v25_evidence
 
 demo-main/mw_interactive
+# Lua 绑定构建产物
+demo-main/fxtk_lua
+demo-main/test/lua_host_sdl

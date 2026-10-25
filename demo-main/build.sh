@@ -6,6 +6,7 @@
 #   ./build.sh --no-run     只构建
 #   ./build.sh --sdl        构建并运行遗留 SDL 版 (对照用)
 #   ./build.sh --shared     打动态库包 (exe 只留 app 层, 见 build_shared.sh)
+#   ./build.sh --lua        构建并运行 Lua 版演示 (C 核心 + 内嵌 Lua)
 #   ./build.sh --win        交叉编译 Windows 单 exe (见 build_win_sokol.sh)
 #
 # 为什么改成薄封装: 旧版本是 v2.2 手写的 gcc 长命令(硬编码 SDL2 依赖、绕过 Makefile),
@@ -19,6 +20,7 @@ case "$MODE" in
   --no-run) make && exit 0 ;;
   --sdl)    make fxtk_sim_sdl && exec ./fxtk_sim_sdl ;;
   --shared) exec ./build_shared.sh ;;
+  --lua)    make lua && exec ./fxtk_lua ;;
   --win)    exec ./build_win_sokol.sh ;;
 esac
 make

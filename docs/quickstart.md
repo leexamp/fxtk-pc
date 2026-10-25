@@ -18,6 +18,8 @@ cd demo-main
 sudo apt install libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev
 ```
 
+> Lua 版：`make lua && ./fxtk_lua`（脚本在 `demo-lua/app.lua`，语法与 C 属性宏一致；详见 `docs/lua.md`）。
+>
 > 只有跑遗留对照版 `./build.sh --sdl` 才需要 `libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev`。
 > 无头测试/基准/金图（`make test` / `make bench` / `make golden`）走 SDL 的 dummy 驱动，
 > 同样需要这套 SDL 开发包——但**默认的 `./build.sh` 不需要**。
