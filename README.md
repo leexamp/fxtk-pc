@@ -6,7 +6,7 @@
 > Lua 源码 vendored，不依赖系统 liblua），C 核心语义不变。
 
 <p>
-  <img alt="version" src="https://img.shields.io/badge/version-v2.5.5-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-v2.5.6-blue">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green">
   <img alt="c" src="https://img.shields.io/badge/language-C99-9cf">
   <img alt="platform" src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey">
