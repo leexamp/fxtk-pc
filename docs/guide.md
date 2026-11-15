@@ -325,7 +325,8 @@ fx_button_new(pixel("340,40","400,70"), name("br_r"), page(6),
 
 - `call()` 为**绘制回调**（立即式）。
 - `anim(1)`：每帧重绘（动画）；否则仅在**首次绘制或内容变化**时重绘。
-  （注：脏区矩形合并当前未启用，任何重绘请求都提升为整帧——见 `docs/internals.md` 与 `fx_repaint_rect()` 注释。）
+  （v2.5.6 起 `fx_repaint_rect` 是真正的**局部重绘**：脏区合并后在下一帧逐块重画，并做过逐帧像素 A/B；
+  `FXTK_FULL_REDRAW=1` 可退回整帧。详见 `docs/internals.md` 与 `fx_repaint_rect()` 注释。）
 - 回调里坐标是**控件本地坐标**（0,0 为左上角），宽高用 `fx_canvas_size(w,&cw,&ch)` 取（也可 `fx_widget_rect`）。
 - 清底用 `fx_canvas_clear(w,color)`（替代手写 `fx_set_color`+`fx_fill_rect`）。
 - canvas 可以当**容器**：`fx_parent(canvas)` 后创建的子控件会画在画布内容之上（C2 补画），随画布裁剪。

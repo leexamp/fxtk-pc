@@ -18,11 +18,33 @@ jobs:
             libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev \
             libegl1-mesa-dev libgles2-mesa-dev libx11-dev
 
+      - name: Quality gates (版本号 / 脚本权限 / API 符号)
+        # v2.5.6: 这三项以前只写在 README 里, 没有任何自动化验证:
+        #   - 版本号在 fxtk.h / CHANGELOG / README 三处手写, 会漂移;
+        #   - *.sh 在 git 索引里丢过可执行位, 导致 CI 三个 job 全红(exit 126);
+        #   - 公开头文件里声明了但没人实现的函数(如 fxtk_font_height)只有链接时才炸.
+        run: |
+          python3 tools/check_version.py
+          python3 tools/check_modes.py
+          make -C demo-main api-check
+
       - name: Build demo (fxtk_sim)
         run: make -C demo-main fxtk_sim
 
       - name: Run headless unit tests
         run: make -C demo-main test
+
+      - name: Module self-tests (par / uiscale / gesture / flex / svg)
+        # v2.5.6: 这五个自检此前只在本地手工跑, CI 从未验过。
+        run: make -C demo-main selftest
+
+      - name: Trim-switch consistency (autotrim)
+        # v2.5.6: 全关裁剪开关仍能编译 + autotrim 不误裁用到的控件 (两处旧 bug 的回归护栏)。
+        run: make -C demo-main trim-check
+
+      - name: ASan + UBSan headless tests
+        # README 的验证表声称 "ASan+UBSan 干净", 但此前 CI 从未跑过 sanitizer。
+        run: make -C demo-main test-asan
 
       - name: Build Lua runner (C core + embedded Lua 5.4; scripts load at runtime)
         run: |
@@ -40,51 +62,17 @@ jobs:
         run: make -C demo-main canvas_01_primitives canvas_03_offscreen canvas_06_interact
 
       - name: Headless-render canvas examples (catches resize crashes)
-        run: |
-          cd demo-main
-          for e in canvas_01_primitives canvas_02_immediate canvas_03_offscreen canvas_04_custom_widget canvas_05_image canvas_06_interact canvas_07_aa; do
-            # v2.5: 核心源清单补齐 —— 之前漏了 gesture/par/flex/svg/wm，
-            # 导致 fx_gesture_feed 等符号未定义，这一步长期是红的。
-            gcc -O2 -I. -I../components/fxtk test/render_canvas.c ../examples/canvas/$e.c \
-              ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
-              ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_extra.c \
-              ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_backends.c \
-              ../components/fxtk/fxtk_gesture.c ../components/fxtk/fxtk_par.c \
-              ../components/fxtk/fxtk_flex.c ../components/fxtk/fxtk_svg.c \
-              ../components/fxtk/fxtk_wm.c \
-              -o /tmp/rc_$e -lm
-            /tmp/rc_$e 480 272 /tmp/$e.ppm || { echo "render crash at 480: $e"; exit 1; }
-            /tmp/rc_$e 200 112 /tmp/${e}_small.ppm || { echo "render crash at 200: $e"; exit 1; }
-          done
-          echo "headless canvas render OK"
+        # v2.5.6: 源清单改为复用 Makefile 的自动发现 (headless-canvas), 不再在 YAML 里手抄 ——
+        # 之前这里漏过 gesture/par/flex/svg/wm, 导致 fx_gesture_feed 等符号未定义、步骤长期是红的。
+        run: make -C demo-main headless-canvas
 
       - name: Warnings report (non-blocking)
+        # v2.5.6: 源清单收进 Makefile 的 warnings-check (复用 CORE/DRIVER, 不再在 YAML 手抄)。
         working-directory: demo-main
-        run: |
-          set +e
-          # v2.4.5: 驱动已移到 drivers/ (v2.4.0 的独立化), 但这里的路径没跟着改 ——
-          # 于是长期停在 "cc1: fatal error: fxtk_sdl_driver.c: No such file or directory",
-          # 报告本身失去意义(它自己会 echo "report would be meaningless" 然后 exit 1)。
-          gcc -O2 -Wall -Wextra -o /dev/null -I. -I../components/fxtk \
-            ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
-            ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_font.c \
-            ../components/fxtk/fxtk_effects.c ../components/fxtk/fxtk_extra.c \
-            ../components/fxtk/fxtk_backends.c \
-            ../components/fxtk/fxtk_gesture.c ../components/fxtk/fxtk_par.c \
-            ../components/fxtk/fxtk_flex.c ../components/fxtk/fxtk_svg.c \
-            ../drivers/fxtk_sdl_driver.c raymarch.c gpu_raymarch.c \
-            ../drivers/main_linux.c app.c app_desktop.c \
-            -lSDL2 -lSDL2_ttf -lSDL2_image -lm -pthread -lEGL -lGLESv2 -lX11 2> /tmp/fxtk_warnings.txt
-          if [ $? -ne 0 ]; then
-            echo "❌ Warnings step: compile failed, report would be meaningless:"
-            tail -30 /tmp/fxtk_warnings.txt
-            exit 1
-          fi
-          n=$(grep -c 'warning:' /tmp/fxtk_warnings.txt)
-          echo "Total -Wall -Wextra warnings: $n (v2.3.1 baseline: 69, advisory only)"
+        run: make warnings-check
 
 
-      - name: API 文档覆盖检查（头文件 → docs/api.md）
+      - name: API 文档一致性（头文件 ↔ docs/api.md: 覆盖 + 参数个数 + 无幽灵符号）
         run: python3 tools/check_api_docs.py
 
       - name: Golden image regression (画布金图, 逐像素)

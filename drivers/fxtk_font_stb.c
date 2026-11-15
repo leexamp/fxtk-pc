@@ -28,6 +28,9 @@ extern void fxtk_text_blit(void *tex, int x, int y, int w, int h);
 
 #define FONT_MAX  8
 #define TC_MAX    128
+#define ADV_CACHE 1024   /* 每字号 advance 直接映射缓存 (8KB); 命中免去 cmap 二分查找 */
+
+typedef struct { uint32_t tag; int adv; } adv_ent_t;   /* tag = cp+1, 0 = 空槽 */
 
 typedef struct {
     int size;
@@ -36,12 +39,27 @@ typedef struct {
     unsigned char *data;      /* TTF 文件内容 (常驻) */
     float scale;
     int ascent, descent, linegap;
+    adv_ent_t adv_cache[ADV_CACHE];   /* 未缩放字形 advance (font units), 随字号槽 memset 失效 */
 } font_t;
 
 static font_t s_fonts[FONT_MAX];
 static int    s_font_n = 0;
 static int    s_cur_size = 16;
 static char   s_path[512];
+
+/* v2.5.6: 字号 → 设备像素 = 逻辑字号 × dpi。
+ * 几何坐标走 drv->width/设计宽(物理像素), HiDPI 下物理像素翻倍; 而字号此前是绝对像素、
+ * 不乘 dpi → 字相对放大后的几何小了一半 (用户实测 200% 缩放"字体过小")。
+ * 测量与绘制都经 font_get(), 在这里统一乘 dpi, 两边天然一致。
+ * dpi<=1 时原样返回 → 非 HiDPI 环境的渲染逐字节不变 (金图不受影响)。 */
+static int font_dev_size(int size)
+{
+    if (size <= 0) size = s_cur_size;
+    float d = fx_dpi_scale();
+    if (d <= 1.0f) return size;
+    int s = (int)((float)size * d + 0.5f);
+    return s > 0 ? s : 1;
+}
 
 typedef struct {
     font_t *f;
@@ -87,18 +105,19 @@ void fxtk_font_init(const char *unused_path, int size)
         snprintf(s_path, sizeof(s_path), "%s", try_list[i]);
         /* 首个字号在此加载, 后续字号复用同一份数据 */
         font_t *f = &s_fonts[0];
+        s_cur_size = size;                 /* 逻辑字号 (font_dev_size 的缺省值) */
+        int devsz = font_dev_size(size);   /* 设备字号 = 逻辑 × dpi */
         f->data = (unsigned char *)data;
         f->ok = stbtt_InitFont(&f->info, f->data, stbtt_GetFontOffsetForIndex(f->data, 0));
-        f->size = size;
+        f->size = devsz;
         f->scale = f->ok ? /* v2.4.1: 字号语义对齐 SDL_ttf —— SDL_ttf 的 size 是【EM 大小】,
              * 而 ScaleForPixelHeight 是让 ascent+descent 等于 size(ascent-descent 通常比 EM 大 ~15%),
              * 于是同样名义字号在 sokol 版看着更小。改用 EM 映射后两边视觉一致。 */
-            stbtt_ScaleForMappingEmToPixels(&f->info, (float)size) : 0.0f;
+            stbtt_ScaleForMappingEmToPixels(&f->info, (float)devsz) : 0.0f;
         if (f->ok) {
             stbtt_GetFontVMetrics(&f->info, &f->ascent, &f->descent, &f->linegap);
             s_font_n = 1;
-            s_cur_size = size;
-            fx_log(FX_LOG_INFO, "[font-stb] %s (size=%d, ascent=%d)", s_path, size, f->ascent);
+            fx_log(FX_LOG_INFO, "[font-stb] %s (size=%d, ascent=%d)", s_path, devsz, f->ascent);
             return;
         }
         fx_file_free(data);
@@ -109,7 +128,7 @@ void fxtk_font_init(const char *unused_path, int size)
 
 static font_t *font_get(int size)
 {
-    if (size <= 0) size = s_cur_size;
+    size = font_dev_size(size);   /* 逻辑字号 → 设备像素 (× dpi), 见 font_dev_size */
     for (int i = 0; i < s_font_n; i++)
         if (s_fonts[i].size == size) return &s_fonts[i];
     if (!s_path[0]) return s_font_n ? &s_fonts[0] : NULL;
@@ -117,8 +136,9 @@ static font_t *font_get(int size)
     if (slot >= FONT_MAX) {          /* 满了: 淘汰最久未用的字号(1 号起, 0 号留作默认),
                                       * 旧实现直接退回 16px → 演示里"字号滑杆只能小范围缩放" */
         slot = 1;
+        int cur_dev = font_dev_size(s_cur_size);   /* 保留当前逻辑字号对应的设备尺寸 */
         for (int i = 2; i < FONT_MAX; i++)
-            if (s_fonts[i].size != s_cur_size && s_fonts[i].size < s_fonts[slot].size) slot = i;
+            if (s_fonts[i].size != cur_dev && s_fonts[i].size < s_fonts[slot].size) slot = i;
         free(s_fonts[slot].data);
         memset(&s_fonts[slot], 0, sizeof(font_t));
     } else {
@@ -142,6 +162,15 @@ static font_t *font_get(int size)
 void  fxtk_font_set_size(int size) { if (size > 0) s_cur_size = size; }
 void *fxtk_font_size(int size) { return (void *)font_get(size); }
 
+/* v2.5.6: 补齐公开头文件声明、但两个字体后端都漏实现的 fxtk_font_height()。
+ * 与 SDL_ttf 的 TTF_FontHeight 对齐: ascent - descent + linegap 换算成像素高。 */
+int fxtk_font_height(int size)
+{
+    font_t *f = font_get(size);
+    if (!f || !f->ok) return 0;
+    return (int)((float)(f->ascent - f->descent + f->linegap) * f->scale + 0.5f);
+}
+
 /* ================= 文本度量 ================= */
 
 static uint32_t utf8_next(const char *s, int *adv)
@@ -154,6 +183,16 @@ static uint32_t utf8_next(const char *s, int *adv)
     cp = ((cp & 0x07) << 18) | ((p[1] & 0x3F) << 12) | ((p[2] & 0x3F) << 6) | (p[3] & 0x3F); *adv = 4; return cp;
 }
 
+static int font_advance(font_t *f, uint32_t cp)
+{
+    adv_ent_t *e = &f->adv_cache[cp & (ADV_CACHE - 1)];
+    if (e->tag == cp + 1) return e->adv;
+    int a, b;
+    stbtt_GetCodepointHMetrics(&f->info, (int)cp, &a, &b);
+    e->tag = cp + 1; e->adv = a;
+    return a;
+}
+
 static int measure(font_t *f, const char *s, int n)
 {
     if (!f || !f->ok || !s) return 0;
@@ -161,9 +200,7 @@ static int measure(font_t *f, const char *s, int n)
     int i = 0;
     while (s[i] && (n < 0 || i < n)) {
         int adv; uint32_t cp = utf8_next(s + i, &adv);
-        int a, b;
-        stbtt_GetCodepointHMetrics(&f->info, (int)cp, &a, &b);
-        w += (float)a * f->scale;
+        w += (float)font_advance(f, cp) * f->scale;
         i += adv;
     }
     return (int)(w + 0.5f);
@@ -247,9 +284,7 @@ static unsigned char *rasterize(font_t *f, const char *s, fx_color_t fg, fx_colo
             }
             stbtt_FreeBitmap(bmp, NULL);
         }
-        int a1, b1;
-        stbtt_GetCodepointHMetrics(&f->info, (int)cp, &a1, &b1);
-        x += (float)a1 * f->scale;
+        x += (float)font_advance(f, cp) * f->scale;
         i += adv;
     }
     *out_w = w; *out_h = h;

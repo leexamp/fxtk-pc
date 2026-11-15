@@ -1,0 +1,23 @@
+# tools/api_allowlist.txt —— "声明了但核心不实现" 的符号白名单
+#
+# 规则: 每条一行, "符号名  # 原因". 只允许两类:
+#   1) 宿主 API: 由 drivers/*.c 实现 (应用壳/驱动层), 核心不链它也允许单独编译;
+#   2) 可选模块: 声明在公开头文件里, 但由使用方按需链接对应 .c.
+# 新增条目必须写清楚"谁实现、为什么不进核心", 否则就是在掩盖下一个 fxtk_font_height.
+
+# ---- 宿主 API (drivers/fxtk_sdl_driver.c 与 drivers/fxtk_sokol_driver.c 各实现一份) ----
+fxtk_fps              # 驱动: 当前 FPS (窗口/计时器在驱动层)
+fxtk_ui_scale         # 驱动: UI 缩放百分比 (X11/Win32 DPI 在驱动层)
+fxtk_set_ui_scale_cap # 驱动: 缩放上限设置
+
+# ---- 可选模块 (drivers/fxtk_window.c, 只被桌面演示/示例按需链接) ----
+fx_win_available          # drivers/fxtk_window.c: 单窗口桌面行为 (X11/Win32)
+fx_win_center             # 同上
+fx_win_drag_begin         # 同上
+fx_win_get_always_on_top  # 同上
+fx_win_get_borderless     # 同上
+fx_win_get_decorated      # 同上
+fx_win_get_pos            # 同上
+fx_win_move               # 同上
+fx_win_set_always_on_top  # 同上
+fx_win_set_borderless     # 同上

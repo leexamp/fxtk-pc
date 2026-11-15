@@ -5,13 +5,15 @@
 #   make lua-test     # 无头运行 Lua 绑定自检 (SDL dummy)
 #   make fxtk_sim_en  # 英文演示 (侧边栏标签)
 #   make test         # 构建并运行无头单元测试 (无需 SDL/窗口/字体)
+#   make check        # 质量闸门: 无头测试 + 模块自检 + 裁剪一致性 + API 符号/文档 + 版本号 + 脚本权限 (v2.5.6)
+#   make test-asan    # ASan+UBSan 跑无头测试 (v2.5.6, CI 也跑)
 #   make ex01_hello   # 构建指定示例: examples/ 下任一 ex*.c
 #   make canvas_01_primitives   # 构建画布教程: examples/canvas/ 下任一 canvas_*.c
 #   make clean
 #
 # 注意: `test` 目标显式声明了 .PHONY 且有真实规则 ——
 #       避免再次踩 "同名 test/ 目录被 make 当作已是最新" 的假成功坑。
-.PHONY: all test clean fxtk_sim fxtk_sim_en fxtk_sim_sokol fxtk_sim_sdl fxtk_sim_sdl_en bench sokol lua lua-runner lua-test lua-sdl
+.PHONY: all test check api-check version-check mode-check test-asan clean fxtk_sim fxtk_sim_en fxtk_sim_sokol fxtk_sim_sdl fxtk_sim_sdl_en bench sokol lua lua-runner lua-test lua-sdl
 .DEFAULT_GOAL := fxtk_sim
 
 # v2.3: 体积优化默认档 (-O2 基线 154KB → 101KB, -35%)
@@ -30,6 +32,8 @@ else
 LDFLAGS ?= -Wl,--gc-sections -Wl,--build-id=none
 endif
 INC    := -I. -I../components/fxtk -I../drivers
+# v2.5.6: 增量构建中间产物目录 (.o)
+BUILD := build
 
 # demo 链接 (3D 页需要 EGL/GLES/X11)
 LIBS    := -lSDL2 -lSDL2_ttf -lSDL2_image -lm -pthread -lEGL -lGLESv2 -lX11
@@ -53,6 +57,40 @@ CORE := ../components/fxtk/fxtk.c \
 HDRS := ../components/fxtk/fxtk.h ../components/fxtk/fxtk_internal.h
 DRIVER := ../drivers/fxtk_sdl_driver.c ../drivers/main_linux.c
 
+# ---- v2.5.6: 所有源清单与对象清单集中在此定义 ----
+# GNU make 的目标前置依赖在【解析时】就展开, 所以这些变量必须出现在任何使用它们的
+# 目标之前 (此前把 CORE_OBJ 定义在 fxtk_sim 之后, 导致 $^ 为空、链接报 main 未定义)。
+# ---- v2.4 sokol 后端 (无 SDL 依赖; 文本层走 stb_truetype) ----
+SOKOL_INC := -I../third_party/sokol
+SOKOL_LIBS := -lX11 -lXi -lXcursor -lGL -ldl -lpthread -lm
+# ⚠️ 这份清单【不是】CORE 的拷贝, 而是独立维护的(去掉 fxtk_font.c, 改用
+#    fxtk_font_stb.c)。新增核心 .c 时【两处都要加】—— v2.5 初版只往 CORE 里加了
+#    fxtk_gesture.c, 结果 sokol 版演示报 "fx_gesture_feed 未定义的引用"。
+SOKOL_CORE := ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
+              ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_effects.c \
+              ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c \
+              ../components/fxtk/fxtk_par.c ../components/fxtk/fxtk_gesture.c \
+              ../components/fxtk/fxtk_flex.c ../components/fxtk/fxtk_svg.c
+# ---- v2.5: 单窗口桌面行为 (去标题栏/置顶/移动/居中/拖动) ----
+# 独立成文件而不是塞进驱动: 它只用 sokol_app 暴露的原生窗口句柄(sapp_x11_get_window
+# 等), 完全不碰渲染 —— 所以与帧流程、命令流、金图都无关, 加进来不影响既有行为。
+WIN_SRC := ../drivers/fxtk_window.c
+# ---- v2.5.4: Lua 绑定源清单 ----
+LUA_INC   := -I../third_party/lua/src
+LUA_CORE  := $(filter-out ../third_party/lua/src/lua.c ../third_party/lua/src/luac.c,$(wildcard ../third_party/lua/src/*.c))
+LUA_BIND  := ../bindings/lua/fxtk_lua.c
+LUA_HOST  := ../drivers/main_lua.c
+LUA_FLAGS := -Wno-format-truncation
+# ---- v2.5.6: 增量构建对象清单 ----
+ALL_CORE_HDRS := $(wildcard ../components/fxtk/*.h)
+CORE_OBJ := $(patsubst ../components/fxtk/%.c,$(BUILD)/core/%.o,$(SOKOL_CORE))
+SOKOL_GL_OBJ := $(BUILD)/drv/fxtk_sokol_driver.o $(BUILD)/drv/fxtk_font_stb.o $(BUILD)/drv/fxtk_window.o
+SOKOL_DRV_OBJ := $(SOKOL_GL_OBJ) $(BUILD)/drv/main_sokol.o
+APP_OBJ := $(BUILD)/app/app.o $(BUILD)/app/app_desktop.o $(BUILD)/app/raymarch.o $(BUILD)/app/gpu_raymarch_stub.o
+APP_EN_OBJ := $(BUILD)/app/app_en.o $(BUILD)/app/app_desktop_en.o $(BUILD)/app/raymarch.o $(BUILD)/app/gpu_raymarch_stub.o
+LUA_OBJ := $(patsubst ../third_party/lua/src/%.c,$(BUILD)/lua/%.o,$(LUA_CORE))
+LUA_BIND_OBJ := $(BUILD)/lua/fxtk_lua.o $(BUILD)/lua/main_lua.o
+
 # ---- v2.4 起【默认后端 = sokol】----
 # SDL2 降为遗留: 只保留 SDL 驱动作为【无头测试/基准/金图】用的假驱动 (SDL_VIDEODRIVER=dummy),
 # 因为 CI 里没有显示器, 而 sokol 需要真实 GL 上下文。发布用的演示程序一律走 sokol。
@@ -61,17 +99,11 @@ all: fxtk_sim
 # 旧名字继续可用(脚本/文档里引用的是它), 现在只是别名 —— 产物仍是 ./fxtk_sim(sokol 版)
 fxtk_sim_sokol: fxtk_sim
 
-fxtk_sim: $(SOKOL_CORE) $(WIN_SRC) ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c \
-          app.c app_desktop.c raymarch.c gpu_raymarch_stub.c
-	gcc $(CFLAGS) $(INC) $(SOKOL_INC) $(SOKOL_CORE) $(WIN_SRC) \
-	    ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c app.c app_desktop.c raymarch.c \
-	    gpu_raymarch_stub.c -o $@ $(LDFLAGS) $(SOKOL_LIBS)
+fxtk_sim: $(CORE_OBJ) $(SOKOL_DRV_OBJ) $(APP_OBJ)
+	gcc $(CFLAGS) $^ -o $@ $(LDFLAGS) $(SOKOL_LIBS)
 
-fxtk_sim_en: $(SOKOL_CORE) $(WIN_SRC) ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c \
-             app_en.c app_desktop_en.c raymarch.c gpu_raymarch_stub.c
-	gcc $(CFLAGS) $(INC) $(SOKOL_INC) $(SOKOL_CORE) $(WIN_SRC) \
-	    ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c ../drivers/main_sokol.c app_en.c app_desktop_en.c raymarch.c \
-	    gpu_raymarch_stub.c -o $@ $(LDFLAGS) $(SOKOL_LIBS)
+fxtk_sim_en: $(CORE_OBJ) $(SOKOL_DRV_OBJ) $(APP_EN_OBJ)
+	gcc $(CFLAGS) $^ -o $@ $(LDFLAGS) $(SOKOL_LIBS)
 
 # ---- 遗留: SDL 版演示 (仅用于对照/过渡; 新功能不再往里加) ----
 fxtk_sim_sdl: $(CORE) $(HDRS) $(DRIVER) raymarch.c gpu_raymarch.c app.c app_desktop.c
@@ -98,6 +130,33 @@ test/headless_test: test/headless_test.c $(TEST_CORE) $(HDRS)
 
 test/headless_test_stub: test/headless_test.c $(TEST_CORE) $(HDRS)
 	gcc -O2 -DFXTK_BACKEND_STUB $(INC) $(TEST_CORE) test/headless_test.c -o $@ -lm -lpthread
+
+# ---- v2.5.6: 质量闸门 ----
+# 都是"能编译"骗不过去的检查, 跑在 CI 里 (原先 README 声称的 ASan 干净、脚本可执行、
+# 版本号一致, CI 一个都没验). 拆成独立目标, CI 里分步跑便于一眼定位。
+api-check:      ## 公开头文件的每个声明都必须在所有字体后端里有实现
+	python3 ../tools/check_symbols.py
+api-doc-check:  ## 文档 ↔ 头文件一致性: 覆盖 + 参数个数 + 无幽灵符号 (v2.5.6)
+	python3 ../tools/check_api_docs.py
+version-check:  ## fxtk.h / CHANGELOG / README 三处版本号一致
+	python3 ../tools/check_version.py
+mode-check:     ## git 索引里所有 *.sh 都是 100755
+	python3 ../tools/check_modes.py
+
+# v2.5.6: 模块自检汇总 (全部无头/确定性) —— 并行 for / UI 缩放 / 触摸手势 / 弹性布局 / SVG 子集。
+# CI 单独一步跑它, check 也带上 (此前这些自检只在本地手工跑, CI 从未验过)。
+.PHONY: selftest
+selftest: par-test uiscale-test gesture-test flex-test svg-test
+
+check: test selftest trim-check api-check api-doc-check version-check mode-check
+
+# ---- v2.5.6: ASan + UBSan 无头测试 ----
+ASAN_FLAGS := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
+test-asan:
+	gcc $(ASAN_FLAGS) $(INC) $(TEST_CORE) test/headless_test.c -o test/headless_test_asan -lm -lpthread
+	ASAN_OPTIONS=detect_leaks=1 ./test/headless_test_asan
+	gcc $(ASAN_FLAGS) -DFXTK_BACKEND_STUB $(INC) $(TEST_CORE) test/headless_test.c -o test/headless_test_asan_stub -lm -lpthread
+	ASAN_OPTIONS=detect_leaks=1 ./test/headless_test_asan_stub
 
 # ---- v2.5.2: 多真实窗口 + 控件输入闭环 demo ----
 # 一条命令构建: make mw_interactive && ./mw_interactive
@@ -151,22 +210,7 @@ svg-test: test/svg_test
 test/svg_test: test/svg_test.c ../components/fxtk/fxtk_svg.c $(HDRS)
 	gcc -O2 $(INC) test/svg_test.c ../components/fxtk/fxtk_svg.c -o $@ -lm
 
-# ---- v2.4 sokol 后端 (无 SDL 依赖; 文本层走 stb_truetype) ----
-SOKOL_INC := -I../third_party/sokol
-SOKOL_LIBS := -lX11 -lXi -lXcursor -lGL -ldl -lpthread -lm
-SOKOL_CORE := ../components/fxtk/fxtk.c ../components/fxtk/fxtk_draw.c \
-              ../components/fxtk/fxtk_widgets.c ../components/fxtk/fxtk_effects.c \
-              ../components/fxtk/fxtk_extra.c ../components/fxtk/fxtk_backends.c \
-              ../components/fxtk/fxtk_par.c ../components/fxtk/fxtk_gesture.c \
-              ../components/fxtk/fxtk_flex.c ../components/fxtk/fxtk_svg.c
-# ⚠️ 这份清单【不是】CORE 的拷贝, 而是独立维护的(去掉 fxtk_font.c, 改用
-#    fxtk_font_stb.c)。新增核心 .c 时【两处都要加】—— v2.5 初版只往 CORE 里加了
-#    fxtk_gesture.c, 结果 sokol 版演示报 "fx_gesture_feed 未定义的引用"。
-
-# ---- v2.5: 单窗口桌面行为 (去标题栏/置顶/移动/居中/拖动) ----
-# 独立成文件而不是塞进驱动: 它只用 sokol_app 暴露的原生窗口句柄(sapp_x11_get_window
-# 等), 完全不碰渲染 —— 所以与帧流程、命令流、金图都无关, 加进来不影响既有行为。
-WIN_SRC := ../drivers/fxtk_window.c
+# ---- sokol 后端 / 单窗口 / Lua 的源清单已上移到文件顶部 (解析时展开的要求) ----
 
 # 单窗口行为自检。
 # 【刻意不放进 test 目标】: 它要开真窗口并依赖窗口管理器, 不适合当无头 CI 的必过项。
@@ -187,11 +231,7 @@ test/window_test: test/window_test.c test/sokol_app_impl.c $(WIN_SRC) $(HDRS)
 #                    fxtk_lua_runner my_app/        # 目录 → <dir>/app.lua
 #   改脚本不用重新编译; 只有改 C 绑定/核心才需要再 make lua。
 # fxtk_lua 是同一个程序的兼容名(符号链接)，老命令/文档继续可用。
-LUA_INC   := -I../third_party/lua/src
-LUA_CORE  := $(filter-out ../third_party/lua/src/lua.c ../third_party/lua/src/luac.c,$(wildcard ../third_party/lua/src/*.c))
-LUA_BIND  := ../bindings/lua/fxtk_lua.c
-LUA_HOST  := ../drivers/main_lua.c
-LUA_FLAGS := -Wno-format-truncation
+# (LUA_INC / LUA_CORE / LUA_BIND / LUA_FLAGS 已上移到文件顶部)
 
 .PHONY: lua lua-runner lua-test lua-sdl lua-clean
 lua: fxtk_lua_runner fxtk_lua
@@ -200,11 +240,8 @@ lua-runner: fxtk_lua_runner
 lua-clean:
 	rm -f fxtk_lua fxtk_lua_runner test/lua_host_sdl
 
-fxtk_lua_runner: $(SOKOL_CORE) $(WIN_SRC) ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c \
-                 $(LUA_HOST) $(LUA_BIND) $(LUA_CORE)
-	gcc $(CFLAGS) $(LUA_FLAGS) $(INC) -I../bindings/lua $(LUA_INC) $(SOKOL_INC) $(SOKOL_CORE) $(WIN_SRC) \
-	    ../drivers/fxtk_sokol_driver.c ../drivers/fxtk_font_stb.c $(LUA_HOST) $(LUA_BIND) $(LUA_CORE) \
-	    -o $@ $(LDFLAGS) $(SOKOL_LIBS)
+fxtk_lua_runner: $(CORE_OBJ) $(SOKOL_GL_OBJ) $(LUA_BIND_OBJ) $(LUA_OBJ)
+	gcc $(CFLAGS) $(LUA_FLAGS) $^ -o $@ $(LDFLAGS) $(SOKOL_LIBS)
 
 # 兼容名: 同一份二进制(脚本在运行时加载)，老脚本/文档里的 ./fxtk_lua 继续可用。
 fxtk_lua: fxtk_lua_runner
@@ -220,6 +257,32 @@ test/lua_host_sdl: $(CORE) $(HDRS) ../drivers/fxtk_sdl_driver.c ../bindings/lua/
 # 绑定自检：无头跑 demo-main/test/lua_test.lua，断言绑定/回调/绘制链路。
 lua-test: test/lua_host_sdl
 	SDL_VIDEODRIVER=dummy FXTK_SCRIPT=test/lua_test.lua ./test/lua_host_sdl
+
+# ---- v2.5.6: 增量构建规则 (对象清单已上移到文件顶部) ----
+$(BUILD)/core/%.o: ../components/fxtk/%.c $(ALL_CORE_HDRS)
+	@mkdir -p $(@D)
+	gcc $(CFLAGS) $(INC) -c $< -o $@
+
+$(BUILD)/drv/%.o: ../drivers/%.c $(ALL_CORE_HDRS)
+	@mkdir -p $(@D)
+	gcc $(CFLAGS) $(INC) $(SOKOL_INC) -c $< -o $@
+
+$(BUILD)/app/%.o: %.c $(ALL_CORE_HDRS)
+	@mkdir -p $(@D)
+	gcc $(CFLAGS) $(INC) $(SOKOL_INC) -c $< -o $@
+
+$(BUILD)/lua/%.o: ../third_party/lua/src/%.c
+	@mkdir -p $(@D)
+	gcc $(CFLAGS) $(LUA_FLAGS) $(LUA_INC) -c $< -o $@
+
+$(BUILD)/lua/fxtk_lua.o: ../bindings/lua/fxtk_lua.c $(ALL_CORE_HDRS)
+	@mkdir -p $(@D)
+	gcc $(CFLAGS) $(LUA_FLAGS) $(INC) -I../bindings/lua $(LUA_INC) $(SOKOL_INC) -c $< -o $@
+
+# main_lua.c 需要 Lua 头文件 + bindings 头文件 → 不能走通用 drv 规则, 单独一条
+$(BUILD)/lua/main_lua.o: ../drivers/main_lua.c $(ALL_CORE_HDRS)
+	@mkdir -p $(@D)
+	gcc $(CFLAGS) $(LUA_FLAGS) $(INC) -I../bindings/lua $(LUA_INC) $(SOKOL_INC) -c $< -o $@
 
 sokol: fxtk_sim
 
@@ -238,6 +301,47 @@ test/bench: test/bench.c $(CORE) $(HDRS) ../drivers/fxtk_sdl_driver.c app.c app_
 	    app.c app_desktop.c raymarch.c gpu_raymarch.c \
 	    test/bench.c -o $@ $(LDFLAGS) $(LIBS)
 
+# ---- v2.5.6: 无头渲染一组画布示例 (CI 用来抓 resize 崩溃) ----
+# CI 里原先内联手抄了整份核心源清单, 与 Makefile 的 CORE 漂移过一次 (漏 gesture/par/flex/svg/wm
+# 导致符号未定义)。这里从 components/fxtk/ 自动发现 (与 tools/golden.sh 同一做法),
+# 新增模块自动带上, 不再需要谁记得改这里。
+CANVAS_CORE := $(shell ls ../components/fxtk/fxtk*.c | grep -v 'fxtk_font\.c$$')
+.PHONY: headless-canvas
+headless-canvas:
+	for e in canvas_01_primitives canvas_02_immediate canvas_03_offscreen canvas_04_custom_widget canvas_05_image canvas_06_interact canvas_07_aa; do \
+	  gcc -O2 $(INC) test/render_canvas.c ../examples/canvas/$$e.c $(CANVAS_CORE) -o /tmp/rc_$$e -lm || exit 1; \
+	  /tmp/rc_$$e 480 272 /tmp/$$e.ppm || { echo "render crash at 480: $$e"; exit 1; }; \
+	  /tmp/rc_$$e 200 112 /tmp/$${e}_small.ppm || { echo "render crash at 200: $$e"; exit 1; }; \
+	done
+	@echo "headless canvas render OK"
+
+# ---- v2.5.6: -Wall -Wextra 告警报告 (非阻断; 复用 CORE 清单避免手抄漂移) ----
+.PHONY: warnings-check
+warnings-check:
+	@set +e; \
+	gcc -O2 -Wall -Wextra -o /dev/null $(INC) $(CORE) $(DRIVER) raymarch.c gpu_raymarch.c app.c app_desktop.c \
+	  $(LIBS) 2> /tmp/fxtk_warnings.txt; \
+	if [ $$? -ne 0 ]; then echo "❌ Warnings step: compile failed"; tail -30 /tmp/fxtk_warnings.txt; exit 1; fi; \
+	n=$$(grep -c 'warning:' /tmp/fxtk_warnings.txt); \
+	echo "Total -Wall -Wextra warnings: $$n (advisory only)"
+
+# ---- v2.5.6: 裁剪开关一致性自检 ----
+# 起因: autotrim 以前只验证过"全开"编译; 关闭 TAB 时 fxtk_anim_reset 仍裸引用 s_ta_w → 直接编译失败;
+# 而 autotrim 的正则 bug 又会把【用到】的控件也判成未使用裁掉 —— 两者叠加让 --autotrim 静默产出空界面。
+# 这里 1) 全关所有控件开关仍能编译核心; 2) autotrim 对已知用 button/label/checkbox 的示例不得误裁。
+.PHONY: trim-check
+trim-check:
+	@OFF="-DFXTK_WIDGET_BUTTON=0 -DFXTK_WIDGET_LABEL=0 -DFXTK_WIDGET_GRID=0 -DFXTK_WIDGET_CANVAS=0 \
+	  -DFXTK_WIDGET_SLIDER=0 -DFXTK_WIDGET_PROGRESS=0 -DFXTK_WIDGET_CHECKBOX=0 -DFXTK_WIDGET_PANEL=0 \
+	  -DFXTK_WIDGET_TAB=0 -DFXTK_WIDGET_IMAGE=0 -DFXTK_WIDGET_TEXTEDIT=0 -DFXTK_WIDGET_LIST=0 -DFXTK_WIDGET_DROP=0"; \
+	  for f in fxtk.c fxtk_widgets.c fxtk_extra.c fxtk_draw.c; do \
+	    gcc -Os $$OFF $(INC) -c ../components/fxtk/$$f -o /tmp/fxtk_trim_$$f.o || exit 1; \
+	  done; \
+	  T=$$(../tools/autotrim.sh ../examples/ex01_hello.c); \
+	  case "$$T" in *-DFXTK_WIDGET_BUTTON=0*|*-DFXTK_WIDGET_LABEL=0*|*-DFXTK_WIDGET_CHECKBOX=0*) \
+	    echo "trim-check FAIL: autotrim 误裁了示例用到的控件: $$T"; exit 1;; esac; \
+	  echo "trim-check OK: 全关裁剪下核心可编译, autotrim 不误裁用到的控件"
+
 # ---- 示例 (examples/ex*.c 与 examples/canvas/canvas_*.c) ----
 ex%: ../examples/ex%.c $(CORE) $(HDRS) $(DRIVER)
 	gcc $(CFLAGS) $(INC) $(CORE) $(DRIVER) $< -o $@ $(LDFLAGS) $(LIBS_EX)
@@ -245,9 +349,15 @@ ex%: ../examples/ex%.c $(CORE) $(HDRS) $(DRIVER)
 canvas%: ../examples/canvas/canvas%.c $(CORE) $(HDRS) $(DRIVER)
 	gcc $(CFLAGS) $(INC) $(CORE) $(DRIVER) $< -o $@ $(LDFLAGS) $(LIBS_EX)
 
+# v2.5.6: 补全 clean —— 此前漏掉 asan/stub 变体、各模块自检、mw_interactive、增量构建 .o 目录,
+# 导致测试二进制残留、build/ 里的旧 .o 继续被增量构建复用。
 clean:
-	rm -f fxtk_sim fxtk_sim_en fxtk_sim_sokol fxtk_lua fxtk_lua_runner test/headless_test test/headless_test_stub test/bench \
-	      test/lua_host_sdl ex[0-9][0-9]_* canvas_[0-9][0-9]_* dist/win/*.exe fxtk_win.exe
+	rm -rf $(BUILD)
+	rm -f fxtk_sim fxtk_sim_en fxtk_sim_sokol fxtk_sim_sdl fxtk_sim_sdl_en fxtk_sim_dbg fxtk_lua fxtk_lua_runner \
+	      test/headless_test test/headless_test_stub test/headless_test_asan test/headless_test_asan_stub \
+	      test/bench test/lua_host_sdl test/par_test test/uiscale_test test/gesture_test test/flex_test \
+	      test/svg_test test/window_test test/v25_showcase test/v25_evidence test/rt_resize \
+	      mw_interactive ex[0-9][0-9]_* canvas_[0-9][0-9]_* dist/win/*.exe fxtk_win.exe
 
 # ---- v2.4 金图回归 (无头, 可进 CI) ----
 golden:

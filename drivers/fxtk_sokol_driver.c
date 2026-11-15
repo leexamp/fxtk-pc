@@ -53,17 +53,27 @@
  * 结果整屏全黑(踩过两次: 第一次漏了 attr, 第二次字段顺序反了)。 */
 typedef struct { float x, y, u, v; uint32_t rgba; float s0, s1, s2, s3; } vtx_t;
 
-#define VB_MAX   262144     /* 顶点数上限 (~4MB) */
-#define CMD_MAX  65536   /* v2.6: 多窗口/复杂帧会超过 8192, 超限原先静默丢绘制 */
+/* v2.5.6 内存: 顶点/索引/命令缓冲改为【按需增长】。
+ * 此前静态预分配 26 万顶点(9MB) + 52 万索引(2MB), GPU 侧也按同尺寸建缓冲 —— 每个 app 常驻约 11MB
+ * 显存/BSS; 而实测演示峰值仅 5k~15k 顶点 (约 20~50 倍超配)。现在从很小一块起步, 帧内需求超过容量
+ * 才翻倍(到硬上限), GPU 缓冲也只在增长时重建。像素/绘制顺序完全不变。 */
+#define VB_MAX   262144     /* 顶点硬上限 */
+#define IB_MAX   (VB_MAX * 2)
+#define CMD_MAX  65536
 #define TEX_MAX  256        /* 每帧可用的纹理绑定数(文本纹理等) */
+/* 初始容量 (顶点/索引/命令); 测试可 -DVB_INIT=1024 等强制走增长路径 */
+#ifndef VB_INIT
+#define VB_INIT 16384
+#endif
+#ifndef IB_INIT
+#define IB_INIT (VB_INIT * 2)
+#endif
+#ifndef CMD_INIT
+#define CMD_INIT 1024
+#endif
 
-static vtx_t  s_vb[VB_MAX];
-static int    s_vb_n = 0;
-/* 索引绘制: sokol 的 sg_draw(base_element) 对【非索引】绘制不做顶点偏移, 因此批次偏移
- * 必须走索引缓冲(索引偏移 = base_element)。这也是 sokol 的惯用做法。 */
-#define IB_MAX  (VB_MAX * 2)
-static uint32_t s_ib[IB_MAX];
-static int      s_ib_n = 0;
+static vtx_t   *s_vb = NULL;  static int s_vb_n = 0, s_vb_cap = 0;
+static uint32_t *s_ib = NULL; static int s_ib_n = 0, s_ib_cap = 0;
 
 typedef struct {
     int  first, count;
@@ -75,9 +85,45 @@ typedef struct {
     float time;             /* pip=2 光追用 */
 } cmd_t;
 static int s_clip_x1 = 0, s_clip_y1 = 0, s_clip_x2 = 32767, s_clip_y2 = 32767;
-static cmd_t  s_cmd[CMD_MAX];
-static int    s_cmd_n = 0;
+static cmd_t *s_cmd = NULL; static int s_cmd_n = 0, s_cmd_cap = 0;
+static int s_vbuf_cap = 0, s_ibuf_cap = 0;   /* GPU 缓冲容量(顶点/索引个数) */
 static sg_buffer s_ibuf;
+
+static int vb_reserve(int need)
+{
+    if (need <= s_vb_cap) return 1;
+    if (need > VB_MAX) return 0;
+    int nc = s_vb_cap ? s_vb_cap : VB_INIT;
+    while (nc < need) nc <<= 1;
+    if (nc > VB_MAX) nc = VB_MAX;
+    vtx_t *p = (vtx_t *)realloc(s_vb, (size_t)nc * sizeof(vtx_t));
+    if (!p) return 0;
+    s_vb = p; s_vb_cap = nc;
+    return nc >= need;
+}
+static int ib_reserve(int need)
+{
+    if (need <= s_ib_cap) return 1;
+    if (need > IB_MAX) return 0;
+    int nc = s_ib_cap ? s_ib_cap : IB_INIT;
+    while (nc < need) nc <<= 1;
+    if (nc > IB_MAX) nc = IB_MAX;
+    uint32_t *p = (uint32_t *)realloc(s_ib, (size_t)nc * sizeof(uint32_t));
+    if (!p) return 0;
+    s_ib = p; s_ib_cap = nc;
+    return nc >= need;
+}
+static int cmd_reserve(void)
+{
+    if (s_cmd_n < s_cmd_cap) return 1;
+    if (s_cmd_cap >= CMD_MAX) return 0;
+    int nc = s_cmd_cap ? s_cmd_cap * 2 : CMD_INIT;
+    if (nc > CMD_MAX) nc = CMD_MAX;
+    cmd_t *p = (cmd_t *)realloc(s_cmd, (size_t)nc * sizeof(cmd_t));
+    if (!p) return 0;
+    s_cmd = p; s_cmd_cap = nc;
+    return s_cmd_n < s_cmd_cap;
+}
 
 /* 每帧的纹理槽位: 记录 sg_image + 尺寸, 用于构造 bindings */
 typedef struct { sg_image img; sg_view view; sg_sampler smp; int w, h; } tex_slot_t;
@@ -294,7 +340,7 @@ static int cmd_can_merge(int pip, int tex)
 
 static int cmd_new(int pip, int tex)
 {
-    if (s_cmd_n >= CMD_MAX) return -1;
+    if (!cmd_reserve()) return -1;
     s_cmd[s_cmd_n].first = s_ib_n;
     s_cmd[s_cmd_n].count = 0;
     s_cmd[s_cmd_n].pip = pip;
@@ -325,7 +371,7 @@ static inline uint32_t rgba_pack(uint32_t rgb)
 static void vtx_push_sdf(float x, float y, float u, float v, uint32_t c,
                         float s0, float s1, float s2, float s3)
 {
-    if (s_vb_n >= VB_MAX) return;
+    if (!vb_reserve(s_vb_n + 1)) return;
     float rw = (float)(s_w > 0 ? s_w : 1), rh = (float)(s_h > 0 ? s_h : 1);
     s_vb[s_vb_n].x = x / rw * 2.0f - 1.0f;
     s_vb[s_vb_n].y = y / rh * 2.0f - 1.0f;
@@ -337,7 +383,7 @@ static void vtx_push_sdf(float x, float y, float u, float v, uint32_t c,
 
 static void vtx_push(float x, float y, float u, float v, uint32_t c)
 {
-    if (s_vb_n >= VB_MAX) return;
+    if (!vb_reserve(s_vb_n + 1)) return;
     float rw = (float)(s_w > 0 ? s_w : 1), rh = (float)(s_h > 0 ? s_h : 1);
     s_vb[s_vb_n].x = x / rw * 2.0f - 1.0f;
     /* sokol 的默认视口是 top-left 原点(内部会翻转), 因此 NDC 的 +1 对应窗口【下边】:
@@ -369,15 +415,18 @@ static void emit_round(int x1, int y1, int x2, int y2, int rad, int border, uint
     float hw = (fx1 - fx0) * 0.5f, hh = (fy1 - fy0) * 0.5f;
     if (rad * 2 > (int)(hw * 2)) rad = (int)hw;
     if (rad * 2 > (int)(hh * 2)) rad = (int)hh;
-    if (getenv("FXTK_SDFCMP")) emit_quad(0, -1, fx0, fy0, fx1, fy1, 0,0,0,0, 0xFF00FF00u);
+    /* 诊断环境变量是启动期开关, 进程内只读一次(热路径上 getenv 是线性扫.environ) */
+    static int sdfcmp = -1, sdfnomerge = -1;
+    if (sdfcmp < 0) { sdfcmp = getenv("FXTK_SDFCMP") != NULL; sdfnomerge = getenv("FXTK_SDFNOMERGE") != NULL; }
+    if (sdfcmp) emit_quad(0, -1, fx0, fy0, fx1, fy1, 0,0,0,0, 0xFF00FF00u);
     /* 与 emit_quad 同款合并: 相邻 SDF 四边形共用一条命令(否则一个控件一条 draw call) */
     /* 诊断开关: FXTK_SDFNOMERGE=1 → 每段 SDF 单独一条命令(用于判定"合并"是否为问题源头) */
-    int no_merge = getenv("FXTK_SDFNOMERGE") != NULL;
+    int no_merge = sdfnomerge;
     if (no_merge || !cmd_can_merge(3, -1)) {
         if (cmd_new(3, -1) < 0) return;
     }
     s_sdf_n++;
-    if (s_vb_n + 4 > VB_MAX || s_ib_n + 6 > IB_MAX) return;
+    if (!vb_reserve(s_vb_n + 4) || !ib_reserve(s_ib_n + 6)) return;
     cmd_t *cm = &s_cmd[s_cmd_n - 1];
     uint32_t b = (uint32_t)s_vb_n;
     float r = (float)rad, bw = (float)border;
@@ -397,7 +446,7 @@ static void emit_quad(int pip, int tex, float x0, float y0, float x1, float y1,
     if (!cmd_can_merge(pip, tex)) {   /* v2.4.2: 合并必须同时比较裁剪区, 否则跨区图元被 scissor 裁掉 */
         if (cmd_new(pip, tex) < 0) return;
     }
-    if (s_vb_n + 4 > VB_MAX || s_ib_n + 6 > IB_MAX) return;
+    if (!vb_reserve(s_vb_n + 4) || !ib_reserve(s_ib_n + 6)) return;
     cmd_t *cm = &s_cmd[s_cmd_n - 1];
     uint32_t b = (uint32_t)s_vb_n;
     vtx_push(x0, y0, u0, v0, c); vtx_push(x1, y0, u1, v0, c);
@@ -506,6 +555,10 @@ static void px_flush(void)
 static int drv_init(void)
 {
     { extern void fx_debug_log_selftest(void); fx_debug_log_selftest(); }   /* v2.4.2: 取证自检 */
+    /* v2.5.6: 重新初始化时释放上一轮的 CPU 批缓冲 (free(NULL) 无副作用), 避免重复 init 泄漏 */
+    free(s_vb); s_vb = NULL; s_vb_cap = 0; s_vb_n = 0;
+    free(s_ib); s_ib = NULL; s_ib_cap = 0; s_ib_n = 0;
+    free(s_cmd); s_cmd = NULL; s_cmd_cap = 0; s_cmd_n = 0;
     if (getenv("FXTK_NO_QUADGPU")) fx_sokol_driver.draw_image_quad = NULL;   /* A/B: 强制走 CPU 逆单应 */
     sg_desc desc = {0};
     /* 环境默认值与我们的管线保持一致: 2D UI 不需要深度缓冲。
@@ -539,12 +592,15 @@ static int drv_init(void)
         .min_filter = SG_FILTER_LINEAR, .mag_filter = SG_FILTER_LINEAR,
         .wrap_u = SG_WRAP_CLAMP_TO_EDGE, .wrap_v = SG_WRAP_CLAMP_TO_EDGE, .label = "fxtk-linear" });
 
+    /* v2.5.6: 先按初始容量建 GPU 缓冲; 帧内需求增长时在提交前重建(见 ensure_gpu_buffers) */
     s_vbuf = sg_make_buffer(&(sg_buffer_desc){
-        .size = sizeof(vtx_t) * VB_MAX, .usage.vertex_buffer = true, .usage.dynamic_update = true,
+        .size = sizeof(vtx_t) * VB_INIT, .usage.vertex_buffer = true, .usage.dynamic_update = true,
         .label = "fxtk-vertices" });
+    s_vbuf_cap = VB_INIT;
     s_ibuf = sg_make_buffer(&(sg_buffer_desc){
-        .size = sizeof(uint32_t) * IB_MAX, .usage.index_buffer = true, .usage.dynamic_update = true,
+        .size = sizeof(uint32_t) * IB_INIT, .usage.index_buffer = true, .usage.dynamic_update = true,
         .label = "fxtk-indices" });
+    s_ibuf_cap = IB_INIT;
 
     /* 顶点布局两端共用: pos(0) + uv(1) + color(2) */
     sg_vertex_layout_state layout = {0};
@@ -761,22 +817,25 @@ static void drv_push_pixels(const uint32_t *px, uint32_t n)
 {
     fb_ensure();
     if (!s_fb || !cur_w) return;
+    uint32_t col = cur_idx % cur_w, row = cur_idx / cur_w;   /* 增量推进, 免每像素除法/取模 */
     for (uint32_t i = 0; i < n; i++) {
-        int x = cur_x0 + (int)(cur_idx % cur_w);
-        int y = cur_y0 + (int)(cur_idx / cur_w);
-        cur_idx++;
-        if (x < 0 || y < 0 || x >= s_fb_w || y >= s_fb_h) continue;
-        s_fb[(size_t)y * s_fb_w + x] = 0xFF000000u | (px[i] & 0xFFFFFFu);
-        if (!s_dirty) { s_dx0 = s_dx1 = x; s_dy0 = s_dy1 = y; s_dirty = 1; }
-        else {
-            if (x < s_dx0) s_dx0 = x;
-            if (x > s_dx1) s_dx1 = x;
-            if (y < s_dy0) s_dy0 = y;
-            if (y > s_dy1) s_dy1 = y;
-            if (s_dx1 >= s_fb_w) s_dx1 = s_fb_w - 1;
-            if (s_dy1 >= s_fb_h) s_dy1 = s_fb_h - 1;
+        int x = cur_x0 + (int)col;
+        int y = cur_y0 + (int)row;
+        if (x >= 0 && y >= 0 && x < s_fb_w && y < s_fb_h) {
+            s_fb[(size_t)y * s_fb_w + x] = 0xFF000000u | (px[i] & 0xFFFFFFu);
+            if (!s_dirty) { s_dx0 = s_dx1 = x; s_dy0 = s_dy1 = y; s_dirty = 1; }
+            else {
+                if (x < s_dx0) s_dx0 = x;
+                if (x > s_dx1) s_dx1 = x;
+                if (y < s_dy0) s_dy0 = y;
+                if (y > s_dy1) s_dy1 = y;
+                if (s_dx1 >= s_fb_w) s_dx1 = s_fb_w - 1;
+                if (s_dy1 >= s_fb_h) s_dy1 = s_fb_h - 1;
+            }
         }
+        if (++col == cur_w) { col = 0; row++; }
     }
+    cur_idx += n;
 }
 
 static void drv_hold_begin(void) {}
@@ -787,7 +846,9 @@ static void drv_fill_rect(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, ui
     if (x0 > x1 || y0 > y1) return;
     /* v2.4.2 驱动侧取证: 请求矩形 vs 实际发出的四边形 + 顶点/命令区间。
      * 用于"合法参数却被画成横贯长条"的现象(用户实测: 拖角点出界后出现橙色横带)。 */
-    int dbg = getenv("FXTK_RECTDBG") ? 1 : 0;
+    static int rectdbg = -1;
+    if (rectdbg < 0) rectdbg = getenv("FXTK_RECTDBG") != NULL;
+    int dbg = rectdbg;
 #if FXTK_DEBUG_LOG_DRV
     dbg = 1;
 #endif
@@ -811,8 +872,10 @@ static void drv_draw_line(int x1, int y1, int x2, int y2, uint32_t c)
     uint32_t col = 0xFF000000u | (c & 0xFFFFFFu);
     float ax = x1 + nx, ay = y1 + ny, bx = x2 + nx, by = y2 + ny;
     float cx = x2 - nx, cy = y2 - ny, ex = x1 - nx, ey = y1 - ny;
-    if (cmd_new(0, -1) < 0) return;
-    if (s_vb_n + 4 > VB_MAX || s_ib_n + 6 > IB_MAX) return;
+    if (!cmd_can_merge(0, -1)) {   /* 与 emit_quad 同款合并: 连续线段共用一条命令 */
+        if (cmd_new(0, -1) < 0) return;
+    }
+    if (!vb_reserve(s_vb_n + 4) || !ib_reserve(s_ib_n + 6)) return;
     cmd_t *cm = &s_cmd[s_cmd_n - 1];
     uint32_t b = (uint32_t)s_vb_n;
     vtx_push(ax, ay, 0, 0, col); vtx_push(bx, by, 0, 0, col);
@@ -825,8 +888,10 @@ static void drv_draw_line(int x1, int y1, int x2, int y2, uint32_t c)
 static void drv_fill_tri(int x1, int y1, int x2, int y2, int x3, int y3, uint32_t c)
 {
     uint32_t col = 0xFF000000u | (c & 0xFFFFFFu);
-    if (cmd_new(0, -1) < 0) return;
-    if (s_vb_n + 3 > VB_MAX || s_ib_n + 3 > IB_MAX) return;
+    if (!cmd_can_merge(0, -1)) {
+        if (cmd_new(0, -1) < 0) return;
+    }
+    if (!vb_reserve(s_vb_n + 3) || !ib_reserve(s_ib_n + 3)) return;
     cmd_t *cm = &s_cmd[s_cmd_n - 1];
     uint32_t b = (uint32_t)s_vb_n;
     vtx_push((float)x1, (float)y1, 0, 0, col);
@@ -856,8 +921,10 @@ static void drv_draw_line_aa(int x1, int y1, int x2, int y2, int w, uint32_t c)
     float cx = (x1 + x2) * 0.5f, cy = (y1 + y2) * 0.5f;
     float ex = ux * (hl + pad), ey = uy * (hl + pad);   /* 轴向端点(含端帽空间) */
     float nx = px * pad, ny = py * pad;                 /* 法向半宽空间 */
-    if (cmd_new(3, -1) < 0) return;
-    if (s_vb_n + 4 > VB_MAX || s_ib_n + 6 > IB_MAX) return;
+    if (!cmd_can_merge(3, -1)) {   /* 羽化线与 SDF 圆角同管线, 可合并 */
+        if (cmd_new(3, -1) < 0) return;
+    }
+    if (!vb_reserve(s_vb_n + 4) || !ib_reserve(s_ib_n + 6)) return;
     cmd_t *cm = &s_cmd[s_cmd_n - 1];
     uint32_t b = (uint32_t)s_vb_n;
     float lx = hl + pad, ly = pad;           /* 局部坐标半宽(片元里用) */
@@ -978,7 +1045,7 @@ static void drv_draw_image_quad(const uint32_t *px, int w, int h, const float *x
     int slot = img_upload(px, w, h, 0);
     if (slot < 0) return;
     if (cmd_new(4, slot) < 0) return;
-    if (s_vb_n + 4 > VB_MAX || s_ib_n + 6 > IB_MAX) return;
+    if (!vb_reserve(s_vb_n + 4) || !ib_reserve(s_ib_n + 6)) return;
     cmd_t *cm = &s_cmd[s_cmd_n - 1];
     uint32_t b = (uint32_t)s_vb_n;
     const uint32_t col = 0xFFFFFFFFu;
@@ -1237,6 +1304,36 @@ static void canvas_ensure(void)
     s_need_clear = 1;
 }
 
+/* v2.5.6: 帧内顶点/索引用量超过当前 GPU 缓冲容量时, 提交前重建为更大的缓冲(只增不减)。
+ * 只在真的需要更大缓冲时发生, 稳态不再重建; 容量上限即 VB_MAX/IB_MAX。 */
+static void ensure_gpu_buffers(void)
+{
+    if (s_vb_n > s_vbuf_cap) {
+        int nc = s_vbuf_cap ? s_vbuf_cap : VB_INIT;
+        while (nc < s_vb_n) nc <<= 1;
+        if (nc > VB_MAX) nc = VB_MAX;
+        if (nc > s_vbuf_cap) {
+            sg_destroy_buffer(s_vbuf);
+            s_vbuf = sg_make_buffer(&(sg_buffer_desc){
+                .size = sizeof(vtx_t) * nc, .usage.vertex_buffer = true, .usage.dynamic_update = true,
+                .label = "fxtk-vertices" });
+            s_vbuf_cap = nc;
+        }
+    }
+    if (s_ib_n > s_ibuf_cap) {
+        int nc = s_ibuf_cap ? s_ibuf_cap : IB_INIT;
+        while (nc < s_ib_n) nc <<= 1;
+        if (nc > IB_MAX) nc = IB_MAX;
+        if (nc > s_ibuf_cap) {
+            sg_destroy_buffer(s_ibuf);
+            s_ibuf = sg_make_buffer(&(sg_buffer_desc){
+                .size = sizeof(uint32_t) * nc, .usage.index_buffer = true, .usage.dynamic_update = true,
+                .label = "fxtk-indices" });
+            s_ibuf_cap = nc;
+        }
+    }
+}
+
 void fxtk_sokol_frame(int fb_w, int fb_h)
 {
     uint32_t t_sub0 = now_us();
@@ -1252,15 +1349,32 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
     }
     px_flush();
     /* 自检 B: FXTK_SOKOL_TEST=1 时追加红/绿两个实心块 (必须在 update 之前) */
-    if (getenv("FXTK_SOKOL_TEST")) {
+    static int sokol_test = -1;
+    if (sokol_test < 0) sokol_test = getenv("FXTK_SOKOL_TEST") != NULL;
+    if (sokol_test) {
         emit_quad(0, -1, 40, 40, 240, 190, 0, 0, 0, 0, 0xFFFF0000u);
         emit_quad(0, -1, 300, 300, 500, 450, 0, 0, 0, 0, 0xFF00FF00u);
     }
+    ensure_gpu_buffers();
     if (s_vb_n > 0) sg_update_buffer(s_vbuf, &(sg_range){ s_vb, (size_t)s_vb_n * sizeof(vtx_t) });
     if (s_ib_n > 0) sg_update_buffer(s_ibuf, &(sg_range){ s_ib, (size_t)s_ib_n * sizeof(uint32_t) });
+    {   /* FXTK_VBSTAT: 记录每帧顶点/索引/命令峰值 (选缓冲容量用) */
+        static int on = -1, pv = 0, pi = 0, pc = 0, n = 0;
+        if (on < 0) on = getenv("FXTK_VBSTAT") != NULL;
+        if (on) {
+            if (s_vb_n > pv) pv = s_vb_n; if (s_ib_n > pi) pi = s_ib_n; if (s_cmd_n > pc) pc = s_cmd_n;
+            if (++n % 60 == 0) { fprintf(stderr, "[vbstat] peak vtx=%d idx=%d cmd=%d (cap %d/%d/%d)\n", pv, pi, pc, VB_MAX, IB_MAX, CMD_MAX); pv = pi = pc = 0; }
+        }
+    }
 
     canvas_ensure();
-    /* --- 第 1 趟: 画进持久画布纹理 (LOAD 保留上一帧的静态内容) --- */
+    /* --- 第 1 趟: 画进持久画布纹理 (LOAD 保留上一帧的静态内容) ---
+     * 无新命令且无需清屏时整趟跳过: 画布纹理内容不变, begin/end pass 纯属浪费。 */
+#ifdef FXTK_MW
+    if (s_cmd_n > 0 || MW_NEED_CLEAR) {
+#else
+    if (s_cmd_n > 0 || s_need_clear) {
+#endif
     sg_begin_pass(&(sg_pass){
         .action = { .colors[0] = {
             #ifdef FXTK_MW
@@ -1329,6 +1443,7 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
         sg_draw(c->first, c->count, 1);   /* 索引绘制: base_element = 索引偏移 ✓ */
     }
     sg_end_pass();
+    }
 
     /* --- 第 2 趟: 把画布整屏贴到交换链 (交换链每帧覆盖, 用 CLEAR) --- */
     sg_begin_pass(&(sg_pass){
@@ -1349,7 +1464,9 @@ void fxtk_sokol_frame(int fb_w, int fb_h)
     sg_commit();
 
     { uint32_t d = now_us() - t_sub0; if (d > s_sub_us_max) s_sub_us_max = d; s_sub_us_sum += d; }
-    if (getenv("FXTK_STAT")) {
+    static int stat_on = -1;
+    if (stat_on < 0) stat_on = getenv("FXTK_STAT") != NULL;
+    if (stat_on) {
         static int n = 0;
         if ((n++ % 30) == 0) {
             uint32_t t = now_us();
@@ -1396,8 +1513,9 @@ int fxtk_ui_scale(void)
     extern int fxtk_drv_width(void);
     /* v2.5: 走共享的 fx_ui_scale_for(逻辑宽 × dpi)。开启 high_dpi 后本函数是
      * "UI 在 HiDPI 上大小正确"的另一半 —— 只开 high_dpi 而不改这里, UI 会缩一半。 */
-    return fx_ui_scale_for(fxtk_drv_width(), fx_dpi_scale(), g_uicap,
-                           getenv("FXTK_COMPACT") != NULL);
+    static int compact = -1;
+    if (compact < 0) compact = getenv("FXTK_COMPACT") != NULL;
+    return fx_ui_scale_for(fxtk_drv_width(), fx_dpi_scale(), g_uicap, compact);
 }
 void fxtk_drv_set_uicap(int p) { if (p >= 100) g_uicap = p; }
 

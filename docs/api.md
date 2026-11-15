@@ -15,9 +15,10 @@
   控件回调、`fx_wm_draw` 的内容回调里）。绘制只对"当前目标"生效（窗口画布 / 离屏画布）。
 - **控件**：用属性宏（C99 compound literal）创建，末尾自动补 `FX_ATTR_END`；例如
   `fx_widget_t *b = fx_button_new(pixel("20,20","140,64"), name("ok"), text("确定"), call(on_ok));`
-  （坐标用 `pixel("x1,y1","x2,y2")` / `percent(...)` / `grid(...)`，没有 `x()/y()/w()/h()` 这类属性。）
+  （坐标用 `pixel("x1,y1","x2,y2")` / `percent(...)` / `grid(...)`，没有 `x()/y()/w()/h()` 这类属性；
+  字面量坐标推荐 v2.5.6 的 `PIXEL(x1,y1,x2,y2)` / `PCT(x1,y1,x2,y2)`，参数个数写错编译期就失败。）
 - **缩放**：`pixel()` 用**设计稿坐标**（默认 480×272，`fx_set_design_pixel()` 可换成自己的稿尺寸）；
-  框架按 `fx_ui_scale()` 自动缩放控件；`fx_set_max_scale()` 限制上限；避免在业务里手算倍数。
+  框架按 `fxtk_ui_scale()` 自动缩放控件；`fx_set_max_scale()` 限制上限；避免在业务里手算倍数。
 - **能力查询**：后端可选能力（GPU 圆角、raymarch、图片 GPU 形变等）先查 `fx_*_available()`；缺失时是安全空操作。
 - **版本**：本文对应 v2.5；多窗口（`fxtk_win_*`）需要独立后端 `-DFXTK_MW`。
 
@@ -51,13 +52,14 @@
 | `name("id")` | 控件名（`fx_find` 用）。 |
 | `text("...")` | 显示文字（标签/按钮/文本框初值）。 |
 | `title("...")` | 标题（面板/窗口类控件）。 |
-| `x(v) / y(v) / w(v) / h(v)` | 位置尺寸（逻辑像素）；不写则由布局决定。 |
+| `pixel(a,b)` | 定位：`pixel("16,56","200,96")`，两个字符串（设计稿坐标，运行期解析）。 |
+| `PIXEL(x1,y1,x2,y2)` | 定位的数字版（v2.5.6，编译期检查，推荐写死坐标时用）。 |
+| `percent(a,b)` | 相对父容器的百分比：`percent("0.25,0.25","0.75,0.75")`。 |
+| `PCT(x1,y1,x2,y2)` | 百分比版（v2.5.6，数字入参 0~1）。 |
 | `color(c)` | 控件主色（填充/强调）。 |
 | `fgcolor(c)` | 前景/文字色（v2.3 起独立设置）。 |
 | `line(n) / row(n)` | 行/列步进位置（古早布局辅助）。 |
 | `grid1(name) / grid5(name,r1,c1,r2,c2)` | 网格定位（按 1/5 分格）。 |
-| `percent("50%")` | 百分比尺寸/位置（相对父容器）。 |
-| `pixel("12")` | 固定像素尺寸/位置（显式禁自动缩放）。 |
 | `call(cb)` | 事件回调 `fx_cb_t`（按钮点击/滑条变化等）。 |
 | `maxlen(n)` | 文本框最大字符数。 |
 | `image(img)` | 给图片控件绑定 `fx_image_t*`。 |
@@ -150,8 +152,9 @@
 | `fx_init(drv)` | 绑定驱动并初始化框架（应用启动一次）。 |
 | `fx_poll()` | 每帧处理输入/布局/绘制（驱动事件循环里调）。 |
 | `fx_frame_begin()` / `fx_frame_end()` | 手动控制一帧绘制区间（画布/自绘/多窗口时用）。 |
-| `fx_repaint()` / `fx_repaint_rect(x1,y1,x2,y2)` | 请求整帧/局部重绘（脏区）。 |
-| `fx_set_autorepaint(on)` | 每帧自动重绘（默认开；自绘/离屏时可关）。 |
+| `fx_repaint()` | 请求整帧重绘（下一帧全屏重画）。 |
+| `fx_repaint_rect(x1,y1,x2,y2)` | 请求局部重绘：矩形并入脏区表（`FX_DIRTY_MAX=8` 块，重叠自动合并，爆表退回整帧）；`fx_poll()` 在下一帧逐块重绘。**v2.5.6 起真实生效**并做过逐帧像素 A/B（见 README 验证表）；`FXTK_FULL_REDRAW=1` 可退回"任何请求都整帧"的旧行为。 |
+| `fx_set_autorepaint(on)` | 每帧自动重绘（**默认关**；开启后即使没有重绘请求也每帧整帧重绘，适合完全自绘/外部驱动的应用）。 |
 | `fx_band_index()` | 当前扫描带序号（分带渲染/调试）。 |
 | `fx_set_grid_lines(on)` / `fxtk_grid_lines_on()` | 布局网格线显示开关。 |
 | `fx_screenshot(path)` | 回读当前帧存 PNG（驱动需 read_pixels 钩子）。 |
@@ -199,6 +202,10 @@
 | `fxtk_font_set_size(size)` | 切默认字号。 |
 | `fxtk_text_width_size(size,t)` / `fxtk_font_height(size)` | 指定字号的宽/高。 |
 | `fxtk_draw_text_size(size,x,y,t,fg,bg)` | 指定字号画文本（MV/多窗口逐帧文字用这个，避免反复切字号）。 |
+
+> **字号语义（v2.5.6）**：所有 `size` 都是**逻辑像素字号**；最终设备字号 = 逻辑字号 × `fx_dpi_scale()`
+> （HiDPI 下物理帧缓冲翻倍，字号同步翻倍，否则文字相对控件过小）。测量与绘制共用同一换算，
+> `dpi=1` 时逐字节不变。属性 `line(n)` / `fx_set_fontsize` 同样按逻辑字号理解。
 ---
 
 ## 9. 画布（离屏）与 GPU 钩子
@@ -206,7 +213,7 @@
 | 函数 | 用法 |
 |---|---|
 | `fx_canvas_begin(cv)` / `fx_canvas_end()` | 在 `fx_canvas_new` 控件回调里开始/结束绘制：begin 后原点变画布左上，end 恢复。 |
-| `fx_canvas_enable_buf(cv)` / `fx_canvas_set_buf(w,on)` | 启用/关闭画布离屏缓冲：开启后每帧内容可保留（适合逐帧覆盖绘制的频谱/动画）。返回是否成功（内存不足会失败）。 |
+| `fx_canvas_enable_buf(cv)` / `fx_canvas_set_buf(w,on)` | 启用/关闭画布离屏缓冲：开启后每帧内容可保留（适合逐帧覆盖绘制的频谱/动画）。`fx_canvas_enable_buf` 返回分配是否成功（内存不足为 0）。 |
 | `fx_canvas_size(cv,&w,&h)` | 画布本地宽高（回调内取代写死尺寸）。 |
 | `fx_canvas_clear(cv,color)` | 一键把画布清成指定颜色（省去整屏 fill_rect 样板）。 |
 | `fx_raymarch_available()` | 后端是否支持 GPU 实时光线步进（sokol 后端有该钩子时为 1）。 |
@@ -400,7 +407,7 @@
 
 | 函数 | 用法 |
 |---|---|
-| `fxtk_win_init()` / `fxtk_win_shutdown()` | 初始化/关闭多窗口后端（应用启动/退出各一次）。 |
+| `fxtk_win_init()` | 初始化多窗口后端（应用启动一次）。**没有独立的 shutdown**：进程退出即回收；重建单窗用 `fxtk_win_destroy(id)`（见第 23 节）。 |
 | `fxtk_win_create(w,h,x,y,title)` | 创建窗口，返回 id（失败 -1）。 |
 | `fxtk_win_create_ex(w,h,x,y,title,flags)` | 同上带标志；`FXTK_WIN_BORDERLESS` = 无边框。 |
 | `fxtk_win_show(id,on)` / `fxtk_win_raise(id)` | 显示/隐藏、置顶。 |
@@ -424,7 +431,10 @@
 |---|---|
 | `fx_wm_add(title,style,cw,ch)` | 新建窗口，返回下标；`style`=FX_WM_LINUX/WIN11/TERM/PLAIN。 |
 | `fx_wm_set(idx,x,y,w,h)` | 窗口位置/尺寸（合成画布坐标）。 |
-| `fx_wm_set_style/set_title/set_z/set_focus/set_visible/set_rot` | 属性；`z` 大者在上，`rot` 暂未实现。 |
+| `fx_wm_set_style(idx,style)` / `fx_wm_set_title(idx,title)` | 改样式 / 标题。 |
+| `fx_wm_set_z(idx,z)` | z 序（大者在上）。 |
+| `fx_wm_set_focus(idx,on)` / `fx_wm_set_visible(idx,on)` | 焦点 / 显示隐藏。 |
+| `fx_wm_set_rot(idx,deg)` | 旋转（**暂未实现**，保留接口）。 |
 | `fx_wm_set_ui(k)` | 全局缩放（标题栏/边框/内容）。 |
 | `fx_wm_prepare(content,ud)` | 兼容保留，空操作。 |
 | `fx_wm_draw(content,ud)` | 渲染所有窗口并合成；`content(idx,cw,ch,ud)` 画每窗内容。 |
@@ -520,3 +530,59 @@ int main(void) {
 | `fxtk_win_backend_name()` | 当前多窗口后端名（日志/诊断）。 |
 | `fxtk_win_count()` | 已创建窗口数。 |
 | `fxtk_win_destroy(id)` | 销毁指定窗口（通常只在退出/重建时用；关窗语义见 [multi-window.md](multi-window.md)）。 |
+| `fxtk_i16(v)` / `fxtk_pct_q(v)` | `PIXEL()/PCT()` 宏内部用的钳位 helper：int16 设计坐标 / 0~1 比例→千分比（NaN 归 0，越界钳位）。 |
+| `fx_fs_pick_dir(out,cap)` / `fx_fs_list(dir,out,max)` | `fxtk_fs.h` 的旧名兼容薄壳（分别转发 `fx_backend_pick_dir` / `fx_dir_list`）。 |
+
+---
+
+## 24. 运行时环境变量（FXTK_*）
+
+> 除特别注明外都在进程启动时读取一次；未设置即默认行为。**框架级**变量对所有应用生效，
+> **演示/测试钩子**只被 `demo-main/` 使用（CI 与截图回归依赖它们）。
+
+### 24.1 显示 / 缩放 / 主题
+
+| 变量 | 作用 |
+|---|---|
+| `FXTK_AA=0/1/2` | 控件 SDF 抗锯齿档位（`fx_init` 读取；等价 `fx_set_widget_aa`，显式调用优先）。 |
+| `FXTK_HIDPI=0` | sokol 关闭 high_dpi（帧缓冲用逻辑像素，界面会糊但省显存；默认开）。与 dpi 字体换算配对。 |
+| `FXTK_DPI=<n>` | **诊断钩子**：强制 dpi 比例（0.5–8），用于在普通屏/无头环境复现 HiDPI 问题。 |
+| `FXTK_WIN=WxH` | 指定 sokol 初始窗口尺寸（在窗口创建前解析）。 |
+| `FXTK_COMPACT=1` | 紧凑模式：UI 缩放不封顶、列表行高上限放宽到 ≥32。 |
+| `FXTK_TOUCH=1` | 强制按触摸屏处理（启用拖动滚动/惯性与手势判定）。 |
+| `FXTK_FONT=<path>` | 指定字体文件（两个字体后端都认）。 |
+| `FXTK_APP_DIR=<dir>` | 覆盖应用数据目录（偏好/日志落盘位置）。 |
+
+### 24.2 重绘 / 渲染诊断
+
+| 变量 | 作用 |
+|---|---|
+| `FXTK_FULL_REDRAW=1` | 任何重绘请求都提升为整帧（退回脏区恢复前的旧行为；诊断对照/兜底）。 |
+| `FXTK_NOANIM=1` | 关闭控件动画（演示/基准/金图的确定性）。 |
+| `FXTK_STAT=1` | 后端每秒打印帧统计（fps / 控件数 / 顶点/命令/纹理槽 / 排队与提交耗时等）。 |
+| `FXTK_VBSTAT=1` | sokol 批缓冲每 60 帧打印一次顶点/索引/命令**峰值**（选容量/查丢绘制用）。 |
+| `FXTK_RECTDBG=1` | 可疑矩形/半径诊断日志（越界、超大色块等，每个签名只报一次）。 |
+| `FXTK_SDFCMP=1` / `FXTK_SDFNOMERGE=1` | SDF 圆角的对照色块 / 禁用同批合并（定位"合并导致问题"）。 |
+| `FXTK_NO_QUADGPU=1` | 图片四边形强制走 CPU 逆单应（A/B GPU 路径）。 |
+| `FXTK_IMEDBG=1` | 打印输入法候选窗坐标。 |
+
+### 24.3 演示 / 测试钩子（demo-main）
+
+| 变量 | 作用 |
+|---|---|
+| `FXTK_SCRIPT=<lua>` | Lua runner 启动脚本（`fxtk_lua_runner`）。 |
+| `FXTK_IMPORT=<img>` | 启动时导入图片到"图片"页。 |
+| `FXTK_GPU=1` | 启用演示的 EGL/GLES2 GPU 光追线程（3D 页）。 |
+| `FXTK_NOVSYNC=1` | 关垂直同步（帧率/基准测量）。 |
+| `FXTK_BENCH=1` | SDL 演示基准模式（关 vsync）。 |
+| `FXTK_MAXW=<px>` | SDL 演示窗口最大边长（防大窗口撑爆渲染目标）。 |
+| `FXTK_CLICK=x,y` / `FXTK_CLICKS="x,y,帧;..."` | 注入点击事件（帧号可省略）。 |
+| `FXTK_DRAG="x1,y1,x2,y2,起帧,止帧"` / `FXTK_DRAG_LOOP=1` | 注入拖动（循环拖动）。 |
+| `FXTK_RESIZE=WxH` | 运行期注入一次窗口 resize。 |
+| `FXTK_SHOT=<png>` / `FXTK_SHOT_AT=<帧>` | 指定帧截图。 |
+| `FXTK_SHOT2=<png>` / `FXTK_SHOT2_AT=<帧>` | 第二次截图（前后对比）。 |
+| `FXTK_SHOT_SEQ="前缀,起帧,止帧"` | 逐帧导出 PNG（脏区 A/B 逐像素验证用）。 |
+| `FXTK_QUIT_AFTER=<帧>` | 跑够帧数自动退出（CI/基准）。 |
+| `FXTK_GPU_BENCH=<帧>` / `FXTK_GPU_BENCH_AT=<帧>` | sokol GPU 路径帧时间基准。 |
+| `FXTK_SOKOL_TEST=1` | 驱动自检：追加红/绿两个实心块。 |
+| `FXTK_MW_DEBUG=1` | 多窗口后端调试日志。 |

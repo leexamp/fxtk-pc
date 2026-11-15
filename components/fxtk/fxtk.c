@@ -28,6 +28,7 @@ static fx_widget_t *s_parent = NULL;
 static int s_touch_prev = 0;
 static int s_last_tx = -1, s_last_ty = -1;
 static int s_repaint = 1;
+static int s_anim_canvas_hint = 0;   /* 创建过 anim 画布就置位: fx_poll 每帧标脏扫描的门槛(无画布时零开销) */
 static int s_boot = 3;   /* 前3帧强制全屏, 杜绝偶发启动黑屏 */
 static int s_full = 0;
 static int s_autorepaint = 1;
@@ -246,6 +247,11 @@ static int widget_in_active_page(fx_widget_t *w)
 }
 
 /* ================= 控件池 ================= */
+/* 晚建 grid 的悬案子件登记处: 创建瞬间 grid 不存在时挂起, 之后每次创建/全量布局重试;
+ * 超过容量时创建点退回全量布局兜底, 不会丢解析。 */
+#define GRID_PENDING_MAX 64
+static fx_widget_t *s_grid_pending[GRID_PENDING_MAX];
+static int s_grid_pending_n = 0;
 static int s_alloc_hint = 0;    /* v2.3: 分配游标 —— 旧实现每次都从 0 扫, 压测页每帧建控件时是 O(n²) */
 static int s_widget_live = 0;   /* v2.3: 存活计数 —— 旧 fxtk_widget_count 每次扫 4096 项 (~40μs/次) */
 fx_widget_t *fxtk_alloc(void)
@@ -342,7 +348,7 @@ void fxtk_lower(fx_widget_t *w)
     w->parent = p; w->sibling = p->child; p->child = w;
 }
 int fxtk_widget_count(void) { return s_widget_live; }
-void fxtk_pool_reset_count(void) { s_widget_live = 0; s_alloc_hint = 0; }   /* fx_init 清池后同步 */
+void fxtk_pool_reset_count(void) { s_widget_live = 0; s_alloc_hint = 0; s_pool_high = 0; s_grid_pending_n = 0; s_anim_canvas_hint = 0; }   /* fx_init 清池后同步 */
 
 /* v2.4: 截图 —— 驱动回读当前帧, 统一走 backends 的 PNG 编码 (stb, 零额外依赖) */
 int fx_screenshot(const char *path)
@@ -369,18 +375,48 @@ int fx_screenshot(const char *path)
 }
 
 /* ================= 属性构造器 ================= */
+/* v2.5.6: 字符串坐标解析失败/越界不再【静默】。
+ * 旧行为: pixel("16;56", ...) 解析失败 -> 属性保持 (0,0,0,0) -> 控件悄悄缩成原点,
+ * 编译不报错、运行不报错, 只能靠肉眼在屏幕上找。现在统一走 fx_log(FX_LOG_WARN),
+ * 解析失败仍返回 0 保持旧行为(不崩溃), 但日志里能直接看到是哪个字符串写错了。
+ * 字面量坐标建议改用 PIXEL()/PCT() 宏: 参数个数写错在【编译期】就失败。 */
 static int parse_xy(const char *s, int16_t *a, int16_t *b)
-{ int x, y;
-if (sscanf(s, "%d,%d", &x, &y) != 2) return 0; *a = (int16_t)x; *b = (int16_t)y; return 1; }
+{
+    int x, y;
+    if (!s || sscanf(s, "%d,%d", &x, &y) != 2) {
+        fx_log(FX_LOG_WARN, "pixel(): 坐标 \"%s\" 无法解析 (格式应为 \"x,y\"), 该控件将退化为 0 坐标",
+               s ? s : "(null)");
+        return 0;
+    }
+    if (x < -32768 || x > 32767 || y < -32768 || y > 32767) {
+        fx_log(FX_LOG_WARN, "pixel(): 坐标 \"%s\" 超出设计稿 int16 范围, 已钳制到 [-32768,32767]", s);
+        if (x < -32768) x = -32768; if (x >  32767) x =  32767;
+        if (y < -32768) y = -32768; if (y >  32767) y =  32767;
+    }
+    *a = (int16_t)x; *b = (int16_t)y; return 1;
+}
 static int parse_pct(const char *s, int16_t *a, int16_t *b)
-{ float x, y;
-if (sscanf(s, "%f,%f", &x, &y) != 2) return 0;
-/* v2.3.1: percent() 收 0~1 小数; 误写 "100,100" 会在 int16 里回绕成负数把控件甩出屏幕, 钳到合法域 */
-if (x < -1.0f) x = -1.0f;
-if (x > 1.0f) x = 1.0f;
-if (y < -1.0f) y = -1.0f;
-if (y > 1.0f) y = 1.0f;
-*a = (int)(x*1000); *b = (int)(y*1000); return 1; }
+{
+    float x, y;
+    if (!s || sscanf(s, "%f,%f", &x, &y) != 2) {
+        fx_log(FX_LOG_WARN, "percent(): 比例 \"%s\" 无法解析 (格式应为 \"0.0~1.0,0.0~1.0\")",
+               s ? s : "(null)");
+        return 0;
+    }
+    if (x != x || y != y) {   /* "nan" 能被 sscanf 吃掉, 后面的钳制比较对 NaN 全部为假 */
+        fx_log(FX_LOG_WARN, "percent(): 比例 \"%s\" 含 NaN, 已按 0 处理", s);
+        if (x != x) x = 0.0f;
+        if (y != y) y = 0.0f;
+    }
+    if (x < -1.0f || x > 1.0f || y < -1.0f || y > 1.0f)
+        fx_log(FX_LOG_WARN, "percent(): 比例 \"%s\" 超出 0~1, 已钳制 (是否误写成了百分数?)", s);
+    /* v2.3.1: percent() 收 0~1 小数; 误写 "100,100" 会在 int16 里回绕成负数把控件甩出屏幕, 钳到合法域 */
+    if (x < -1.0f) x = -1.0f;
+    if (x > 1.0f) x = 1.0f;
+    if (y < -1.0f) y = -1.0f;
+    if (y > 1.0f) y = 1.0f;
+    *a = (int)(x*1000); *b = (int)(y*1000); return 1;
+}
 fx_attr_t pixel(const char *a, const char *b)
 { fx_attr_t at = { FX_A_PIXEL, { {0} } }; parse_xy(a,&at.v.rect.x1,&at.v.rect.y1); parse_xy(b,&at.v.rect.x2,&at.v.rect.y2); return at; }
 fx_attr_t percent(const char *a, const char *b)
@@ -414,6 +450,8 @@ fx_attr_t maxlen(int n)         { fx_attr_t a={FX_A_MAXLEN,{ {0} }}; a.v.iv.v=(i
 fx_attr_t image(fx_image_t *img){ fx_attr_t a={FX_A_IMAGE,{ {0} }}; a.v.w.w=(fx_widget_t*)img; return a; }
 
 /* ================= 控件创建 ================= */
+static void layout_one(fx_widget_t *c);
+static void grid_pending_resolve(void);
 fx_widget_t *fx_widget_new_impl(int type, fx_attr_t attrs[])
 {
     fx_widget_t *w = fxtk_alloc();
@@ -468,7 +506,15 @@ fx_widget_t *fx_widget_new_impl(int type, fx_attr_t attrs[])
     }
     if (type == FX_W_TAB) { int n=1; 
     for(const char *p=w->title; *p; p++) if (*p==',') n++; w->lines=(int16_t)n; }
-    fx_layout(); fx_repaint();
+    /* 增量布局: 只算新控件自身 (坐标与兄弟无关), 不再全树重排 */
+    layout_one(w);
+    if (type == FX_W_CANVAS && (w->flags & FX_F_ANIM)) s_anim_canvas_hint = 1;
+    if (w->pos_mode == FX_POS_GRID && !w->grid_ref && w->gname) {
+        if (s_grid_pending_n < GRID_PENDING_MAX) s_grid_pending[s_grid_pending_n++] = w;
+        else fx_layout();   /* 悬案超容量: 退回全量兜底 (layout_children 会重解析全部) */
+    }
+    grid_pending_resolve();   /* 新建的也许正是别人等的 grid */
+    fx_repaint();
     if (type == FX_W_CANVAS && fxtk_aa()) fx_canvas_enable_buf(w);   /* v2.2: 开抗锯齿的画布自动离屏, 以便边缘混合 */
     return w;
 }
@@ -476,7 +522,7 @@ fx_widget_t *fx_widget_new_impl(int type, fx_attr_t attrs[])
 fx_widget_t *fx_find(const char *n)
 {
     if (!n) return NULL;
-    for (int i = 0; i < FX_MAX_WIDGETS; i++)
+    for (int i = 0; i < s_pool_high; i++)
         if (s_pool[i].type != FX_W_NONE && s_pool[i].name[0] && strcmp(s_pool[i].name, n)==0) return &s_pool[i];
     return NULL;
 }
@@ -584,6 +630,8 @@ void fxtk_apply_fit(fx_widget_t *w){   /* 绘制期幂等fit: 从父+设计坐�
     w->y1=(int16_t)(cy-nh/2); w->y2=(int16_t)(w->y1+nh-1);
 }
 static void layout_children(fx_widget_t *p);
+static void layout_one(fx_widget_t *c);
+static void grid_pending_resolve(void);
 void fx_layout(void)
 {
     if (!s_drv) return;
@@ -592,40 +640,61 @@ void fx_layout(void)
     s_sx1000 = (int)((int32_t)s_drv->width*1000/(fx_design_w > 0 ? fx_design_w : 480));
     s_sy1000 = (int)((int32_t)s_drv->height*1000/(fx_design_h > 0 ? fx_design_h : 272));
     layout_children(s_act_root);
+    grid_pending_resolve();
+}
+/* 单控件坐标: 只依赖祖先矩形与自身属性, 与兄弟无关 —— 创建期增量布局用,
+ * 避免每建一个控件就全树重排 (批量建 N 个控件从 O(N²) 降到 O(N))。 */
+static void layout_one(fx_widget_t *c)
+{
+    if (!s_drv || !(c->flags & FX_F_VISIBLE)) return;
+    fx_widget_t *p = c->parent ? c->parent : s_act_root;
+    switch (c->pos_mode) {
+    case FX_POS_PIXEL:
+        c->x1=(int16_t)(p->x1+(int32_t)c->ox1*s_sx1000/1000); c->y1=(int16_t)(p->y1+(int32_t)c->oy1*s_sy1000/1000);
+        c->x2=(int16_t)(p->x1+(int32_t)c->ox2*s_sx1000/1000); c->y2=(int16_t)(p->y1+(int32_t)c->oy2*s_sy1000/1000);
+        break;
+    case FX_POS_PERCENT: {
+        int pw=p->x2-p->x1+1, ph=p->y2-p->y1+1;
+        c->x1=(int16_t)(p->x1+(int32_t)pw*c->px1/1000); c->y1=(int16_t)(p->y1+(int32_t)ph*c->py1/1000);
+        c->x2=(int16_t)(p->x1+(int32_t)pw*c->px2/1000-1); c->y2=(int16_t)(p->y1+(int32_t)ph*c->py2/1000-1);
+        break; }
+    case FX_POS_FIXED: break;   /* 弹层: 保留直写坐标 */
+    case FX_POS_FLEX:  break;   /* v2.5: 坐标由 fx_flex_apply 写好了, 布局期不重算 */
+    case FX_POS_GRID: {
+        fx_widget_t *g=c->grid_ref;
+        /* v2.3.1: grid 晚于子件创建时布局期重解析 (旧逻辑只在创建瞬间解析一次,
+         * 先子后父/名字打错 → 子件永远停在 (0,0,0,0) 且无任何提示) */
+        if (!g && c->gname) {
+            g = c->grid_ref = fx_find(c->gname);
+            if (!g) fx_log(FX_LOG_WARN, "grid '%s' 不存在(控件 '%s')", c->gname, c->name);
+        }
+        if (g && g->lines>0 && g->rows>0) {
+            int cw=(g->x2-g->x1+1)/g->rows, ch=(g->y2-g->y1+1)/g->lines;
+            c->x1=(int16_t)(g->x1+(c->gc1-1)*cw); c->y1=(int16_t)(g->y1+(c->gr1-1)*ch);
+            c->x2=(int16_t)(g->x1+c->gc2*cw-1); c->y2=(int16_t)(g->y1+c->gr2*ch-1);
+        } break; }
+    }
+    clamp_ctrl(c);
 }
 static void layout_children(fx_widget_t *p)
 {
     for (fx_widget_t *c=p->child; c; c=c->sibling) {
         if (!(c->flags & FX_F_VISIBLE)) continue;
-        switch (c->pos_mode) {
-        case FX_POS_PIXEL:
-            c->x1=(int16_t)(p->x1+(int32_t)c->ox1*s_sx1000/1000); c->y1=(int16_t)(p->y1+(int32_t)c->oy1*s_sy1000/1000);
-            c->x2=(int16_t)(p->x1+(int32_t)c->ox2*s_sx1000/1000); c->y2=(int16_t)(p->y1+(int32_t)c->oy2*s_sy1000/1000);
-            break;
-        case FX_POS_PERCENT: {
-            int pw=p->x2-p->x1+1, ph=p->y2-p->y1+1;
-            c->x1=(int16_t)(p->x1+(int32_t)pw*c->px1/1000); c->y1=(int16_t)(p->y1+(int32_t)ph*c->py1/1000);
-            c->x2=(int16_t)(p->x1+(int32_t)pw*c->px2/1000-1); c->y2=(int16_t)(p->y1+(int32_t)ph*c->py2/1000-1);
-            break; }
-        case FX_POS_FIXED: break;   /* 弹层: 保留直写坐标 */
-        case FX_POS_FLEX:  break;   /* v2.5: 坐标由 fx_flex_apply 写好了, 布局期不重算 */
-        case FX_POS_GRID: {
-            fx_widget_t *g=c->grid_ref;
-            /* v2.3.1: grid 晚于子件创建时布局期重解析 (旧逻辑只在创建瞬间解析一次,
-             * 先子后父/名字打错 → 子件永远停在 (0,0,0,0) 且无任何提示) */
-            if (!g && c->gname) {
-                g = c->grid_ref = fx_find(c->gname);
-                if (!g) fx_log(FX_LOG_WARN, "grid '%s' 不存在(控件 '%s')", c->gname, c->name);
-            }
-            if (g && g->lines>0 && g->rows>0) {
-                int cw=(g->x2-g->x1+1)/g->rows, ch=(g->y2-g->y1+1)/g->lines;
-                c->x1=(int16_t)(g->x1+(c->gc1-1)*cw); c->y1=(int16_t)(g->y1+(c->gr1-1)*ch);
-                c->x2=(int16_t)(g->x1+c->gc2*cw-1); c->y2=(int16_t)(g->y1+c->gr2*ch-1);
-            } break; }
-        }
-        clamp_ctrl(c);
+        layout_one(c);
         layout_children(c);
     }
+}
+/* 晚建 grid 的悬案子件: 取出时按当前状态校验 (槽位可能删除复用); 全量布局兜底重解析 */
+static void grid_pending_resolve(void)
+{
+    int n = 0;
+    for (int i = 0; i < s_grid_pending_n; i++) {
+        fx_widget_t *w = s_grid_pending[i];
+        if (w->type == FX_W_NONE || w->pos_mode != FX_POS_GRID || w->grid_ref || !w->gname) continue;
+        if (!fx_find(w->gname)) { s_grid_pending[n++] = w; continue; }
+        layout_one(w);   /* 内部重解析 grid_ref 并算坐标 */
+    }
+    s_grid_pending_n = n;
 }
 
 /* ================= 命中测试 ================= */
@@ -887,7 +956,11 @@ static void draw_widget_inner(fx_widget_t *w, int cx1, int cy1, int cx2, int cy2
                 float _p = fx_page_wipe(w);
                 if (_p < 1.0f) fx_page_wipe_clip(w, w->x1, w->y1, w->x2, w->y2, _p, &c1, &c2, &c3, &c4);
                 /* v2.4.3: 收窄后的矩形必须【当作裁剪参数传进去】—— draw_widget 的第 2~5 个参数就是裁剪矩形,
-                 * 之前在外面 fx_set_clip 会被它覆盖, 所以换页过渡一直看不到效果。 */
+                 * 之前在外面 fx_set_clip 会被它覆盖, 所以换页过渡一直看不到效果。
+                 * v2.5.6: 再与传入裁剪求交 —— 脏区局部重绘时若重置成 tab 整 rect, 脏区外的兄弟控件
+                 * 也会被重画却没有背景擦除, AA 文字逐帧叠加变深。整帧重绘 cx 为全屏, 求交无副作用。 */
+                if (c1 < cx1) c1 = cx1; if (c2 < cy1) c2 = cy1;
+                if (c3 > cx2) c3 = cx2; if (c4 > cy2) c4 = cy2;
                 for (fx_widget_t *c=w->child; c; c=c->sibling) if (c->page==w->value) draw_widget(c, c1, c2, c3, c4);
             }
             return;
@@ -964,21 +1037,8 @@ static void draw_canvas_only(fx_widget_t *w)
     if (w->x1 > w->x2 || w->y1 > w->y2) return;
     if (!(w->flags & FX_F_VISIBLE)) return;
 
-    /* v2.4.3 动画: 除 canvas 外, 任何带 FX_F_ANIM 的可见控件也把自身矩形标脏, 让核心本帧重绘它。
-     * 这是"全局动画开关"能作用于普通控件(如标签页药丸淡入、进度条缓动)的关键——
-     * 之前 FX_F_ANIM 只对 canvas 生效, 所以普通控件设了标志也不会被继续重绘(动画只走一帧就停)。
-     * 仅在动画开启时扫描, 关闭时零开销(不影响基准与金图)。 */
-    if (s_anim_on) {
-        int lim = s_pool_high > 0 ? s_pool_high : 0;
-        for (int i = 0; i < lim; i++) {
-            fx_widget_t *a = &s_pool[i];
-            if (a->type == FX_W_NONE || !(a->flags & FX_F_ANIM)) continue;
-            if (a->type == FX_W_CANVAS) continue;              /* 画布已在上面的分支里处理 */
-            if (!(a->flags & FX_F_VISIBLE)) continue;
-            if (!widget_in_active_page(a)) continue;
-            fx_repaint_rect(a->x1, a->y1, a->x2, a->y2);
-        }
-    }
+    /* v2.5.6: FX_F_ANIM 控件的每帧标脏已前移到 fx_poll 分支选择之前 ——
+     * 脏区恢复后, 标脏若只在 else 分支做, 连续脏区帧会漏标 → 动画相位分叉。 */
     if (w->type==FX_W_TAB) {
         fx_set_clip(w->x1,w->y1,w->x2,w->y2);
         float p2 = fx_page_wipe(w);
@@ -1125,14 +1185,35 @@ void fx_poll(void)
     s_tick++;
     int bl=(s_tick/25)&1;
     if (s_focus && s_focus->type==FX_W_TEXTEDIT && bl!=s_blink) { s_blink=bl; fx_repaint_rect(s_focus->x1,s_focus->y1,s_focus->x2,s_focus->y2); }
+    /* v2.5.6: 动画控件每帧标脏 —— 必须在分支选择【之前】做, 不能只在 draw_canvas_only 里做:
+     * 画布回调按调用次数推进相位(s_phase 等), 脏区帧若跳过画布, 相位就与整帧重绘永久分叉。
+     * 画布不受全局动画开关控制(与 draw_canvas_only 的旧语义一致); 普通控件(药丸/缓动)受控。 */
+    if (s_anim_on || s_anim_canvas_hint) {
+        for (int i = 0; i < s_pool_high; i++) {
+            fx_widget_t *a = &s_pool[i];
+            if (a->type == FX_W_NONE || !(a->flags & FX_F_ANIM)) continue;
+            if (!(a->flags & FX_F_VISIBLE)) continue;
+            if (a->type != FX_W_CANVAS && !s_anim_on) continue;
+            if (!widget_in_active_page(a)) continue;
+            fx_repaint_rect(a->x1, a->y1, a->x2, a->y2);
+        }
+    }
     if (s_boot > 0) { s_boot--; fx_frame_begin(); fxtk_draw_all(); fx_frame_end(); s_repaint = 0; s_dirty_n = 0; s_full = 0; }
     else if (s_full) { s_full = 0; s_repaint = 0; s_dirty_n = 0;
 fx_frame_begin(); fxtk_draw_all(); fx_frame_end(); }
 else if (s_repaint && s_dirty_n > 0) {
         s_repaint=0; fx_frame_begin();
-        for (int i=0;i<s_dirty_n;i++) redraw_region(s_dirty[i][0],s_dirty[i][1],s_dirty[i][2],s_dirty[i][3]);
-        s_dirty_n=0;
-        if (s_ctx_open) ctx_draw_abs(); fx_frame_end();
+        /* 快照本帧脏区后立即清零: 重绘期间控件回调/设值产生的新标脏归入下一帧。
+         * 否则边消费边追加会让同一画布在一帧内被重复绘制, 按调用次数推进的相位(压测页 s_mv_t)超速分叉。 */
+        int rects[FX_DIRTY_MAX][4]; int n = s_dirty_n;
+        memcpy(rects, s_dirty, sizeof(rects[0]) * (size_t)n);
+        s_dirty_n = 0;
+        for (int i=0;i<n;i++) redraw_region(rects[i][0],rects[i][1],rects[i][2],rects[i][3]);
+        /* 与 fxtk_draw_all 同一收尾: 先复位裁剪再画弹层/调试层, 否则弹层被最后一块脏区的裁剪截断 */
+        fx_reset_clip();
+        if (s_ctx_open && s_ctx_root == s_act_root) ctx_draw_abs();
+        draw_debug_overlay();
+        fx_frame_end();
     } else if (s_repaint) { s_repaint=0; fx_frame_begin(); fxtk_draw_all(); fx_frame_end(); }
     else if (s_autorepaint) { fx_frame_begin(); fxtk_draw_all(); fx_frame_end(); }
     else fxtk_draw_canvases();
@@ -1140,15 +1221,14 @@ else if (s_repaint && s_dirty_n > 0) {
 uint16_t fx_width(void){return s_drv?s_drv->width:0;} uint16_t fx_height(void){return s_drv?s_drv->height:0;}
 void fx_set_autorepaint(int on){s_autorepaint=on;} void fx_set_touch_debug(int on){s_tdbg_on=on;}
 void fx_repaint(void){s_full=1;s_repaint=1;s_dirty_n=0;}
-/* ⚠️ v2.4.4 审计结论(第三方评审发现, 已核实): 本函数开头的 s_full=1 使下面的
- * 矩形合并与"局部重绘"分支变成【死代码】—— 消费端 fxtk_frame() 里 `else if (s_full)`
- * 排在脏区分支之前, 而本函数是全项目唯一往 s_dirty[] 写数据的地方, 于是永远走不到合并结果。
- * 现状: 任何一次请求都退化为【整帧重绘】(所以不会残影, 但也没有任何脏区优化)。
- * 这也是为什么当初加它是为了"杜绝残影": 局部路径历史上出过残影问题。
- * 要真正启用脏区合并, 需要: ①去掉这里的 s_full=1 ②把合并结果交给 redraw_region 逐块重绘
- * ③用连续多帧逐像素对比验证无残影(尤其滚动/悬停/光标闪烁/画布内控件移动)。 */
+/* v2.5.6: 脏区局部重绘已恢复 —— 请求合并进 s_dirty[], 消费端 fxtk_frame() 逐块 redraw_region。
+ * 正确性由多帧逐像素 A/B 验证守住(滚动/悬停/光标闪烁/画布移动, 与整帧重绘逐帧一致)。
+ * FXTK_FULL_REDRAW=1: 退回"任何请求都整帧重绘"的旧行为(诊断对照/用户应用兜底)。 */
 void fx_repaint_rect(int x1,int y1,int x2,int y2)
-{ s_full=1;   /* 见上方说明: 这一行让下面的合并逻辑当前不可达 */
+{
+    static int force_full = -1;
+    if (force_full < 0) force_full = getenv("FXTK_FULL_REDRAW") != NULL;
+    if (force_full) { fx_repaint(); return; }
     if (!s_drv) return;
     if (x1<0)x1=0;
     if (y1<0)y1=0;

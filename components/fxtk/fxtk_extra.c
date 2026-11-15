@@ -41,7 +41,9 @@ static ex_slot_t *ex_get(fx_widget_t *w){
 static ex_slot_t *ex_new(fx_widget_t *w){ for(int i=0;i<FX_MAX_EXTRA_WIDGETS;i++) if(!s_ex[i].w){ memset(&s_ex[i],0,sizeof(ex_slot_t)); s_ex[i].w=w; s_ex[i].row_h=22; s_ex[i].sel=-1; return &s_ex[i]; } return 0; }
 static int ex_rh(ex_slot_t *s){ int rh=s->row_h*fxtk_ui_scale()/100;
 if (rh<12)rh=12;
-if (!getenv("FXTK_COMPACT")&&rh>32)rh=32; return rh; }
+/* v2.5.6: FXTK_COMPACT 缓存一次 —— 原先每行每帧都 getenv 扫 environ */
+{ static int compact = -1; if (compact < 0) compact = getenv("FXTK_COMPACT") != NULL;
+  if (!compact && rh>32)rh=32; } return rh; }
 #if FXTK_WIDGET_LIST
 /* v2.5.5: 列表/下拉与滚动容器共用同一滚动引擎 —— off 是像素偏移(不是行号),
  * 行位置 = 1 + i*rh - off, 所以拖动/惯性/滚动条手感与滚动页完全一致。 */

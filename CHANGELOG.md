@@ -1,5 +1,58 @@
 # Changelog
 
+## 未发布（v2.5.6：质量闸门 —— 把"写在 README 里的承诺"变成 CI 会失败的检查）
+
+> 核心 API 语义未改；这一版只补"可验证性"，外加两处被新闸门当场抓出来的真实缺陷。
+
+### 新增
+
+- **类型化坐标宏 `PIXEL(x1,y1,x2,y2)` / `PCT(x1,y1,x2,y2)`**：字面量坐标不再经过运行期
+  `sscanf`，参数个数写错在编译期就失败（字符串误传至少触发 `-Wint-conversion`，建议开 `-Werror`）；
+  字符串版 `pixel()/percent()` 保留给动态坐标。
+- **坐标解析失败/越界告警**：`pixel()/percent()` 现在走 `fx_log(FX_LOG_WARN, ...)`，不再静默
+  退化成 0 坐标（写错一个逗号，以前只能在屏幕上用肉眼找）。
+- **`make check` 质量闸门**（CI 也跑）：
+  - `tools/check_symbols.py`：公开头文件的每个声明必须在【两种字体后端】里都有实现
+    （此前 `fxtk_font_height` 声明了但没人实现，一调用就链接失败）；
+  - `tools/check_version.py`：`fxtk.h` / `CHANGELOG` / `README` 三处版本号一致；
+  - `tools/check_modes.py`：git 索引里所有 `*.sh` 必须是 100755。
+- **`make test-asan`**：ASan+UBSan 跑无头测试两遍（含 leak 检测），CI 里真正执行 ——
+  此前 README 写着 "ASan+UBSan 干净"，但 CI 从未跑过 sanitizer。
+- **补上 `fxtk_font_height()`**：SDL_ttf 与 stb_truetype 两个文本后端都实现（返回行高像素）。
+
+### 修复（都由新闸门抓出，不是"顺手改"）
+
+- **stub 后端 `fx_file_read()` 未补 `'\0'`**：真实文件系统分支分配 `size+1` 并补零，stub 分支
+  只分配 `size`；`fx_prefs_load()` 把返回缓冲区当 C 字符串读，于是读越界 1 字节。
+  ASan 接入 CI 后第一个报的就是这个 `heap-buffer-overflow`（`fxtk_backends.c:773`）。
+- **`skills/fxtk-gui/verify.sh` 缺可执行位**：上一轮"全部 18 个 `*.sh` 已置 100755"漏掉了它，
+  新加的 `check_modes.py` 第一次运行就抓到。
+
+### 性能与内存（本轮）
+
+- **恢复脏区局部重绘**：`fx_repaint_rect` 不再一律退化为整帧重绘。A/B 逐帧验证（370 帧：
+  波形/点击/滚动/焦点光标/画板）整帧与脏区**逐像素一致**；压测页整帧==脏区。
+  排查中修掉两处真实根因：① tab 绘制子页时把裁剪重置成自身整 rect，脏区外控件被无擦除重画、
+  AA 文字逐帧叠加变深；② 脏区消费循环边迭代边被回调追加，导致同一画布一帧被画多次、相位超速
+  （压测页 `t` 快一倍）。改为消费前快照、重绘期新标脏归入下一帧。`FXTK_FULL_REDRAW=1` 可退回旧行为。
+- **图元级裁剪 early-out**：渐变/圆/多边形/图片在完全移出裁剪区时直接返回；CPU 逐像素的图片与
+  多边形只遍历裁剪区内的部分（多边形扫描线改为栈缓冲，常规不再每次 malloc）。
+- **热路径消除隐藏开销**：`isqrt` 由 16 轮二分改为查表（圆角逐行内缩 `round_cut` 曾占软件路径 26%）；
+  `fx_rect_dbg` 的 `getenv("FXTK_RECTDBG")`（每次填充都扫 environ，压测中被调用数百万次）与
+  列表行高的 `getenv("FXTK_COMPACT")` 改为首次缓存。1080p 压测 110→129 fps（+17%）。
+- **内存占用**：sokol 驱动顶点/索引缓冲由静态预分配（26 万顶点 9MB + 52 万索引 2MB）改为
+  **按需增长**（初始 16k 顶点 / 32k 索引，帧内不够才翻倍、GPU 缓冲同步重建，硬上限不变）。
+  二进制 BSS 由 16.1MB 降到 2.9MB，GL 批缓冲由 11MB 降到约 0.7MB 起步；渲染逐像素不变。
+- **构建提速与 CI**：demo/lua 目标改为 `build/` 下 `.o` 增量构建（仍 `-Os -flto`，产物字节一致）；
+  CI 增加模块自检（par/uiscale/gesture/flex/svg）与裁剪一致性检查 `trim-check`，并复用 Makefile
+  的源清单替代 YAML 手抄；`clean` 补全遗漏产物。
+- **autotrim 修复**：正则 `\${sym}_p?\(` 匹配不到常用写法 `fx_button_new(`，会把**用到的控件也裁掉**
+  （能编出但界面空白）；改为 `\${sym}(_p)?\(`。另修 `FXTK_WIDGET_TAB=0` 时 `fxtk_anim_reset`
+  裸引用 tab 动画槽导致编译失败。示例裁剪实测 -11.4% 体积。
+- **HiDPI 字号**：几何按物理像素放大而字号是绝对像素、不乘 dpi，200% 缩放下文字相对过小。
+  两个字体后端统一「设备字号 = 逻辑字号 × dpi」（测量与绘制共用），`dpi=1` 时逐字节不变。
+  顺带修复 `FXTK_WIN` 在窗口创建后才解析（此前无效），新增 `FXTK_DPI` 诊断钩子。
+
 ## v2.5.5（统一滚动：容器/列表/下拉/输入框/画布同一套引擎 + 触摸屏拖动）
 
 > **核心仍是 fxtk-pc-v2.5（C99，`FXTK_VERSION` = 2.5.5）。** 旧 API 全部保留（`fx_scroll_update` /

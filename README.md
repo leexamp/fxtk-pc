@@ -136,7 +136,10 @@ make -C demo-main lua-test   # 无头绑定自检（SDL dummy，无需窗口/字
 - **Linux 377KB / Windows 439KB 单文件**，`ldd` / `objdump` 里只有系统库；
 - 图片解码（PNG/JPEG/BMP/GIF/TGA/PNM）、PNG 截图、剪贴板、文件对话框、随机数、时间、偏好持久化
   **都在框架内**（sokol 与 stb 以源码形式 vendored，不是动态库）；
-- 体积裁剪：`-DFXTK_WIDGET_XXX=0` 编译期裁掉不用的控件，`tools/autotrim.sh` 扫源码自动生成开关。
+- **运行期内存**：控件池 8192 槽约 2.6MB；sokol 顶点/索引批缓冲**按需增长**（初始约 0.7MB，
+  帧内不够才翻倍），整个二进制 `.bss` 约 2.9MB；
+- 体积裁剪：`-DFXTK_WIDGET_XXX=0` 编译期裁掉不用的控件，`tools/autotrim.sh` 扫源码自动生成开关
+  （`make trim-check` 守住"不误裁用到的控件"）。
 
 ## 能力
 
@@ -159,8 +162,14 @@ make -C demo-main                 # 12 页演示 fxtk_sim (C)
 make -C demo-main lua             # 通用 Lua runner fxtk_lua_runner (脚本运行时加载)
 make -C demo-main mw_interactive  # 多真实窗口 + 控件输入闭环 demo
 make -C demo-main test            # 无头单元测试（无需窗口/字体）
+make -C demo-main check           # 质量闸门：测试 + 模块自检 + 裁剪一致性 + API 符号/文档 + 版本号 + 脚本权限
+make -C demo-main selftest        # 模块自检：par / uiscale / gesture / flex / svg
+make -C demo-main trim-check      # 裁剪开关一致性（全关仍可编译 + autotrim 不误裁）
+make -C demo-main test-asan       # ASan+UBSan 跑无头测试（CI 也跑）
 make -C demo-main lua-test        # Lua 绑定无头自检
 make -C demo-main golden          # 画布金图逐像素回归（本地容差 0）
+make -C demo-main headless-canvas # 一组画布示例无头渲染（抓 resize 崩溃）
+make -C demo-main warnings-check  # -Wall -Wextra 告警报告（非阻断）
 make -C demo-main bench           # 渲染吞吐基准（无头、无 vsync）
 
 make -C demo-main ex01_hello      # 任意独立示例
@@ -174,11 +183,17 @@ Windows 用 `demo-main/build_win_sokol.sh` 交叉编译出单 exe（CI 会跑）
 
 | 目标 | 覆盖 | 不覆盖 |
 |---|---|---|
-| `make test` | 真实 OS 服务 + `FXTK_BACKEND_STUB` 确定性变体各跑一遍；布局/命中/控件生命周期/输入/颜色-几何契约；ASan+UBSan 干净 | 假驱动不渲染帧缓冲，**没有逐像素断言** |
+| `make test` | 真实 OS 服务 + `FXTK_BACKEND_STUB` 确定性变体各跑一遍；布局/命中/控件生命周期/输入/颜色-几何契约 | 假驱动不渲染帧缓冲，**没有逐像素断言** |
+| `make test-asan`（CI） | 同一套测试用 ASan+UBSan 跑两遍（含 leak 检测）；v2.5.6 进 CI 后当场抓到 stub 后端一处堆越界读（已修） | 只覆盖无头测试走到的路径，不覆盖真实窗口/GL |
+| `make check`（CI） | 无头测试 + 模块自检（par/uiscale/gesture/flex/svg）+ 裁剪一致性（全关可编译、autotrim 不误裁）+ API 符号一致性（公开声明必须在两种字体后端都有实现）+ 版本号三处一致 + `*.sh` 可执行位 | 不检查文档文字描述是否与实现语义完全一致 |
+| API 文档一致性（CI，`api-doc-check`） | 头文件每个声明都在文档出现 + `docs/api.md` 中调用写法的**参数个数**与原型一致 + 文档里以"函数("形式出现的名字都真实存在（无幽灵 API） | 只校验签名/存在性，不校验自然语言描述 |
 | `make lua-test` | C 核心 + Lua 绑定 + 语法层：属性/控件/回调（含列表 index）/画布/图片/列表/flex/SVG/文件/手势 | 无 GPU raymarch、无真实窗口/输入法；**没有逐像素断言** |
 | `make golden` | 10 张 canvas 示例金图，本地容差 0 | 只覆盖 canvas，控件/文字/输入框/滚动**没有金图** |
-| `make bench` | 1080P 压测页 2820 控件约 102–130 fps（整帧重绘口径） | 合成场景，不代表真实业务 |
-| CI | Linux：构建 + 单测 + Lua 绑定自检 + 示例 + canvas 金图（`GOLDEN_TOL=1`）；Windows：交叉编译（含 `fxtk_lua_runner.exe`） | Windows **只编译不运行**；多窗口未进 CI |
+| `make bench` | 1080P 压测页 2820 控件约 110–129 fps（脏区重绘已恢复；该页所有控件都在动，等价整帧口径） | 合成场景，不代表真实业务 |
+| 脏区 A/B（本地脚本） | 5 场景（波形/点击/滚动/焦点光标/画板）370 帧，整帧 vs 脏区**逐像素一致**；压测页整帧==脏区 | 需要 GL/Xvfb 环境，未内置为 CI 步骤 |
+| `make selftest`（CI） | par / uiscale / gesture / flex / svg 五个模块的确定性自检 | 只覆盖各模块自测点 |
+| `make trim-check`（CI） | 全关 `FXTK_WIDGET_*` 仍可编译 + autotrim 不误裁用到的控件 | 不验证裁剪后的运行期行为 |
+| CI | Linux：质量闸门（版本/脚本权限/API 符号）+ 构建 + 单测 + 模块自检 + 裁剪一致性 + ASan/UBSan + Lua 绑定自检 + 示例 + canvas 金图（`GOLDEN_TOL=1`）；Windows：交叉编译（含 `fxtk_lua_runner.exe`） | Windows **只编译不运行**；多窗口未进 CI |
 
 **未系统验证**：真实 HiDPI、多显示器、非 ASCII 输入法全链路、跨 WM（GNOME/KWin/xfwm）差异、
 极端尺寸窗口、长时间运行内存增长。用前请按自己的环境做回归。
@@ -188,13 +203,16 @@ Windows 用 `demo-main/build_win_sokol.sh` 交叉编译出单 exe（CI 会跑）
 
 ## 已知限制
 
-- **整帧重绘**：脏区矩形合并代码存在但当前被旁路（`fx_repaint_rect` 里 `s_full=1`），
-  每次请求都是整帧重画 —— 不残影，但没有脏区优化（见 `fxtk.c` 中的注释）。
+- **脏区重绘**：`fx_repaint_rect` 已是真正的局部重绘（逐帧像素 A/B 验证：5 场景 370 帧整帧与脏区一致）。
+  唯一的全局开关是 `FXTK_FULL_REDRAW=1`（退回"任何请求都整帧"的旧行为）。"所有控件都在动"的页面
+  （压测页这类）本身每帧全屏脏，脏区优化对它们没有收益。
 - **控件层 SDF 抗锯齿**在“画布 + 文字 + quadwarp 混排”下有已知观感缺陷（`fx_set_widget_aa` 可切换/关闭）。
 - **多真实窗口**：X11 only（XWayland 可用）、只覆盖主屏、最多 8 窗口、无剪贴板/输入法；
   窗口被系统拖动/缩放时没有事件回调（v2.5.3 起后端会同步客户区尺寸并在下一帧重排/重绘，
   应用可轮询 `fxtk_win_width/height`）；Win32 与 X11 分别实现，行为需各自验证。
-- **定位属性是字符串**：`pixel("16,56","200,96")` 写错不会编译报错（没有 `x()/y()/w()/h()` 这类属性）。
+- **定位属性默认是字符串**：`pixel("16,56","200,96")` 写错不会编译报错（没有 `x()/y()/w()/h()` 这类属性）。
+  v2.5.6 起提供 `PIXEL(x1,y1,x2,y2)` / `PCT(x1,y1,x2,y2)` 类型化宏（参数个数写错编译失败）；
+  字符串版解析失败/越界会打 `[W]` 日志，不再静默退化成 0 坐标。
 - **没有 i18n 层**：英文演示是 `app_en.c` 整份复制，不是运行时切换。
 - **没有**无障碍 / RTL / 设计器；坐标用 `int16`，控件池 8192 个上限（可 `-DFX_MAX_WIDGETS` 调）。
 - **Lua 绑定是可选层，不改变 C 核心**：回调每次跨语言调用有固定开销；粒子/压测这类热路径在

@@ -6,13 +6,15 @@
 
 | 文件 | 职责 |
 |---|---|
-| `components/fxtk/fxtk.c` | 控件树、布局、输入分发、重绘调度、弹层、默认配色 |
+| `components/fxtk/fxtk.c` | 控件树、布局、输入分发、重绘调度（脏区/整帧）、弹层、默认配色 |
 | `components/fxtk/fxtk_widgets.c` | 各控件绘制（按钮高光/标签页立体/网格等） |
 | `components/fxtk/fxtk_extra.c` | 列表/下拉/滚动等扩展控件 |
-| `components/fxtk/fxtk_font.c` | TTF 字体缓存 + 文本纹理缓存 |
-| `components/fxtk/fxtk_draw.c` | 绘制原语、`fxtk_text_blit`、裁剪 |
+| `components/fxtk/fxtk_font.c` | **SDL/ttf 文本后端**：字体缓存 + 文本纹理缓存（无头测试/金图用） |
+| `drivers/fxtk_font_stb.c` | **sokol/stb 文本后端**：字形 rasterize + advance 缓存 + 文本纹理缓存 |
+| `components/fxtk/fxtk_draw.c` | 绘制原语、`fxtk_text_blit`、裁剪、AA、离屏缓冲 |
 | `components/fxtk/fxtk_effects.c` | 图像特效 |
-| `demo-main/fxtk_sdl_driver.c` | SDL2 窗口/渲染/输入/resize |
+| `drivers/fxtk_sdl_driver.c` | SDL2 窗口/渲染/输入/resize（无头基准/金图专用假驱动） |
+| `drivers/fxtk_sokol_driver.c` | **默认后端**：sokol_app + OpenGL 顶点批/命令流/持久画布纹理 |
 | `demo-main/raymarch.c` | CPU 光追（持久线程池 + barrier） |
 | `demo-main/gpu_raymarch.c` | GPU(EGL/GLES2) 光追后台线程 |
 
@@ -28,11 +30,12 @@
 
 **控件池**：静态数组 `s_pool[FX_MAX_WIDGETS]`，`FX_MAX_WIDGETS`（**PC 默认 8192 ≈ 2.6MB BSS**；`sizeof(fx_widget_t)` = 328B）。`fxtk_alloc()` 线性找空槽，`fxtk_free()` 标记 `FX_W_NONE`。
 
-> **整个 `.bss` 的账**（PC / sokol 版实测 **14.77MB**，控件池只占其中约 2.6MB）：
-> 最大项是驱动的**顶点/索引缓冲** —— `drivers/fxtk_sokol_driver.c` 里
-> `s_vb[VB_MAX]`（`VB_MAX=262144` × 32B = **8MB**）与 `s_ib[IB_MAX]`（`IB_MAX=VB_MAX*2` × 4B = **2MB**），
-> 加上命令/纹理槽/事件队列等约 0.4MB。这是**虚拟保留**，`.bss` 按需分页：极简应用实测常驻仅 **7.3MB**、
-> 完整 12 页演示 **32.9MB**。注意 `VB_MAX`/`IB_MAX` 目前是**源内 define，不可用 `-D` 覆盖**。
+> **内存账（PC / sokol 版实测）**：整个二进制 `.bss` 约 **2.9MB**，其中控件池占 2.6MB。
+> sokol 驱动的顶点/索引/命令缓冲是**按需增长**的堆缓冲：初始 16k 顶点（≈590KB）/ 32k 索引（≈128KB）/
+> 1k 命令，帧内需求超过容量才翻倍（硬上限仍是 `VB_MAX=262144` / `IB_MAX` / `CMD_MAX=65536`），
+> GPU 侧的 `sg_buffer` 也只在容量增长时重建。实测演示峰值仅 5k~15k 顶点，绝大多数应用不会触发增长。
+> 初始容量可用 `-DVB_INIT=... -DIB_INIT=... -DCMD_INIT=...` 覆盖（测试强制走增长路径用）。
+> 另有一张**持久画布纹理**（窗口尺寸 RGBA8，1280×720 ≈ 3.7MB）——脏区局部重绘依赖它跨帧保留内容。
 
 
 ## 布局与缩放
@@ -58,16 +61,26 @@
 
 ## 重绘模型
 
-- 默认脏区；当前任何 `fx_repaint_rect` 提升为全量（`s_full=1`），保证无残影。
-- 渲染到 `target` 纹理（尺寸=逻辑宽高），present 时整体拷贝到后备缓冲。
-- resize 重建 `target` 并清屏，帧末 `SDL_RenderSetClipRect(NULL)` 防 clip 残留。
-- 图形走**顶点批**：矩形/三角/折线合并为 `SDL_RenderGeometry` 一次提交；`sdl_fill_rect` 并入批（不打断 draw call）。
-- 像素路径（离屏/3D）写 `fb_rgba` 脏区，`SDL_UpdateTexture` 整帧单次上传。
+- **脏区局部重绘（v2.5.6 恢复）**：`fx_repaint_rect` 把矩形并入 `s_dirty[]`（≤8 块，重叠合并，爆表退回整帧）；
+  `fx_poll()` 在分支选择**之前**给 `FX_F_ANIM` 控件每帧标脏（画布回调按调用次数推进相位，漏画一帧就会与整帧永久分叉），
+  然后逐块 `redraw_region()`：先用背景铺该矩形，再让控件树按该矩形裁剪重画。
+- **两个坑（已修，别再犯）**：① tab 画子页时不能把裁剪重置成自身整 rect —— 必须与传入脏区求交，
+  否则脏区外的兄弟控件被无背景擦除地重画、AA 文字逐帧叠加变深；② 消费脏区前必须**快照并清零**，
+  重绘期间回调产生的新标脏归入下一帧 —— 边消费边追加会让同一画布一帧被画多次、相位超速。
+- `FXTK_FULL_REDRAW=1` 退回"任何请求都整帧"；正确性由 5 场景 370 帧整帧/脏区逐像素 A/B 守住。
+- sokol 后端：绘制进**持久画布纹理**（`LOAD` 保留上一帧静态内容，脏区帧只重画变动块），
+  命令流按管线 + 纹理 + **裁剪矩形**合并（裁剪不同不合并，否则 scissor 会把图形裁掉），最后 blit 到 swapchain。
+- SDL 假驱动（无头基准/金图）：渲染到 `target` 纹理，present 整体拷贝；像素路径写 `fb_rgba` 脏区后单次上传。
 
 ## 字体与文本缓存
 
-- `fxtk_font_size(size)`：缓存 `FC_N=8` 个 TTF；满则**淘汰并关闭**旧字体（`tc_drop_font` 清理关联文本纹理），杜绝句柄泄漏。
-- 文本纹理缓存 256 项，键为 `字体|文本|fg|bg`，LRU 淘汰。
+- **字号 → 设备像素**：`size` 是逻辑字号，两个后端统一按 `设备字号 = size × fx_dpi_scale()` 取字体/测宽/绘制
+  （HiDPI 下物理帧缓冲翻倍，字号必须同步翻倍，否则文字相对控件过小；`dpi=1` 时逐字节不变）。
+- SDL/ttf 后端（`components/fxtk/fxtk_font.c`）：缓存 `FC_N=8` 个 TTF；满则**淘汰并关闭**旧字体
+  （`tc_drop_font` 清理关联文本纹理），杜绝句柄泄漏。
+- sokol/stb 后端（`drivers/fxtk_font_stb.c`）：`FONT_MAX=8` 个字号槽，每槽带 **1024 项 advance 直接映射缓存**
+  （`tag = cp+1`，省掉每次测宽的字形 cmap 二分查找）；文本纹理缓存 128 项。
+- 文本纹理键为 `字体|文本|fg|bg`，LRU 淘汰；GPU 纹理与 CPU 像素两份都随淘汰释放。
 
 ## 输入
 
@@ -101,7 +114,8 @@
 
 - `drivers/fxtk_sokol_driver.c` 增加 `FXTK_MW` 分支：每窗口画布（`s_mw_img[24]`）与帧缓冲（`s_mw_fb[24]`）
   按尺寸缓存；`MW_NEED_CLEAR` 控制首帧/换尺寸清屏；`rgba_pack()` 保留 alpha（24 位 alpha=0 → 不透明）。
-- `CMD_MAX` 8192 → 65536：多窗口/复杂帧下不再静默丢绘制。
+- 顶点/索引/命令缓冲：`VB_MAX/IB_MAX/CMD_MAX` 是**硬上限**（262144 / 524288 / 65536）；
+  v2.5.6 起改为**按需增长**（初始 16k / 32k / 1k），复杂帧不再静默丢绘制，同时不再常驻约 11MB。
 - 多窗口环境：窗口尺寸/位置/事件由 `drivers/fxtk_sokol_mw.c` 负责；`fxtk_sokol_frame()` 只负责画布合成 +
   swapchain 呈现；vsync 关闭由后端完成。
 - 单窗口路径保持原样（`SOKOL_APP_IMPL` 仅在非 `FXTK_MW` 时编译）。

@@ -703,7 +703,7 @@ int w = fxtk_text_width_size(16, "Large font");   /* measure width */
 | Trigger | Behavior |
 |---|---|
 | `fx_repaint()` | full repaint |
-| `fx_repaint_rect(x1,y1,x2,y2)` | dirty-region repaint (in the current implementation promoted to a full repaint to guarantee no ghosting) |
+| `fx_repaint_rect(x1,y1,x2,y2)` | dirty-region repaint (real partial redraw since v2.5.6; verified pixel-identical against full frames; `FXTK_FULL_REDRAW=1` restores the old full-frame behaviour) |
 | widget property change (`fx_set_title` etc.) | automatic local repaint |
 | `anim(1)` canvas | callback + repaint **every frame** |
 

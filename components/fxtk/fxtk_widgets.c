@@ -567,12 +567,20 @@ fx_scrollbar_draw(w, off, total_h);
  * (新按钮继承别人的按下渐变、新标签页继承别人的换页进度)。这里给统一复位入口。 */
 void fxtk_anim_reset(void)
 {
+    /* v2.5.6: 各槽表只在对应控件开启时存在 —— autotrim 关掉某控件后这里不能再裸引用,
+     * 否则 -DFXTK_WIDGET_TAB=0 等裁剪开关直接编译失败 (autotrim 的第二处失效点)。 */
+#if FXTK_WIDGET_TAB
     memset(s_ta_w, 0, sizeof s_ta_w); memset(s_ta_t0, 0, sizeof s_ta_t0); memset(s_ta_sel, 0, sizeof s_ta_sel);
+#endif
+#if FXTK_WIDGET_BUTTON
     memset(s_bt_w, 0, sizeof s_bt_w); memset(s_bt_v, 0, sizeof s_bt_v);
     memset(s_bt_t0, 0, sizeof s_bt_t0); memset(s_bt_goal, 0, sizeof s_bt_goal);
+#endif
+#if FXTK_WIDGET_PROGRESS
     memset(s_pa_w, 0, sizeof s_pa_w); memset(s_pa_from, 0, sizeof s_pa_from);
     memset(s_pa_disp, 0, sizeof s_pa_disp); memset(s_pa_to, 0, sizeof s_pa_to);
     memset(s_pa_t0, 0, sizeof s_pa_t0); memset(s_pa_init, 0, sizeof s_pa_init);
+#endif
 }
 
 /* v2.5.1(M5): 控件销毁时清它占用的动画槽 —— 旧实现只在 fx_init 复位,
@@ -581,8 +589,14 @@ void fxtk_anim_forget(fx_widget_t *w)
 {
     if (!w) return;
     for (int i = 0; i < FX_ANIM_SLOTS; i++) {
+#if FXTK_WIDGET_BUTTON
         if (s_bt_w[i] == w) { s_bt_w[i] = NULL; s_bt_v[i] = 0; s_bt_goal[i] = 0; s_bt_t0[i] = 0; }
+#endif
+#if FXTK_WIDGET_PROGRESS
         if (s_pa_w[i] == w) { s_pa_w[i] = NULL; s_pa_from[i] = s_pa_disp[i] = 0; s_pa_to[i] = 0; s_pa_t0[i] = 0; s_pa_init[i] = 0; }
+#endif
+#if FXTK_WIDGET_TAB
         if (s_ta_w[i] == w) { s_ta_w[i] = NULL; s_ta_t0[i] = 0; s_ta_sel[i] = 0; }
+#endif
     }
 }

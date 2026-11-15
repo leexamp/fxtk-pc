@@ -173,6 +173,25 @@ int main(void) {
     fx_layout();
     check_rect("b1 pixel", fx_find("b1"), 10,10,100,40);
 
+    /* 1b. v2.5.6: PIXEL()/PCT() 类型化坐标宏 —— 参数个数写错编译期失败,
+     *     几何必须与字符串版完全一致, 否则宏只是换了个写法。 */
+    printf("[1b] PIXEL/PCT 类型化坐标 (编译期检查)\n");
+    fx_button_new(PIXEL(10,10,100,40), name("b1t"), title("A"));
+    fx_layout();
+    check_rect("b1t PIXEL", fx_find("b1t"), 10,10,100,40);
+    fx_label_new(PCT(0.25f,0.25f,0.75f,0.75f), name("l1t"), title("B"));
+    fx_layout();
+    check_rect("l1t PCT", fx_find("l1t"), 120,68,359,203);
+
+    /* 1c. v2.5.6: 字符串坐标写错不再静默 —— 运行期打 [W] 日志, 控件仍能创建(不崩溃)。
+     *     旧行为是悄悄退化成 (0,0,0,0), 只能在屏幕上靠肉眼找。 */
+    printf("[1c] 非法坐标字符串告警 (预期出现一条 [W] pixel(): 无法解析)\n");
+    {
+        fx_widget_t *bad = fx_button_new(pixel("16;56","200,96"), name("badpos"), title("bad"));
+        if (!bad) { printf("  [FAIL] 非法坐标不应导致创建失败\n"); fails++; }
+        else printf("  [ok]   非法坐标创建成功 (回退 0 坐标) 且日志有告警\n");
+    }
+
     /* 2. percent 布局 (480x272): 25%~75% 应得 (120,68,359,203) */
     printf("[2] percent 响应式\n");
     fx_label_new(percent("0.25,0.25","0.75,0.75"), name("l1"), title("B"));

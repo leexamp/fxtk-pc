@@ -604,7 +604,11 @@ static int fx_dbg_on(void)
 #if FXTK_DEBUG_LOG
     return 1;
 #else
-    return getenv("FXTK_RECTDBG") != NULL;
+    /* v2.5.6: getenv 只在首次调用时查一次 —— 原先每个矩形填充都线性扫一遍 environ
+     * (压测剖析显示 fx_rect_dbg 被调用数百万次, 是隐藏的纯开销)。 */
+    static int on = -1;
+    if (on < 0) on = getenv("FXTK_RECTDBG") != NULL;
+    return on;
 #endif
 }
 
@@ -805,9 +809,25 @@ void fx_fill_rect(int x1, int y1, int x2, int y2)
             fxtk_put_px(x, y, s_color);
 }
 
+/* v2.5.6: 整数平方根 —— 小值走查表 (圆角/圆逐行内缩的参数都在 0..64², 原先每次要跑
+ * 16 轮二分查找; 压测剖析显示圆角计算 round_cut 占软件路径 26% 自身耗时)。表外仍走二分,
+ * 返回的 floor(sqrt) 与二分完全一致 → 像素结果不变。 */
+#define ISQRT_TAB 4096
+static uint8_t s_isqrt_tab[ISQRT_TAB + 1];
 static int isqrt(int n)
 {
     if (n <= 0) return 0;
+    if (n <= ISQRT_TAB) {
+        if (s_isqrt_tab[ISQRT_TAB] == 0) {   /* 一次性建表; 64 = sqrt(4096) 占住哨兵 */
+            for (int i = 0; i <= ISQRT_TAB; i++) {
+                int r = 0;
+                while ((r + 1) * (r + 1) <= i) r++;
+                s_isqrt_tab[i] = (uint8_t)r;
+            }
+            s_isqrt_tab[ISQRT_TAB] = 64;
+        }
+        return s_isqrt_tab[n];
+    }
     int lo = 0, hi = 65536;
     while (lo < hi) {
         int mid = (lo + hi + 1) / 2;
@@ -831,6 +851,8 @@ void fx_fill_rect_gradient(int x1, int y1, int x2, int y2, fx_color_t c1, fx_col
 {
     if (x1 > x2) { int t = x1; x1 = x2; x2 = t; }
     if (y1 > y2) { int t = y1; y1 = y2; y2 = t; }
+    /* v2.5.6 激进裁剪: 整个渐变矩形在裁剪区外时连逐行循环都省掉 (每行 hline/vline 本会各自裁剪) */
+    if (x2 < s_clip_x1 || x1 > s_clip_x2 || y2 < s_clip_y1 || y1 > s_clip_y2) return;
     int len = vertical ? (y2 - y1 + 1) : (x2 - x1 + 1);
     if (len <= 0) return;
     int denom = len > 1 ? len - 1 : 1;   /* v2.3.1: 旧 t=i*255/len 末行永远到不了 c2 */
@@ -946,6 +968,8 @@ void fx_fill_circle(int cx, int cy, int r)
 {
     if (!s_drv) return;   /* v2.4.4: 与 flush_line 同款判空(此前裸解引用) */
     if (r <= 0) return;
+    /* v2.5.6 激进裁剪: 圆完全在裁剪区外 → 连三角扇/扫描行都不生成 */
+    if (cx + r < s_clip_x1 || cx - r > s_clip_x2 || cy + r < s_clip_y1 || cy - r > s_clip_y2) return;
     if (s_aa && s_offing) { aa_fill_circle(cx, cy, r, s_color); return; }   /* v2.2 抗锯齿 */
     if (!s_offing && s_drv && s_drv->fill_tri) {   /* v2: 圆=GPU三角扇, 1次提交 */
         const int SEG = 14;
@@ -1023,17 +1047,25 @@ void fx_fill_polygon(const int16_t *pts, int n)
 {
     if (!s_drv) return;   /* v2.4.4: 与 flush_line 同款判空(此前裸解引用) */
     if (n < 3) return;
-    if (!s_offing && s_drv && s_drv->fill_tri) { for (int i=1;i+1<n;i++) fx_fill_triangle(pts[0],pts[1],pts[i*2],pts[i*2+1],pts[(i+1)*2],pts[(i+1)*2+1]); return; }
-    int ymin = 32767, ymax = -32768;
+    /* v2.5.6 激进裁剪: 先算包围盒 —— 多边形完全在裁剪区外则 GPU 三角扇也不提交,
+     * CPU 扫描线也不再逐行跑 (此前 CPU 路径会把裁剪区外的每一行都求交/排序一遍)。 */
+    int xmin = 32767, xmax = -32768, ymin = 32767, ymax = -32768;
     for (int i = 0; i < n; i++) {
-        if (pts[i * 2 + 1] < ymin) ymin = pts[i * 2 + 1];
-        if (pts[i * 2 + 1] > ymax) ymax = pts[i * 2 + 1];
+        int px = pts[i * 2], py = pts[i * 2 + 1];
+        if (px < xmin) xmin = px; if (px > xmax) xmax = px;
+        if (py < ymin) ymin = py; if (py > ymax) ymax = py;
     }
+    if (xmax < s_clip_x1 || xmin > s_clip_x2 || ymax < s_clip_y1 || ymin > s_clip_y2) return;
+    if (!s_offing && s_drv && s_drv->fill_tri) { for (int i=1;i+1<n;i++) fx_fill_triangle(pts[0],pts[1],pts[i*2],pts[i*2+1],pts[(i+1)*2],pts[(i+1)*2+1]); return; }
+    if (ymin < s_clip_y1) ymin = s_clip_y1;
+    if (ymax > s_clip_y2) ymax = s_clip_y2;
     if (ymax < ymin) return;
 
     int max_xs = n + 2;
     if (max_xs < 64) max_xs = 64;
-    int *xs = malloc(max_xs * sizeof(int));
+    /* v2.5.6: 常规多边形(n<=62)用栈缓冲, 不再每次调用 malloc/free (SVG/自绘每帧都走这里) */
+    int xs_stack[64];
+    int *xs = (max_xs <= 64) ? xs_stack : (int *)malloc((size_t)max_xs * sizeof(int));
     if (!xs) return;
 
     for (int y = ymin; y <= ymax; y++) {
@@ -1054,7 +1086,7 @@ void fx_fill_polygon(const int16_t *pts, int n)
                 }
         for (int i = 0; i + 1 < m; i += 2) fx_draw_hline(xs[i], xs[i + 1], y);
     }
-    free(xs);
+    if (xs != xs_stack) free(xs);
 }
 
 void fx_fill_triangle(int x1, int y1, int x2, int y2, int x3, int y3)
@@ -1119,6 +1151,8 @@ void fx_draw_image_ex(fx_image_t *img, int x, int y, int dw, int dh, int dark)
         fx_draw_image_quad(img, xy8);
         return;
     }
+    /* v2.5.6 激进裁剪: 未变换的图片矩形完全在裁剪区外 → 不提交 GPU blit, 也不跑 CPU 逐像素 */
+    if (x + dw - 1 < s_clip_x1 || x > s_clip_x2 || y + dh - 1 < s_clip_y1 || y > s_clip_y2) return;
     if (!s_offing && s_drv && s_drv->blit_img) {   /* v2: 图片上交 GPU 缩放 */
         flush_line();
         if (s_drv->set_clip_rect) s_drv->set_clip_rect(s_clip_x1+s_ox,s_clip_y1+s_oy,s_clip_x2+s_ox,s_clip_y2+s_oy);
@@ -1126,11 +1160,16 @@ void fx_draw_image_ex(fx_image_t *img, int x, int y, int dw, int dh, int dark)
         if (s_drv->set_clip_rect) s_drv->set_clip_rect(0,0,32767,32767);
         return;
     }
-    for (int j = 0; j < dh; j++) {
+    /* CPU 逐像素只跑裁剪区内的那部分 (此前整幅 dw×dh 都跑, 每个像素再各自判裁剪) */
+    int i0 = s_clip_x1 - x, i1 = s_clip_x2 - x;
+    int j0 = s_clip_y1 - y, j1 = s_clip_y2 - y;
+    if (i0 < 0) i0 = 0; if (i1 > dw - 1) i1 = dw - 1;
+    if (j0 < 0) j0 = 0; if (j1 > dh - 1) j1 = dh - 1;
+    for (int j = j0; j <= j1; j++) {
         int sy = (int)((int64_t)j * img->h / dh);
         if (sy >= img->h) sy = img->h - 1;
         const uint32_t *row = &img->px[sy * img->w];
-        for (int i = 0; i < dw; i++) {
+        for (int i = i0; i <= i1; i++) {
             int sx = (int)((int64_t)i * img->w / dw);
             if (sx >= img->w) sx = img->w - 1;
             uint32_t c = row[sx];

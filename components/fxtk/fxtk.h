@@ -99,8 +99,27 @@ typedef struct {
 
 #define FX_ATTR_END { FX_A_NONE, { {0} } }
 
+/* 字符串坐标: 运行期 sscanf 解析 —— 写错不会编译失败, 只在日志里告警。
+ * v2.5.6 起: 字面量坐标请优先用下面的 PIXEL()/PCT() 宏 (编译期检查); 这两个函数留给动态坐标。 */
 fx_attr_t pixel(const char *a, const char *b);
 fx_attr_t percent(const char *a, const char *b);
+
+/* ---- v2.5.6: 类型化坐标构造器 ----
+ * 语义同 pixel("x1,y1","x2,y2") / percent("0.1,0.2","0.3,0.4"), 但坐标直接以 int/float
+ * 传入: 参数个数不对/少写一个坐标, 会【编译期报错】; 把字符串硬塞给数字参数也会触发
+ * -Wint-conversion 诊断 (建议同时开 -Werror)。不再依赖运行期 sscanf。
+ * 越界值钳到合法域 (int16 设计稿坐标 / 0~1 比例)。
+ * 注意: 展开成 C99 复合字面量, 只能用在控件构造函数这类表达式位置。 */
+static inline int16_t fxtk_i16(int v)
+{ return (int16_t)(v < -32768 ? -32768 : (v > 32767 ? 32767 : v)); }
+static inline int16_t fxtk_pct_q(float v)
+{ if (v != v) v = 0.0f; else if (v < -1.0f) v = -1.0f; else if (v > 1.0f) v = 1.0f;
+  return (int16_t)(v * 1000.0f); }
+#define PIXEL(x1,y1,x2,y2) \
+    ((fx_attr_t){ FX_A_PIXEL, { .rect = { fxtk_i16(x1), fxtk_i16(y1), fxtk_i16(x2), fxtk_i16(y2) } } })
+#define PCT(x1,y1,x2,y2) \
+    ((fx_attr_t){ FX_A_PERCENT, { .pct = { fxtk_pct_q(x1), fxtk_pct_q(y1), fxtk_pct_q(x2), fxtk_pct_q(y2) } } })
+
 fx_attr_t grid1(const char *name);
 fx_attr_t grid5(const char *name, int r1, int c1, int r2, int c2);
 #define FX_GRID_SEL(_1,_2,_3,_4,_5,NAME,...) NAME

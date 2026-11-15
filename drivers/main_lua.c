@@ -55,6 +55,8 @@ static int s_shot2_at = 0;
 static int s_quit_after = 0;
 static int s_win_w = 0, s_win_h = 0;
 static int s_frames = 0;
+/* 测试钩子环境变量: 启动时读一次, 免每帧 getenv */
+static const char *s_env_clicks, *s_env_click, *s_env_drag, *s_env_resize;
 static int s_lua_ok = 0;
 static int s_has_frame = 0;
 
@@ -238,6 +240,8 @@ static void init_cb(void)
     }
     const char *qa = getenv("FXTK_QUIT_AFTER");
     if (qa) s_quit_after = atoi(qa);
+    s_env_clicks = getenv("FXTK_CLICKS"); s_env_click = getenv("FXTK_CLICK");
+    s_env_drag = getenv("FXTK_DRAG"); s_env_resize = getenv("FXTK_RESIZE");
 }
 
 static void frame_cb(void)
@@ -245,7 +249,7 @@ static void frame_cb(void)
     double dt = sapp_frame_duration();
     call_lua_frame(dt);
 
-    { const char *cs = getenv("FXTK_CLICKS");
+    { const char *cs = s_env_clicks;
       if (cs) {
           const char *q = cs;
           while (*q) {
@@ -257,18 +261,18 @@ static void frame_cb(void)
               q = sc + 1;
           }
       } }
-    { const char *clk = getenv("FXTK_CLICK");
+    { const char *clk = s_env_click;
       if (clk && s_frames + 1 == 20) {
           int cx = 0, cy = 0;
           if (sscanf(clk, "%d,%d", &cx, &cy) == 2) fxtk_sokol_inject_click(cx, cy);
       } }
-    { const char *dg = getenv("FXTK_DRAG");
+    { const char *dg = s_env_drag;
       if (dg) {
           int x0 = 0, y0 = 0, x1 = 0, y1 = 0, steps = 8, df = 20;
           if (sscanf(dg, "%d,%d,%d,%d,%d,%d", &x0, &y0, &x1, &y1, &steps, &df) >= 4 && s_frames + 1 == df)
               fxtk_sokol_inject_drag(x0, y0, x1, y1, steps > 0 ? steps : 8);
       } }
-    { const char *rs = getenv("FXTK_RESIZE");
+    { const char *rs = s_env_resize;
       if (rs && s_frames + 1 == 20) {
           int rw = 0, rh = 0;
           if (sscanf(rs, "%dx%d", &rw, &rh) == 2) {

@@ -23,16 +23,16 @@
 
 | 类别 | API | 说明 |
 |---|---|---|
-| 随机 | `fx_rand()` / `fx_rand_seed()` | PCG32；**同种子序列可复现**，测试与演示共用一套随机 |
+| 随机 | `fx_rand_seed()` / `fx_rand_u32()` / `fx_rand_below(n)` / `fx_rand_range(lo,hi)` / `fx_randf()` | PCG32；**同种子序列可复现**，测试与演示共用一套随机 |
 | 时间 | `fx_time_us()` / `fx_time_ms()` / `fx_time_unix()` | 单调时钟（不受系统时间调整影响）+ 墙钟 |
-| 路径 | `fx_path_join()` / `fx_path_dir()` / `fx_path_ext()` / `fx_path_base()` | 跨平台分隔符与扩展名处理 |
+| 路径 | `fx_path_join()` / `fx_path_dir()` / `fx_path_ext()` / `fx_path_basename()` | 跨平台分隔符与扩展名处理 |
 | 文件 | `fx_file_read()` / `fx_file_write()` / `fx_file_exists()` | 一次性读写，内部处理大小与错误 |
 | 图片 | `fx_img_load_file()` | PNG / JPEG / BMP / GIF / TGA / PNM（stb，已裁掉 HDR/PSD/PIC 省体积） |
 | 截图 | `fx_screenshot()` | 驱动 `read_pixels` 回读当前帧 → PNG（stb 编码，零外部依赖） |
 | 剪贴板 | `fx_clip_set()` / `fx_clip_get()` | Linux 走 `xsel`/`xclip`/`wl-copy` 并带进程内兜底；Windows 用 `OpenClipboard` + `CF_UNICODETEXT`（UTF-8↔UTF-16）。**驱动侧（sokol）已委托到这两个函数** —— 此前驱动自己用 `system("xsel ...")` 实现，Windows 上必然失败 |
 | 交给系统 | `fx_open_url()` / `fx_reveal_file()` | 用默认浏览器打开链接、用文件管理器打开所在目录；**不阻塞、不弹自己的窗口**，POSIX 用 `fork+exec`（不经 shell，避免注入），Windows 用 `ShellExecuteA`，ESP32 明确返回 0 |
 | 对话框 | `fx_backend_pick_file()` / `fx_fs_pick_dir()` | Linux 依序尝试 `zenity`→`kdialog`；Win32 用系统对话框 |
-| 偏好 | `fx_pref_set()` / `fx_pref_get()` | 轻量键值持久化（配置目录下的文本文件） |
+| 偏好 | `fx_prefs_set()` / `fx_prefs_get()` / `fx_prefs_save()` / `fx_prefs_load()` | 轻量键值持久化（配置目录下的文本文件） |
 | 能力协商 | `fx_backend_caps()` | 哪些能力在当前平台可用（例如"有对话框吗"），**调用方据此决定回退策略** |
 | 日志 | `fx_log()` / `fx_log_set_level()` | 核心统一日志出口；ESP32 侧转发 `esp_log_write`，PC 侧走 stdout/stderr |
 

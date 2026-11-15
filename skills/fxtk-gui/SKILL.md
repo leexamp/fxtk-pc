@@ -178,7 +178,6 @@ int v = fx_get_value(w);
 | `fx_rect(...)` / `fx_new_button(...)` | `pixel()/percent()` + `fx_button_new()` |
 | `pixel(10,10,150,40)` | `pixel("10,10","150,40")` — two strings |
 | `fx_textedit_set_readonly` | **only exists in v2.4.5+**; on older checkouts it fails to link. Guard with `#ifdef FXTK_HAVE_READONLY` (see `ref_app.c`) if you must support older trees |
-| `fxtk_font_height(n)` | declared in `fxtk.h` but **has no implementation** — linking it fails |
 | `fx_create_*`, `fx_add_widget`, `fx_widget_create` | not in this API |
 | `fx_set_text` | `fx_set_title` |
 | `fx_draw_string` | `fx_draw_text` / `fx_draw_text_c` |

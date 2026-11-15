@@ -61,7 +61,7 @@
 
     static void content(int idx, int cw, int ch, void *ud) {
         (void)ud;
-        if (idx == 0) { fxtk_draw_text_c(6, 6, "notes", FX_RGB(230,237,243), FX_RGB(20,24,30)); }
+        if (idx == 0) { fx_draw_text_c(6, 6, "notes", FX_RGB(230,237,243), FX_RGB(20,24,30)); }
         else          { fx_set_color(FX_RGB(40,90,140)); fx_fill_rect(0, 0, cw-1, ch-1); }
     }
     // 初始化

@@ -27,24 +27,32 @@ static char s_shot_path[512];
 static char s_shot2_path[512];      /* 同一次运行内的第二次截图 (脏区残留检测) */
 static int  s_shot2_at = 0;
 static int  s_shot_at = 30;
+static char s_shot_seq[480];        /* FXTK_SHOT_SEQ="前缀,起帧,止帧": 逐帧存 PNG (脏区 A/B 逐像素验证) */
+static int  s_seq_start = 0, s_seq_end = 0;
 static int  s_win_w = 0, s_win_h = 0;   /* FXTK_WIN="WxH": 指定初始窗口尺寸(复现特定分辨率下的问题) */
 static int  s_quit_after = 0;
 static int  s_frames = 0;
+/* 测试钩子环境变量: 启动时读一次 —— frame_cb 每帧 getenv 是纯浪费(未设置时也要线性扫 environ) */
+static const char *s_env_drag, *s_env_drag_loop, *s_env_clicks, *s_env_resize, *s_env_click;
+static const char *s_env_gpu_bench, *s_env_gpu_bench_at;
 
 static void init_cb(void)
 {
+    /* v2.5.6: 先设屏幕尺寸/dpi —— 字号按 dpi 选设备字号会读它 (见字体后端 font_dev_size)。
+     * FXTK_DPI=<n> 可强制 dpi 比例, 用于在普通屏/无头环境复现 HiDPI 问题 (诊断钩子)。 */
+    float dpi = (float)sapp_dpi_scale();
+    { const char *de = getenv("FXTK_DPI"); if (de && de[0]) { float v = (float)atof(de); if (v >= 0.5f && v <= 8.0f) dpi = v; } }
+    fx_backend_set_screen(sapp_width(), sapp_height(), dpi);
     fxtk_font_init(NULL, 18);
     fx_sokol_driver.width = (uint32_t)sapp_width();
     fx_sokol_driver.height = (uint32_t)sapp_height();
     fx_sokol_driver.init();
     fx_init(&fx_sokol_driver);
     if (getenv("FXTK_NOANIM")) fx_animation(0);   /* A/B: 关掉演示的动画做性能对照 */
-    fx_backend_set_screen(sapp_width(), sapp_height(),
-                          (float)sapp_dpi_scale());
     fx_set_bg(FX_WINDOW_BG);
     app_init();
 
-    { const char *wn = getenv("FXTK_WIN"); if (wn) sscanf(wn, "%dx%d", &s_win_w, &s_win_h); }
+    /* FXTK_WIN 已在 sokol_main 中解析(窗口创建前), 这里不再重复读取 */
     const char *shot = getenv("FXTK_SHOT");
     if (shot && shot[0]) {
         snprintf(s_shot_path, sizeof(s_shot_path), "%s", shot);
@@ -60,6 +68,14 @@ static void init_cb(void)
     }
     const char *qa = getenv("FXTK_QUIT_AFTER");
     if (qa) s_quit_after = atoi(qa);
+    const char *seq = getenv("FXTK_SHOT_SEQ");
+    if (seq && sscanf(seq, "%479[^,],%d,%d", s_shot_seq, &s_seq_start, &s_seq_end) == 3
+        && s_seq_start >= 1 && s_seq_end >= s_seq_start && !s_quit_after)
+        s_quit_after = s_seq_end + 1;
+    s_env_drag = getenv("FXTK_DRAG"); s_env_drag_loop = getenv("FXTK_DRAG_LOOP");
+    s_env_clicks = getenv("FXTK_CLICKS"); s_env_resize = getenv("FXTK_RESIZE");
+    s_env_click = getenv("FXTK_CLICK"); s_env_gpu_bench = getenv("FXTK_GPU_BENCH");
+    s_env_gpu_bench_at = getenv("FXTK_GPU_BENCH_AT");
     fx_log(FX_LOG_INFO, "[sokol] 窗口 %dx%d dpi=%.2f", sapp_width(), sapp_height(), sapp_dpi_scale());
 }
 
@@ -69,7 +85,7 @@ extern void fxtk_sokol_inject_click(int x, int y);   /* 测试: 注入一次点�
 static void frame_cb(void)
 {
     {   /* 测试钩子: FXTK_DRAG="x0,y0,x1,y1[,steps]" 在第 30 帧注入一次拖拽 */
-        const char *dg = getenv("FXTK_DRAG");
+        const char *dg = s_env_drag;
         static int drag_frame = -1;
         if (drag_frame < 0) {
             drag_frame = 30;
@@ -86,7 +102,7 @@ static void frame_cb(void)
         }
     }
     {   /* 测试钩子: FXTK_DRAG_LOOP="x0,y0,x1,y1[,steps[,每帧事件数]]" 持续拖动, 测"跟手"延迟 */
-        const char *dl = getenv("FXTK_DRAG_LOOP");
+        const char *dl = s_env_drag_loop;
         if (dl) {
             extern void fxtk_sokol_drag_loop_start(int, int, int, int, int, int);
             extern void fxtk_sokol_drag_loop_tick(void);
@@ -109,7 +125,7 @@ static void frame_cb(void)
         }
     }
     {   /* 测试钩子: FXTK_CLICKS="x,y,帧;x,y,帧;..." 多段点击(测跨页切换残留/IPC) */
-        const char *cs = getenv("FXTK_CLICKS");
+        const char *cs = s_env_clicks;
         if (cs) {
             const char *q = cs;
             while (*q) {
@@ -125,7 +141,7 @@ static void frame_cb(void)
         }
     }
     {   /* 测试钩子: FXTK_RESIZE="WxH" 在第 20 帧模拟一次窗口缩放 */
-        const char *rs = getenv("FXTK_RESIZE");
+        const char *rs = s_env_resize;
         if (rs && s_frames + 1 == 20) {
             int rw = 0, rh = 0;
             if (sscanf(rs, "%dx%d", &rw, &rh) == 2) {
@@ -136,7 +152,7 @@ static void frame_cb(void)
         }
     }
     {   /* 测试钩子: FXTK_CLICK="x,y" 在第 20 帧注入一次点击(用于无人值守验证输入链路) */
-        const char *clk = getenv("FXTK_CLICK");
+        const char *clk = s_env_click;
         if (clk && s_frames + 1 == 20) {
             int cx = 0, cy = 0;
             if (sscanf(clk, "%d,%d", &cx, &cy) == 2) fxtk_sokol_inject_click(cx, cy);
@@ -144,15 +160,16 @@ static void frame_cb(void)
     }
     int want_shot  = (s_shot_path[0]  && s_frames + 1 == s_shot_at);
     int want_shot2 = (s_shot2_path[0] && s_frames + 1 == s_shot2_at);
-    if (want_shot || want_shot2) fxtk_sokol_request_shot();   /* 驱动在本帧 pass 内抓取 */
+    int want_seq   = (s_shot_seq[0] && s_frames + 1 >= s_seq_start && s_frames + 1 <= s_seq_end);
+    if (want_shot || want_shot2 || want_seq) fxtk_sokol_request_shot();   /* 驱动在本帧 pass 内抓取 */
     /* ===== GPU 路径基准: FXTK_GPU_BENCH=<帧数> =====
      * 用途: 回答"压测页在 GPU(sokol)路径下的真实帧时间", 与 SDL 软件路径的 bench 对照。
      * 做法: 等测试钩子把页面切好(默认第 25 帧之后), 把【框架逐帧 + 提交渲染】连续跑 N 次并逐帧计时,
      *       取后半段平均(避开压测页控件还在增生的阶段), 打印后退出。
      * 说明: 这个版本【包含】交换链提交(与真实运行一致); 纯离屏、不含 present 的版本是后续细化。 */
     {
-        const char *gb = getenv("FXTK_GPU_BENCH");
-        const char *ga = getenv("FXTK_GPU_BENCH_AT");   /* 可选: 第几帧开始测(默认 25; 用于先 resize 窗口再测) */
+        const char *gb = s_env_gpu_bench;
+        const char *ga = s_env_gpu_bench_at;   /* 可选: 第几帧开始测(默认 25; 用于先 resize 窗口再测) */
         int at = ga ? atoi(ga) : 25;
         if (gb && s_frames >= at) {
             extern uint32_t fxtk_sokol_now_us(void);
@@ -193,6 +210,11 @@ static void frame_cb(void)
         if (fx_screenshot(s_shot2_path)) fx_log(FX_LOG_INFO, "[shot2] %s", s_shot2_path);
         s_quit_after = s_frames + 1;
     }
+    if (want_seq) {
+        char p[560];
+        snprintf(p, sizeof(p), "%s_%04d.png", s_shot_seq, s_frames);
+        if (!fx_screenshot(p)) fx_log(FX_LOG_WARN, "[shot-seq] 失败 %s", p);
+    }
     if (s_quit_after > 0 && s_frames >= s_quit_after) sapp_request_quit();
 }
 
@@ -218,6 +240,9 @@ sapp_desc sokol_main(int argc, char *argv[])
      *    非 HiDPI 设备上 sapp_dpi_scale()=1.0 → 本开关无任何行为差异。 */
     const char *hidpi_env = getenv("FXTK_HIDPI");
     bool use_hidpi = hidpi_env ? (hidpi_env[0] != '0') : true;
+    /* v2.5.6: FXTK_WIN 必须在窗口创建【之前】解析 —— 原先在 init_cb 里读, 那时
+     * sapp_desc.width/height 早已生效, 于是该开关形同虚设 (永远 1280x720)。 */
+    { const char *wn = getenv("FXTK_WIN"); if (wn) sscanf(wn, "%dx%d", &s_win_w, &s_win_h); }
     return (sapp_desc){
         .init_cb = init_cb,
         .frame_cb = frame_cb,

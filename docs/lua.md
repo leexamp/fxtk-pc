@@ -153,7 +153,8 @@ end))
 ```
 
 - `w` 是控件句柄（lightuserdata）。
-- 回调在绘制/事件阶段触发；**不要**在回调里调用 `fx_init` / `fx_shutdown`。
+- 回调在绘制/事件阶段触发；**不要**在回调里调用 `fx_init`、`sapp_request_quit`/驱动退出钩子，
+  也不要销毁正在绘制的控件树（跨语言回调没有事务保护）。
 - 回调抛错会被 `pcall` 捕获，打印 traceback 到 `fx_log(FX_LOG_ERROR, ...)`，不会让 C 崩溃；
   但该回调之后的 Lua 逻辑不会执行——生产代码请自行 `pcall` 包住易错部分。
 

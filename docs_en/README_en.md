@@ -162,8 +162,14 @@ make -C demo-main                 # 12-page demo (fxtk_sim, C)
 make -C demo-main lua             # generic Lua runner fxtk_lua_runner (scripts load at runtime)
 make -C demo-main mw_interactive  # multi-window + widget input demo
 make -C demo-main test            # headless unit tests (no window, no font)
+make -C demo-main check           # quality gate: tests + module self-tests + trim consistency + API symbols/docs + version + script modes
+make -C demo-main selftest        # module self-tests: par / uiscale / gesture / flex / svg
+make -C demo-main trim-check      # trim switches consistent (all-off still compiles; autotrim never trims used widgets)
+make -C demo-main test-asan       # ASan+UBSan headless tests (CI)
 make -C demo-main lua-test        # Lua binding self-test (headless)
 make -C demo-main golden          # canvas golden-image regression (local tolerance 0)
+make -C demo-main headless-canvas # render a set of canvas examples headlessly (catches resize crashes)
+make -C demo-main warnings-check  # -Wall -Wextra report (advisory)
 make -C demo-main bench           # headless render benchmark (no vsync)
 
 make -C demo-main ex01_hello      # any standalone example
@@ -178,8 +184,12 @@ Start your own app from [your_app/](../your_app/) (`main.c` + `build.sh`).
 |---|---|---|
 | `make test` | real OS services + deterministic `FXTK_BACKEND_STUB` variant; layout/hit-test/lifecycle/input/colour-geometry contracts; clean under ASan+UBSan | fake driver never rasterises a framebuffer — **no per-pixel assertions** |
 | `make golden` | 10 canvas golden images, local tolerance 0 | canvas only; widgets/text/textbox/scroll have **no golden images** |
-| `make bench` | 2820 widgets @ 1080p, ~102–130 fps (full-frame redraw) | synthetic scene, not a real app |
-| CI | Linux: build + tests + examples + canvas goldens (`GOLDEN_TOL=1`); Windows: cross-compile | Windows is **compile-only**; multi-window is not in CI |
+| `make bench` | 2820 widgets @ 1080p, ~110–129 fps (dirty-rect redraw restored; that page dirties everything, so it is the full-frame workload) | synthetic scene, not a real app |
+| dirty-rect A/B (local script) | 5 scenarios (waveform/click/scroll/caret/paint), 370 frames, full-frame vs dirty **pixel-identical**; stress page full == dirty | needs GL/Xvfb; not a built-in CI step |
+| `make selftest` (CI) | deterministic self-tests for par / uiscale / gesture / flex / svg | covers each module's own checkpoints only |
+| `make trim-check` (CI) | all `FXTK_WIDGET_*=0` still compiles + autotrim never trims used widgets | does not verify runtime behaviour of trimmed builds |
+| API-doc check (CI, `api-doc-check`) | every header declaration appears in the docs + argument **counts** in `docs/api.md` match the prototypes + no ghost (documented-but-undeclared) symbols | signatures/existence only, not natural-language semantics |
+| CI | Linux: quality gate (version/script modes/API symbols) + build + tests + module self-tests + trim consistency + ASan/UBSan + Lua self-test + examples + canvas goldens (`GOLDEN_TOL=1`); Windows: cross-compile | Windows is **compile-only**; multi-window is not in CI |
 
 **Not systematically verified**: real HiDPI, multi-monitor, full non-ASCII IME paths, WM differences
 (GNOME/KWin/xfwm), extreme window sizes, long-run memory growth. Regression-test in your own environment.
@@ -190,8 +200,10 @@ Start your own app from [your_app/](../your_app/) (`main.c` + `build.sh`).
 
 ## Known limits
 
-- **Full-frame redraw**: dirty-rect merging exists but is currently bypassed (`s_full=1` in
-  `fx_repaint_rect`) — no ghosting, but no dirty-rect optimisation either.
+- **Dirty-rect redraw**: `fx_repaint_rect` is a real partial redraw again (verified frame-by-frame:
+  5 scenarios × 370 frames pixel-identical to full-frame). `FXTK_FULL_REDRAW=1` restores the old
+  "every request repaints the whole frame" behaviour. Pages where everything moves (like the stress page)
+  dirty the whole screen anyway, so dirty-rect optimisation gains nothing there.
 - **Widget SDF anti-aliasing** has a known artefact when canvas + text + quad-warp are mixed
   (`fx_set_widget_aa` toggles it).
 - **Real multi-window**: X11 only (XWayland works), main screen only, max 8 windows, no clipboard/IME,

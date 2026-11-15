@@ -18,10 +18,11 @@ tab:fx_tab_new image:fx_image_new textedit:fx_textedit_new list:fx_list_new drop
 out=""
 for w in $WIDGETS; do
     type="${w%%:*}"; sym="${w##*:}"
-    # 该工厂宏是否出现在任何源文件里? (list/drop 用 fx_list_new / fx_drop_new, 会同时匹配 _p 变体)
-    # v2.3.1: ${sym}_p?\( 同时匹配 fx_list_new( 与 fx_list_new_p( —
-    # 否则只用 _p 变体的源码会被误判"未用 LIST", 裁掉后 fx_list_sel/fx_list_clear 链接失败
-    if ! grep -qE "${sym}_p?\(" $SRCS; then
+    # 该工厂宏是否出现在任何源文件里? (fx_list_new / fx_list_new_p 两种写法都要认)
+    # v2.5.6 修复: 原正则 "${sym}_p?\(" 实际要求名字里带下划线, 永远匹配不到最常见的
+    #   fx_button_new( 写法 —— 于是把用到的控件也判成"未使用"裁掉, 二进制能编出来但控件消失
+    #   (autotrim 静默失效)。正确写法是 "${sym}(_p)?\(": 名字后紧跟 "(" 或 "_p(".
+    if ! grep -qE "${sym}(_p)?\(" $SRCS; then
         out="$out -DFXTK_WIDGET_$(echo "$type" | tr 'a-z' 'A-Z')=0"
     fi
 done

@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "fxtk.h"
+#include "fxtk_backends.h"   /* v2.5.6: fx_dpi_scale —— 字号按 dpi 换算设备像素 */
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 
@@ -74,12 +75,25 @@ static TTF_Font *g_font = NULL;
 static int g_font_size = 16;
 static char s_font_path[160];
 
+/* v2.5.6: 字号 → 设备像素 = 逻辑字号 × dpi (与 stb 后端同一语义)。
+ * HiDPI 下物理帧缓冲翻倍, 字号若不乘 dpi 会相对几何小一半(用户实测 200% "字体过小")。
+ * 测量(TTF_SizeUTF8)与绘制都用设备字号, 两边一致; dpi<=1 原样返回 → 现有渲染/金图零变化。 */
+static int font_dev_size(int size)
+{
+    if (size <= 0) return g_font_size > 0 ? g_font_size : 16;   /* 0 = 当前设备字号(防重复乘 dpi) */
+    float d = fx_dpi_scale();
+    if (d <= 1.0f) return size;
+    int s = (int)((float)size * d + 0.5f);
+    return s > 0 ? s : 1;
+}
+
 void fxtk_font_init(const char *unused_path, int size)
 {
     if (TTF_Init() == -1) {
         printf("TTF_Init failed: %s\n", TTF_GetError());
         return;
     }
+    int devsz = font_dev_size(size);
     const char *env = getenv("FXTK_FONT");
     const char *fb[] = {
         env,
@@ -93,11 +107,11 @@ void fxtk_font_init(const char *unused_path, int size)
     };
     for (int i = 0; i < (int)(sizeof(fb)/sizeof(fb[0])); i++) {
         if (!fb[i]) continue;
-        g_font = TTF_OpenFont(fb[i], size);
+        g_font = TTF_OpenFont(fb[i], devsz);
         if (g_font) {
             snprintf(s_font_path, sizeof(s_font_path), "%s", fb[i]);
             printf("[font] SUCCESS: %s (h=%d)\n", s_font_path, TTF_FontHeight(g_font));
-            g_font_size = size;
+            g_font_size = devsz;
             return;
         }
     }
@@ -284,6 +298,7 @@ void fxtk_font_set_size(int size)
 }
 void *fxtk_font_size(int size)
 {
+    size = font_dev_size(size);   /* 逻辑字号 → 设备像素 (× dpi) */
     if (size <= 0 || !s_font_path[0]) return g_font;
     for (int k = 0; k < FC_N; k++)
         if (s_fc[k].f && s_fc[k].size == size) return s_fc[k].f;
@@ -297,6 +312,13 @@ void *fxtk_font_size(int size)
     if (s_fc[0].f!=g_font){ tc_drop_font(s_fc[0].f); TTF_CloseFont(s_fc[0].f); } s_fc[0].f=NULL; s_fc[0].size=0; }   /* 别关正在用的 g_font, 防 use-after-free */
     s_fc[slot].f=f; s_fc[slot].size=size;
     return f;
+}
+/* v2.5.6: 公开头文件早就声明了它, 但两个字体后端都没实现 —— 调用即链接失败。
+ * 语义与 TTF_FontHeight 一致: 该字号的行高(像素), 供垂直居中/多行排版使用。 */
+int fxtk_font_height(int size)
+{
+    TTF_Font *f = (TTF_Font *)fxtk_font_size(size);
+    return f ? TTF_FontHeight(f) : 0;
 }
 int fxtk_text_width_size(int size, const char *t)
 {

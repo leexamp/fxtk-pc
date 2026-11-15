@@ -28,12 +28,14 @@ For people who want to modify the source / port it. For application development,
 
 **Widget pool**: static array `s_pool[FX_MAX_WIDGETS]`, `FX_MAX_WIDGETS` (**8192 by default ≈ 2.6MB BSS**; `sizeof(fx_widget_t)` = 328B). `fxtk_alloc()` linearly finds an empty slot, `fxtk_free()` marks it `FX_W_NONE`.
 
-> **The whole `.bss` bill** (measured **14.77MB** on PC/sokol — the widget pool is only ~2.6MB of it):
-> the largest item is the driver's **vertex/index buffers** in `drivers/fxtk_sokol_driver.c`:
-> `s_vb[VB_MAX]` (`VB_MAX=262144` × 32B = **8MB**) and `s_ib[IB_MAX]` (`IB_MAX=VB_MAX*2` × 4B = **2MB**),
-> plus command/texture-slot/event-queue arrays (~0.4MB). This is a **virtual reservation** — `.bss` is
-> demand-paged, so a minimal app measured **7.3MB** resident and the full 12-page demo **32.9MB**.
-> Note `VB_MAX`/`IB_MAX` are currently **source-level defines, not overridable via `-D`**.
+> **Memory bill (measured on PC/sokol)**: the binary's `.bss` is about **2.9MB**, of which the widget pool is
+> ~2.6MB. The sokol driver's vertex/index/command buffers are **grow-on-demand heap buffers**: initial
+> 16k vertices (≈590KB) / 32k indices (≈128KB) / 1k commands; they double only when a frame needs more
+> (hard caps remain `VB_MAX=262144` / `IB_MAX` / `CMD_MAX=65536`), and the GPU-side `sg_buffer` is recreated
+> only when the capacity grows. Measured demo peaks are just 5k–15k vertices, so most apps never grow.
+> The initial capacities can be overridden with `-DVB_INIT=... -DIB_INIT=... -DCMD_INIT=...` (used by tests to
+> force the growth path). There is also one **persistent canvas texture** (window-sized RGBA8, ≈3.7MB at
+> 1280×720) — dirty-rect redraw relies on it to keep static content across frames.
 
 
 ## Layout & Scaling
@@ -59,15 +61,33 @@ For people who want to modify the source / port it. For application development,
 
 ## Redraw Model
 
-- Dirty rectangles by default; currently any `fx_repaint_rect` is promoted to a full redraw (`s_full=1`), guaranteeing no ghosting.
-- Render into a `target` texture (size = logical width/height); on present, copy the whole thing to the back buffer.
-- On resize, rebuild `target` and clear the screen; at end of frame `SDL_RenderSetClipRect(NULL)` prevents clip carry-over.
-- Graphics go through **vertex batching**: rectangles/triangles/polylines are merged into a single `SDL_RenderGeometry` submission; `sdl_fill_rect` joins the batch (does not break the draw call).
-- Pixel path (offscreen/3D) writes the `fb_rgba` dirty rectangle; `SDL_UpdateTexture` uploads the whole frame in one shot.
+- **Dirty-rect partial redraw (restored in v2.5.6)**: `fx_repaint_rect` merges the rectangle into `s_dirty[]`
+  (≤8 regions, overlaps merged, overflow falls back to a full frame). Before choosing the draw branch,
+  `fx_poll()` marks every `FX_F_ANIM` widget dirty each frame (canvas callbacks advance phase per call —
+  skipping one frame diverges permanently from full redraw), then repaints region by region with the tree
+  clipped to each region.
+- **Two traps (fixed, do not reintroduce)**: ① when a tab draws its page it must intersect its child clip
+  with the incoming dirty region instead of resetting it to the whole tab rect (otherwise widgets outside
+  the region are repainted without background erase and AA text darkens every frame); ② snapshot and clear
+  the dirty list before consuming it — new marks raised by callbacks during repaint belong to the next frame,
+  otherwise the same canvas is painted several times in one frame and per-call phase runs too fast.
+- `FXTK_FULL_REDRAW=1` restores "any request repaints the whole frame"; correctness is guarded by a
+  370-frame full-vs-dirty pixel A/B over 5 scenarios.
+- sokol backend: draws into a **persistent canvas texture** (`LOAD` keeps last frame's static content, dirty
+  frames repaint only the changed blocks); commands merge by pipeline + texture + **clip rect** (different
+  clips never merge, otherwise the scissor clips the geometry away), then the texture is blitted to the swapchain.
+- SDL fake driver (headless benchmarks/goldens): renders into a `target` texture and copies it on present;
+  the pixel path writes `fb_rgba` dirty rectangles and uploads once.
 
 ## Font & Text Cache
 
-- `fxtk_font_size(size)`: caches `FC_N=8` TTFs; when full, evicts and **closes** the old font (`tc_drop_font` cleans up the associated text textures), eliminating handle leaks.
+- **Logical font size → device pixels**: `size` is a logical size; both backends use
+  `device_size = size × fx_dpi_scale()` for font selection, measurement and drawing (on HiDPI the physical
+  framebuffer doubles, so the font must double too; at `dpi=1` output is byte-identical).
+- SDL/ttf backend (`components/fxtk/fxtk_font.c`): caches `FC_N=8` TTFs; when full, evicts and **closes** the
+  old font (`tc_drop_font` cleans up the associated text textures), eliminating handle leaks.
+- sokol/stb backend (`drivers/fxtk_font_stb.c`): `FONT_MAX=8` size slots, each with a **1024-entry advance
+  direct-map cache** (`tag = cp+1`, avoids the per-glyph cmap binary search when measuring); 128 text textures cached.
 - Text texture cache has 256 entries, keyed by `font|text|fg|bg`, LRU eviction.
 
 ## Input
@@ -103,6 +123,7 @@ Provides `width/height`, `set_window/push_pixels`, `fill_rect`, `touch_read/key_
 ## v2.5 driver internals
 
 - `FXTK_MW` branch: per-size canvas/framebuffer caches (24 slots), `MW_NEED_CLEAR`, alpha-preserving
-  `rgba_pack`; `CMD_MAX` raised to 65536. Multi-window window/event handling lives in
+  `rgba_pack`; `CMD_MAX` raised to 65536. Since v2.5.6 the vertex/index/command buffers grow on demand
+  (initial 16k/32k/1k) up to those hard caps. Multi-window window/event handling lives in
   `drivers/fxtk_sokol_mw.c`. Details: [docs/multi-window.md](../docs/multi-window.md).
 

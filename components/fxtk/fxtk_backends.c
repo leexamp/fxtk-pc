@@ -350,9 +350,14 @@ void *fx_file_read(const char *path, int *out_size)
     int i = stub_find(path);
     if (out_size) *out_size = 0;
     if (i < 0) return NULL;
-    void *buf = malloc((size_t)(s_stub_fs[i].size ? s_stub_fs[i].size : 1));
+    /* v2.5.6: 必须与真实文件系统分支保持同一契约 —— 尾部补 '\0'。
+     * fx_prefs_load()/fx_svg_load() 等调用方把返回缓冲区当 C 字符串用; stub 分支
+     * 少补这个字节, 就是堆越界读 (CI 接入 ASan 后抓到的第一个 heap-buffer-overflow:
+     * 测试里写 prefs 再读回, 11 字节缓冲读到第 12 字节)。 */
+    void *buf = malloc((size_t)s_stub_fs[i].size + 1);
     if (!buf) return NULL;
     memcpy(buf, s_stub_fs[i].data, (size_t)s_stub_fs[i].size);
+    ((char *)buf)[s_stub_fs[i].size] = 0;
     if (out_size) *out_size = s_stub_fs[i].size;
     return buf;
 }
@@ -666,6 +671,17 @@ int fx_clip_get(char *buf, int cap) { if (buf && cap > 0) buf[0] = 0; return 0; 
  * 这在能力查询里如实报告: 两个命令都没有时返回失败, 框架退化为内部剪贴板。 */
 static int have_cmd(const char *cmd)
 {
+    /* 探测结果按命令名缓存: 工具不会在进程运行期间凭空出现/消失,
+     * 没必要每次读写剪贴板都 fork 一个 shell 去 command -v。 */
+    static struct { const char *name; int has; } cache[4];
+    for (int i = 0; i < 4; i++) {
+        if (cache[i].name) { if (strcmp(cache[i].name, cmd) == 0) return cache[i].has; continue; }
+        char line[128];
+        snprintf(line, sizeof(line), "command -v %s >/dev/null 2>&1", cmd);
+        cache[i].name = cmd;
+        cache[i].has = (system(line) == 0);
+        return cache[i].has;
+    }
     char line[128];
     snprintf(line, sizeof(line), "command -v %s >/dev/null 2>&1", cmd);
     return system(line) == 0;
